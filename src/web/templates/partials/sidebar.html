@@ -1,0 +1,60 @@
+{# Sidebar partial per DESIGN.md §9.2 #}
+{% import "macros/ui.html" as ui %}
+
+<aside class="sidebar">
+  <div class="sidebar__brand">
+    <span>Spike</span>
+    <button class="btn btn--ghost btn--sm btn--icon" type="button" onclick="toggleTheme()" aria-label="Toggle color theme" data-tooltip="Toggle theme">
+      {{ ui.icon("sun", 14) }}
+    </button>
+  </div>
+
+  <nav class="stack stack--sm" aria-label="Main Navigation">
+    <a href="/" class="nav-item {% if active_nav == 'review' %}is-active{% endif %}" {% if active_nav == 'review' %}aria-current="page"{% endif %}>
+      {{ ui.icon("film-strip", 16) }}
+      <span>Review</span>
+      {% if review_count is defined and review_count > 0 %}
+        <span class="nav-item__count">{{ review_count }}</span>
+      {% endif %}
+    </a>
+
+    <a href="/new" class="nav-item {% if active_nav == 'new' %}is-active{% endif %}" {% if active_nav == 'new' %}aria-current="page"{% endif %}>
+      {{ ui.icon("plus", 16) }}
+      <span>New</span>
+    </a>
+
+    <a href="/sources" class="nav-item {% if active_nav == 'sources' %}is-active{% endif %}" {% if active_nav == 'sources' %}aria-current="page"{% endif %}>
+      {{ ui.icon("broadcast", 16) }}
+      <span>Sources</span>
+    </a>
+
+    <a href="/jobs" class="nav-item {% if active_nav == 'jobs' %}is-active{% endif %}" {% if active_nav == 'jobs' %}aria-current="page"{% endif %}>
+      {{ ui.icon("queue", 16) }}
+      <span>Jobs</span>
+    </a>
+
+    <a href="/posts" class="nav-item {% if active_nav == 'posts' %}is-active{% endif %}" {% if active_nav == 'posts' %}aria-current="page"{% endif %}>
+      {{ ui.icon("paper-plane-tilt", 16) }}
+      <span>Posts</span>
+    </a>
+
+    {% if user and user.role == 'admin' %}
+      <a href="/settings" class="nav-item {% if active_nav == 'settings' %}is-active{% endif %}" {% if active_nav == 'settings' %}aria-current="page"{% endif %}>
+        {{ ui.icon("gear-six", 16) }}
+        <span>Settings</span>
+      </a>
+    {% endif %}
+  </nav>
+
+  <div class="sidebar__spacer"></div>
+
+  {% if user %}
+    <div class="user-row">
+      <div class="user-avatar">{{ user.login[:2] }}</div>
+      <div class="user-info truncate">
+        <div class="user-name truncate">{{ user.name or user.login }}</div>
+        <div class="user-role">{{ user.role }}</div>
+      </div>
+    </div>
+  {% endif %}
+</aside>

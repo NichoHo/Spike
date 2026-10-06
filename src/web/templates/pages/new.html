@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<div class="page page--narrow">
+  {{ ui.page_header("New job", "Submit a long video or stream to find and render moments.") }}
+
+  <div class="tabs" role="tablist">
+    <a href="/new?tab=upload" class="tab {% if active_tab == 'upload' or not active_tab %}is-active{% endif %}" role="tab">Upload file</a>
+    <a href="/new?tab=url" class="tab {% if active_tab == 'url' %}is-active{% endif %}" role="tab">Paste URL</a>
+    <a href="/new?tab=streamer" class="tab {% if active_tab == 'streamer' %}is-active{% endif %}" role="tab">From streamer</a>
+  </div>
+
+  <form method="post" action="/new/submit" enctype="multipart/form-data" class="card">
+    <input type="hidden" name="tab" value="{{ active_tab or 'upload' }}">
+
+    <div class="card__body stack">
+      {% if active_tab == 'url' %}
+        <!-- URL Input Tab -->
+        <div class="field">
+          <label class="field__label" for="field-url">Video or stream URL</label>
+          <input type="url" name="url" id="field-url" class="input" placeholder="https://www.youtube.com/watch?v=... or https://twitch.tv/videos/..." required autofocus>
+          <p class="field__help">Twitch and YouTube links supported.</p>
+        </div>
+      {% elif active_tab == 'streamer' %}
+        <!-- Streamer Tab -->
+        <div class="field">
+          <label class="field__label" for="field-source">Select followed source</label>
+          <select name="source_id" id="field-source" class="select" required>
+            <option value="">Choose a source...</option>
+            {% for s in sources %}
+              <option value="{{ s.id }}">{{ s.display_name }} ({{ s.kind }})</option>
+            {% endfor %}
+          </select>
+          <p class="field__help">Pick a source configured in the Sources tab.</p>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="field-vod-url">VOD URL or ID (optional)</label>
+          <input type="text" name="vod_url" id="field-vod-url" class="input" placeholder="Leave empty to fetch the latest past broadcast">
+        </div>
+      {% else %}
+        <!-- Upload Tab (default) -->
+        <div class="field">
+          <label class="field__label">Video file</label>
+          <div class="dropzone" id="file-dropzone">
+            <input type="file" name="file" id="field-file" accept=".mp4,.mov,.mkv,.webm,.m4a" required>
+            <div class="dropzone__icon">
+              {{ ui.icon("upload-simple", 24) }}
+            </div>
+            <div class="dropzone__title">Drop a video file or browse</div>
+            <div class="dropzone__help">Up to 2 GB · MP4, MOV, MKV, WebM</div>
+          </div>
+        </div>
+      {% endif %}
+
+      <!-- Pipeline Options (Collapsed Details) -->
+      <details style="margin-top: var(--space-4); border-top: 1px solid var(--color-border); padding-top: var(--space-4);">
+        <summary>
+          {{ ui.icon("caret-right", 14) }}
+          <span>Processing options (optional)</span>
+        </summary>
+        <div class="stack stack--sm" style="margin-top: var(--space-4);">
+          <div class="field">
+            <label class="field__label" for="field-target-clips">Target clip count</label>
+            <input type="number" name="target_clips" id="field-target-clips" class="input input--short input--number" value="3" min="1" max="10">
+            <p class="field__help">Target number of moments to render (1–10).</p>
+          </div>
+
+          <fieldset class="field">
+            <legend class="field__label">Layout</legend>
+            {% set layouts = [
+              ("split", "Split", "Streamer on top, what they’re watching below."),
+              ("auto", "Auto", "Split if there’s a facecam, otherwise Face track."),
+              ("face_track", "Face track", "Tall crop that follows the face."),
+              ("center", "Center", "Tall crop from the middle of the frame."),
+              ("letterbox", "Letterbox", "Whole wide frame, blurred fill above and below."),
+            ] %}
+            <div class="layout-picker">
+              {% for value, name, desc in layouts %}
+                <input type="radio" name="layout" id="layout-{{ value }}" value="{{ value }}" {% if loop.first %}checked{% endif %}>
+                <label for="layout-{{ value }}" class="layout-option">
+                  <span class="layout-thumb layout-thumb--{{ value }}" aria-hidden="true">
+                    {% if value == "auto" %}
+                      <span class="lt-cam"></span><span class="lt-content"></span><span class="lt-auto">A</span>
+                    {% elif value == "split" %}
+                      <span class="lt-cam"></span><span class="lt-content"></span>
+                    {% elif value == "face_track" %}
+                      <span class="lt-cam"></span>
+                    {% elif value == "center" %}
+                      <span class="lt-content"></span>
+                    {% else %}
+                      <span class="lt-blur"></span><span class="lt-content"></span><span class="lt-blur"></span>
+                    {% endif %}
+                    <span class="lt-caption"></span>
+                  </span>
+                  <span class="layout-option__name">{{ name }}</span>
+                  <span class="layout-option__desc">{{ desc }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            <p class="field__help">Blue is the streamer, grey is the game or video, white is where captions go.</p>
+          </fieldset>
+
+          <div class="field">
+            <span class="field__label" id="lbl-captions">Captions</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="lbl-captions">
+              <input type="radio" name="captions" id="cap-on" value="on" checked>
+              <label for="cap-on">On</label>
+              <input type="radio" name="captions" id="cap-off" value="off">
+              <label for="cap-off">Off</label>
+            </div>
+            <p class="field__help">Big word-by-word captions. The spoken word turns yellow.</p>
+          </div>
+
+          <div class="field">
+            <span class="field__label" id="lbl-music">Background music</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="lbl-music">
+              <input type="radio" name="music" id="music-auto" value="auto" checked>
+              <label for="music-auto">Auto</label>
+              <input type="radio" name="music" id="music-on" value="on">
+              <label for="music-on">On</label>
+              <input type="radio" name="music" id="music-off" value="off">
+              <label for="music-off">Off</label>
+            </div>
+            <p class="field__help">Auto: the AI adds a quiet track to talk-heavy clips and skips it when the audio is the joke.</p>
+          </div>
+
+          <div class="field">
+            <span class="field__label" id="lbl-cuts">Cut pauses</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="lbl-cuts">
+              <input type="radio" name="cut_pauses" id="cut-auto" value="auto" checked>
+              <label for="cut-auto">Auto</label>
+              <input type="radio" name="cut_pauses" id="cut-tight" value="tight">
+              <label for="cut-tight">Tight</label>
+              <input type="radio" name="cut_pauses" id="cut-natural" value="natural">
+              <label for="cut-natural">Natural</label>
+              <input type="radio" name="cut_pauses" id="cut-off" value="off">
+              <label for="cut-off">Off</label>
+            </div>
+            <p class="field__help">Tight cuts every pause over 0.6 s. Natural only cuts dead air over 1.2 s. Auto lets the AI pick per clip.</p>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="card__footer">
+      <span class="card__footer-note">Queued videos are processed sequentially in the background.</span>
+      <button type="submit" class="btn btn--primary btn--lg" onclick="this.classList.add('is-loading')">
+        {{ ui.icon("plus", 16) }}
+        <span>Start job</span>
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

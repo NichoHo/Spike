@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<div class="page page--narrow">
+  <header class="page-header">
+    <div class="page-header__left">
+      <a href="/sources" class="back-link">
+        {{ ui.icon("caret-left", 14) }}
+        <span>Sources</span>
+      </a>
+      <h1 class="page-header__title">{% if source %}Edit source{% else %}Add source{% endif %}</h1>
+      <p class="page-header__description">Configure channel parameters, permission status, and processing presets.</p>
+    </div>
+  </header>
+
+  <form method="post" action="{% if source %}/sources/{{ source.id }}/edit{% else %}/sources/new{% endif %}" class="card">
+    <div class="card__body stack">
+      <!-- Section: Source Identity -->
+      <section class="stack stack--sm">
+        <h2 style="font-size: 16px; font-weight: 600; color: var(--color-text);">Channel identity</h2>
+        <div class="field">
+          <label class="field__label" for="field-kind">Platform</label>
+          <select name="kind" id="field-kind" class="select" required>
+            <option value="twitch" {% if source and source.kind == 'twitch' %}selected{% endif %}>Twitch</option>
+            <option value="youtube" {% if source and source.kind == 'youtube' %}selected{% endif %}>YouTube</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="field-ext-id">Broadcaster or Channel ID</label>
+          <input type="text" name="external_id" id="field-ext-id" class="input input--mono" value="{{ source.external_id if source else '' }}" placeholder="e.g. xqc or UCX6OQ3DkcsbYNE6H8uQQuVA" required>
+          <p class="field__help">Twitch username / ID or YouTube channel ID.</p>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="field-name">Display name</label>
+          <input type="text" name="display_name" id="field-name" class="input" value="{{ source.display_name if source else '' }}" placeholder="Human readable name" required>
+        </div>
+      </section>
+
+      <!-- Section: Permission -->
+      <section class="stack stack--sm" style="border-top: 1px solid var(--color-border); padding-top: var(--space-6);">
+        <h2 style="font-size: 16px; font-weight: 600; color: var(--color-text);">Permission</h2>
+        <div class="field">
+          <label class="field__label" for="field-permission">Permission level</label>
+          <select name="permission" id="field-permission" class="select" required>
+            <option value="none" {% if not source or source.permission == 'none' %}selected{% endif %}>Review only (no automated posting)</option>
+            <option value="own" {% if source and source.permission == 'own' %}selected{% endif %}>Own channel</option>
+            <option value="written" {% if source and source.permission == 'written' %}selected{% endif %}>Written permission</option>
+            <option value="program" {% if source and source.permission == 'program' %}selected{% endif %}>Clipping program</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="field-permission-note">Permission note (optional)</label>
+          <textarea name="permission_note" id="field-permission-note" class="textarea" placeholder="Link, date, or agreement reference">{{ source.permission_note if source else '' }}</textarea>
+        </div>
+      </section>
+
+      <!-- Section: Processing & Presets -->
+      <section class="stack stack--sm" style="border-top: 1px solid var(--color-border); padding-top: var(--space-6);">
+        <h2 style="font-size: 16px; font-weight: 600; color: var(--color-text);">Processing presets</h2>
+
+        <div class="row" style="gap: var(--space-3); margin-bottom: var(--space-2);">
+          <input type="checkbox" name="auto_process" id="field-auto" class="switch" role="switch" {% if source and source.auto_process %}checked{% endif %}>
+          <label for="field-auto" style="font-size: 14px; font-weight: 500; cursor: pointer;">Auto-process new VODs via watcher</label>
+        </div>
+
+        <div class="field">
+          <label class="field__label">Default framing layout</label>
+          {{ ui.layout_picker('src-layout', source.layout if source and source.layout else 'split') }}
+        </div>
+
+        <div class="field">
+          <label class="field__label">Default caption style</label>
+          {{ ui.caption_picker('src-caption', source.caption_style if source and source.caption_style else 'bold_pop') }}
+        </div>
+
+        <div class="field">
+          <label class="field__label">Background music</label>
+          <div class="stack" style="gap: var(--space-2);">
+            <label class="switch-row">
+              <input type="checkbox" class="switch" role="switch" name="music" value="1" {% if source and source.music == 1 %}checked{% endif %}>
+              <span>Add ducked background music to clips</span>
+            </label>
+            <p class="field__help">Music sits at -22 dB and ducks further during speech. Disabled by default for gaming.</p>
+            <div class="row" style="margin-top: var(--space-2);">
+              <span class="small muted" style="min-width: 100px;">Default mood:</span>
+              <select name="default_music_mood" class="select" style="max-width: 200px;">
+                <option value="chill" {% if not source or source.default_music_mood == 'chill' %}selected{% endif %}>Chill</option>
+                <option value="hype" {% if source and source.default_music_mood == 'hype' %}selected{% endif %}>Hype</option>
+                <option value="funny" {% if source and source.default_music_mood == 'funny' %}selected{% endif %}>Funny</option>
+                <option value="dramatic" {% if source and source.default_music_mood == 'dramatic' %}selected{% endif %}>Dramatic</option>
+                <option value="wholesome" {% if source and source.default_music_mood == 'wholesome' %}selected{% endif %}>Wholesome</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field__label">Effects & Pacing</label>
+          <div class="stack" style="gap: var(--space-3);">
+            <label class="switch-row">
+              <input type="checkbox" class="switch" role="switch" name="silence_trim" value="1" {% if source and source.silence_trim == 1 %}checked{% endif %}>
+              <span>Silence trim (cut internal pauses > 1.2s)</span>
+            </label>
+            <label class="switch-row">
+              <input type="checkbox" class="switch" role="switch" name="punch_in_zoom" value="1" {% if not source or source.punch_in_zoom == 1 or source.punch_in_zoom is none %}checked{% endif %}>
+              <span>Punch-in zoom (1.15x zoom ramp at peak moment)</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="field-style-notes">Style notes (optional)</label>
+          <textarea name="style_notes" id="field-style-notes" class="textarea" placeholder="Instructions included in the LLM prompt for this source">{{ source.style_notes if source else '' }}</textarea>
+        </div>
+      </section>
+    </div>
+
+    <div class="card__footer">
+      <a href="/sources" class="btn btn--secondary">Cancel</a>
+      <button type="submit" class="btn btn--primary">
+        {% if source %}Save changes{% else %}Create source{% endif %}
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}

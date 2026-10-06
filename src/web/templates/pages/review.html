@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header__left">
+    <h1 class="page-header__title">Review</h1>
+    <p class="page-header__description">
+      {% if total_clips == 1 %}1 clip needs review{% else %}{{ total_clips }} clips need review{% endif %}
+    </p>
+  </div>
+  {% if sources %}
+    <div class="page-header__actions">
+      <form method="get" action="/">
+        <select name="source_id" class="select" onchange="this.form.submit()" aria-label="Filter by source">
+          <option value="">All sources</option>
+          {% for s in sources %}
+            <option value="{{ s.id }}" {% if selected_source_id == s.id %}selected{% endif %}>{{ s.display_name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    </div>
+  {% endif %}
+</header>
+
+{% if not job_groups %}
+  {{ ui.empty_state("film-strip", "No clips to review", "New clips show up here when a video processing job finishes.", "Submit a video", "/new") }}
+{% else %}
+  <div class="stack stack--lg">
+    {% for group in job_groups %}
+      <section class="clip-group">
+        <div class="clip-group__header">
+          <h2 class="clip-group__title">
+            {% if group.video.source_name %}{{ group.video.source_name }} · {% endif %}{{ group.video.title or 'Untitled Video' }}
+          </h2>
+          <div class="clip-group__meta">
+            {{ group.clips | length }} {% if group.clips | length == 1 %}clip{% else %}clips{% endif %}
+            {% if group.video.duration_s %} · {{ group.video.duration_s | duration_words }} source{% endif %}
+            {% if group.video.created_at %} · {{ group.video.created_at | relative_time }}{% endif %}
+          </div>
+        </div>
+
+        <div class="clip-grid">
+          {% for clip in group.clips %}
+            <a href="/clips/{{ clip.id }}" class="clip-card">
+              <div class="clip-card__media">
+                {% if clip.thumb_path %}
+                  <img src="/media/clip/{{ clip.id }}/thumb" alt="Thumbnail for {{ clip.cand_title or 'Clip' }}" loading="lazy">
+                {% endif %}
+                <video preload="none" data-src="/media/clip/{{ clip.id }}/stream" muted playsinline></video>
+              </div>
+              <div class="clip-card__title">
+                {{ clip.cand_title or clip.cand_hook or 'Untitled Clip' }}
+              </div>
+              <div class="clip-card__meta">
+                {{ ui.score(clip.final_score) }}
+                {% set dur = (clip.trim_end_s or clip.orig_end_s or 30) - (clip.trim_start_s or clip.orig_start_s or 0) %}
+                <span class="tabular">{{ dur | duration }}</span>
+                {% if clip.created_at %}<span style="white-space: nowrap;">· {{ clip.created_at | relative_time }}</span>{% endif %}
+              </div>
+            </a>
+          {% endfor %}
+        </div>
+      </section>
+    {% endfor %}
+  </div>
+{% endif %}
+<script>
+  // Reload when a finished job or rerender changes the queue.
+  (function () {
+    var sig = {{ review_sig|tojson }};
+    var url = "/api/review-signature{% if selected_source_id %}?source_id={{ selected_source_id }}{% endif %}";
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch(url).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        if (d && d.sig !== sig) location.reload();
+      }).catch(function () {});
+    }, 5000);
+  })();
+</script>
+{% endblock %}

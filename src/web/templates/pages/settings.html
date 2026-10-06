@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header__left">
+    <h1 class="page-header__title">Settings</h1>
+    <p class="page-header__description">Team access, Discord notifications, and pipeline parameters.</p>
+  </div>
+</header>
+
+<div class="stack stack--lg" style="max-width: var(--content-narrow);">
+  <!-- Discord Webhook Card -->
+  <form method="post" action="/settings/discord" class="card">
+    <div class="card__header">
+      <h2 class="card__title">Discord notifications</h2>
+      <p class="card__description">Post a notification embed to a Discord channel when a video finishes rendering clips.</p>
+    </div>
+    <div class="card__body stack">
+      <div class="field">
+        <label class="field__label" for="field-webhook">Webhook URL</label>
+        <input type="url" name="webhook_url" id="field-webhook" class="input input--mono" value="{{ discord_webhook_url or '' }}" placeholder="https://discord.com/api/webhooks/...">
+        <p class="field__help">Create a webhook under Channel Settings → Integrations in Discord.</p>
+      </div>
+    </div>
+    <div class="card__footer">
+      <button type="button" class="btn btn--secondary btn--sm" onclick="testWebhook()">Test notification</button>
+      <button type="submit" class="btn btn--primary">Save changes</button>
+    </div>
+  </form>
+
+  <!-- Users Table Card -->
+  <div class="card">
+    <div class="card__header row row--between">
+      <div>
+        <h2 class="card__title">Team members</h2>
+        <p class="card__description">Authorized logins via Tailscale or local development.</p>
+      </div>
+      <button type="button" class="btn btn--secondary btn--sm" onclick="document.getElementById('invite-dialog').showModal()">
+        {{ ui.icon("plus", 14) }}
+        <span>Add user</span>
+      </button>
+    </div>
+    <div class="card__body" style="padding: 0;">
+      <div class="table-wrap" style="border: 0; border-radius: 0;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Login</th>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th class="actions">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+              <tr>
+                <td class="primary-cell mono">{{ u.login }}</td>
+                <td>{{ u.name or '-' }}</td>
+                <td><span class="badge">{{ u.role }}</span></td>
+                <td>
+                  {% if u.active %}
+                    <span class="badge badge--success">Active</span>
+                  {% else %}
+                    <span class="badge badge--danger">Disabled</span>
+                  {% endif %}
+                </td>
+                <td class="actions">
+                  {% if u.login != user.login %}
+                    <form method="post" action="/settings/users/{{ u.id }}/toggle" style="display: inline;">
+                      <button type="submit" class="btn btn--ghost btn--sm">
+                        {% if u.active %}Disable{% else %}Enable{% endif %}
+                      </button>
+                    </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connected Accounts Card (Blueprint §8, §9) -->
+  <div class="card">
+    <div class="card__header row row--between">
+      <div>
+        <h2 class="card__title">Connected accounts</h2>
+        <p class="card__description">Platform targets for short-form video publishing. Tokens are encrypted at rest.</p>
+      </div>
+      <button type="button" class="btn btn--secondary btn--sm" onclick="document.getElementById('connect-account-dialog').showModal()">
+        {{ ui.icon("plus", 14) }}
+        <span>Connect account</span>
+      </button>
+    </div>
+    <div class="card__body" style="padding: 0;">
+      <div class="table-wrap" style="border: 0; border-radius: 0;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Platform</th>
+              <th>Account</th>
+              <th>Connected</th>
+              <th class="actions">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in accounts %}
+              <tr>
+                <td>
+                  {% if a.platform == 'tiktok' %}
+                    <span class="badge">TikTok</span>
+                  {% elif a.platform == 'youtube' %}
+                    <span class="badge badge--accent">YouTube</span>
+                  {% elif a.platform == 'instagram' %}
+                    <span class="badge">Instagram</span>
+                  {% else %}
+                    <span class="badge">{{ a.platform }}</span>
+                  {% endif %}
+                </td>
+                <td class="primary-cell mono">{{ a.display_name }}</td>
+                <td class="muted">{{ a.created_at | relative_time }}</td>
+                <td class="actions">
+                  <form method="post" action="/settings/accounts/{{ a.id }}/delete" style="display: inline;" onsubmit="return confirm('Disconnect account {{ a.display_name }}?');">
+                    <button type="submit" class="btn btn--ghost btn--sm">Disconnect</button>
+                  </form>
+                </td>
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="4" class="muted text-center" style="padding: var(--space-6);">No accounts connected yet. Connect TikTok, YouTube, or Instagram to publish clips.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Information Card -->
+  <div class="card">
+    <div class="card__header">
+      <h2 class="card__title">System configuration</h2>
+      <p class="card__description">Runtime environment, models, and local directories.</p>
+    </div>
+    <div class="card__body">
+      <dl class="dl">
+        <dt>Whisper model</dt>
+        <dd class="mono">{{ config_info.whisper_model }} ({{ config_info.whisper_compute }})</dd>
+        <dt>Gemini model</dt>
+        <dd class="mono">{{ config_info.gemini_model }}</dd>
+        <dt>Data directory</dt>
+        <dd class="mono truncate">{{ config_info.data_dir }}</dd>
+        <dt>Database</dt>
+        <dd class="mono truncate">{{ config_info.db_path }}</dd>
+        <dt>Upload cap</dt>
+        <dd class="tabular">2.0 GB</dd>
+      </dl>
+    </div>
+  </div>
+</div>
+
+<!-- Add User Dialog -->
+<dialog id="invite-dialog" class="dialog">
+  <form method="post" action="/settings/users/add">
+    <div class="dialog__body stack">
+      <h2 class="dialog__title">Add team member</h2>
+      <div class="field">
+        <label class="field__label" for="add-login">Tailscale login (email)</label>
+        <input type="text" name="login" id="add-login" class="input" placeholder="user@tailscale.net" required>
+        <p class="field__help">Must match the user's Tailscale account login address.</p>
+      </div>
+      <div class="field">
+        <label class="field__label" for="add-name">Display name</label>
+        <input type="text" name="name" id="add-name" class="input" placeholder="e.g. Nicholas">
+      </div>
+      <div class="field">
+        <label class="field__label" for="add-role">Role</label>
+        <select name="role" id="add-role" class="select">
+          <option value="member">Member (submit, review, edit, render)</option>
+          <option value="admin">Admin (full settings, sources, accounts)</option>
+        </select>
+      </div>
+    </div>
+    <div class="dialog__footer">
+      <button type="button" class="btn btn--secondary" data-close-dialog>Cancel</button>
+      <button type="submit" class="btn btn--primary">Add user</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Connect Account Dialog (Blueprint §8, §9) -->
+<dialog id="connect-account-dialog" class="dialog">
+  <form method="post" action="/settings/accounts/add">
+    <div class="dialog__body stack">
+      <h2 class="dialog__title">Connect platform account</h2>
+      <p class="dialog__text">OAuth tokens are stored encrypted at rest using Fernet.</p>
+      <div class="field">
+        <label class="field__label" for="add-platform">Platform</label>
+        <select name="platform" id="add-platform" class="select" required>
+          <option value="tiktok">TikTok (Upload to inbox)</option>
+          <option value="youtube">YouTube Shorts (Private upload)</option>
+          <option value="instagram">Instagram Reels</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field__label" for="add-display-name">Channel or account handle</label>
+        <input type="text" name="display_name" id="add-display-name" class="input" placeholder="@channel" required>
+      </div>
+      <div class="field">
+        <label class="field__label" for="add-access-token">Access token</label>
+        <input type="password" name="access_token" id="add-access-token" class="input input--mono" placeholder="Bearer / OAuth token or mock_token" required>
+        <p class="field__help">In testing/sandbox environments, use a <code>mock_</code> prefix token.</p>
+      </div>
+      <div class="field">
+        <label class="field__label" for="add-refresh-token">Refresh token (optional)</label>
+        <input type="password" name="refresh_token" id="add-refresh-token" class="input input--mono" placeholder="Optional OAuth refresh token">
+      </div>
+    </div>
+    <div class="dialog__footer">
+      <button type="button" class="btn btn--secondary" data-close-dialog>Cancel</button>
+      <button type="submit" class="btn btn--primary">Connect account</button>
+    </div>
+  </form>
+</dialog>
+
+
+<script>
+async function testWebhook() {
+  const url = document.getElementById("field-webhook").value;
+  if (!url) {
+    showToast("Please enter a webhook URL first.");
+    return;
+  }
+  showToast("Sending test notification...");
+  try {
+    const res = await fetch("/settings/discord/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ webhook_url: url })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast("Notification sent successfully!");
+    } else {
+      showToast("Test failed: " + data.error);
+    }
+  } catch (err) {
+    showToast("Error testing webhook: " + err.message);
+  }
+}
+</script>
+{% endblock %}

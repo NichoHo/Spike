@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header__left">
+    <a href="/" class="back-link">
+      {{ ui.icon("caret-left", 14) }}
+      <span>Review</span>
+    </a>
+    <div class="row" style="gap: var(--space-3); margin-top: var(--space-1); flex-wrap: wrap;">
+      <h1 class="page-header__title" id="clip-title">{{ clip.cand_title or 'Clip review' }}</h1>
+      <button type="button" class="btn btn--ghost btn--sm" id="btn-edit-title" aria-label="Edit title" onclick="toggleTitleEdit(true)">
+        {{ ui.icon("pencil-simple", 14) }}
+      </button>
+      {{ ui.score(clip.final_score) }}
+      {{ ui.status("clip", clip.status) }}
+    </div>
+    <form method="post" action="/clips/{{ clip.id }}/title" id="title-form" class="row" style="display: none; gap: var(--space-2); margin-top: var(--space-1);">
+      <input type="text" name="title" class="input" maxlength="200" required value="{{ clip.cand_title or '' }}" aria-label="Clip title" style="min-width: 320px;">
+      <button type="submit" class="btn btn--primary btn--sm">Save</button>
+      <button type="button" class="btn btn--secondary btn--sm" onclick="toggleTitleEdit(false)">Cancel</button>
+    </form>
+    <p class="page-header__description">
+      {% if clip.source_name %}{{ clip.source_name }}, {% endif %}{{ clip.video_title or 'Video' }} at {{ (clip.trim_start_s or clip.orig_start_s or 0) | timecode }}
+    </p>
+  </div>
+
+  <div class="page-header__actions">
+    {% if prev_clip_id %}
+      <a id="nav-prev-clip" href="/clips/{{ prev_clip_id }}" class="visually-hidden">Previous clip</a>
+    {% endif %}
+    {% if next_clip_id %}
+      <a id="nav-next-clip" href="/clips/{{ next_clip_id }}" class="visually-hidden">Next clip</a>
+    {% endif %}
+
+    <a href="/clips/{{ clip.id }}/post" class="btn btn--secondary">
+      {{ ui.icon("paper-plane-tilt", 16) }}
+      <span>Post</span>
+    </a>
+
+    <button type="button" class="btn btn--secondary" onclick="document.getElementById('reject-dialog').showModal()">
+      {{ ui.icon("x", 16) }}
+      <span>Reject</span>
+    </button>
+
+    <form method="post" action="/clips/{{ clip.id }}/approve" style="display: inline;">
+      <button type="submit" id="btn-approve" class="btn btn--primary" {% if clip.status == 'approved' %}disabled{% endif %}>
+        {{ ui.icon("check", 16) }}
+        <span>{% if clip.status == 'approved' %}Approved{% else %}Approve clip{% endif %}</span>
+      </button>
+    </form>
+  </div>
+</header>
+
+<div class="clip-detail-grid">
+  <!-- Left column: 9:16 Video Player -->
+  <div class="player-wrap">
+    <div class="player-container">
+      <video id="main-clip-player" controls preload="auto" playsinline>
+        <source src="/media/clip/{{ clip.id }}/stream" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
+    </div>
+
+    <div class="player-actions">
+      <a href="/clips/{{ clip.id }}/post" class="btn btn--ghost btn--sm">
+        {{ ui.icon("paper-plane-tilt", 14) }}
+        <span>Post</span>
+      </a>
+      <a id="btn-download" href="/clips/{{ clip.id }}/download" class="btn btn--ghost btn--sm">
+        {{ ui.icon("download-simple", 14) }}
+        <span>Download</span>
+      </a>
+      <button type="button" class="btn btn--ghost btn--sm" onclick='navigator.clipboard.writeText({{ copy_caption|tojson }}); showToast("Caption copied");'>
+        {{ ui.icon("copy", 14) }}
+        <span>Copy caption</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Right column: Inspector & Re-render Form -->
+  <div class="inspector">
+    <!-- Why this clip -->
+    <section class="inspector-section">
+      <h2 class="inspector-title">Why this clip</h2>
+      <p style="font-size: 14px; color: var(--color-text); line-height: 20px;">
+        {{ clip.reason or 'Proposed as a peak moment.' }}
+      </p>
+
+      <div class="score-row" style="margin-top: var(--space-2);">
+        <div class="score-row__item">
+          <span class="score-row__label">Overall score</span>
+          <span class="score-row__value">{{ clip.final_score or 0 }} / 100</span>
+        </div>
+        {% if clip.signal_score %}
+        <div class="score-row__item">
+          <span class="score-row__label">Signal score</span>
+          <span class="score-row__value">{{ clip.signal_score }} / 100</span>
+        </div>
+        {% endif %}
+        {% if clip.llm_score %}
+        <div class="score-row__item">
+          <span class="score-row__label">LLM judge score</span>
+          <span class="score-row__value">{{ clip.llm_score }} / 100</span>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if clip.chat_mood %}
+      <dl class="dl" style="margin-top: var(--space-3);">
+        <dt>Chat mood</dt>
+        <dd style="text-transform: capitalize;">{{ clip.chat_mood }}</dd>
+      </dl>
+      {% endif %}
+    </section>
+
+    <!-- Re-render Form -->
+    <form method="post" action="/clips/{{ clip.id }}/rerender" class="card">
+      <div class="card__header">
+        <h3 class="card__title">Edit & Re-render</h3>
+        <p class="card__description">Adjust trim boundaries, video framing, captions, or hook text.</p>
+      </div>
+
+      <div class="card__body stack">
+        <!-- Trim Section -->
+        <div class="field">
+          <label class="field__label">Trim boundaries (seconds)</label>
+          <div class="row" style="flex-wrap: wrap; gap: var(--space-4);">
+            <div class="row">
+              <span class="small muted">Start:</span>
+              <input type="number" step="0.1" name="start_s" id="input-start-s" class="input input--mono input--short" value="{{ clip.trim_start_s or clip.orig_start_s or 0 }}">
+              <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-start-s', -0.5)">-0.5</button>
+              <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-start-s', 0.5)">+0.5</button>
+            </div>
+
+            <div class="row">
+              <span class="small muted">End:</span>
+              <input type="number" step="0.1" name="end_s" id="input-end-s" class="input input--mono input--short" value="{{ clip.trim_end_s or clip.orig_end_s or 30 }}">
+              <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-end-s', -0.5)">-0.5</button>
+              <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-end-s', 0.5)">+0.5</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Framing Layout -->
+        <div class="field">
+          <label class="field__label">Framing layout</label>
+          {{ ui.layout_picker('layout', clip.layout or 'split') }}
+        </div>
+
+        <!-- Caption Style -->
+        <div class="field">
+          <label class="field__label">Caption style</label>
+          {{ ui.caption_picker('caption', clip.caption_style or 'bold_pop') }}
+          <input type="hidden" name="caption_text" id="caption-text-field" disabled>
+          <button type="button" class="btn btn--secondary btn--sm" id="btn-edit-captions" style="margin-top: var(--space-2);" onclick="openCaptionEditor()">
+            {{ ui.icon("pencil-simple", 14) }}
+            <span>Edit caption text</span>
+          </button>
+        </div>
+
+        <!-- Hook title: AI-written summary, editable, shown on the video only when switched on -->
+        <div class="field">
+          <label class="field__label" for="field-hook-text">Hook title</label>
+          <input type="text" name="hook_text" id="field-hook-text" class="input" value="{{ clip.cand_hook or '' }}" maxlength="80" placeholder="Short funny summary of the clip…">
+          <label class="switch-row" style="margin-top: var(--space-2);">
+            <input type="checkbox" name="show_hook" class="switch" role="switch" value="1" {% if clip.show_hook == 1 %}checked{% endif %}>
+            <span>Show on video (top, first 2.5 s)</span>
+          </label>
+          <p class="field__help">Written by the AI. Edits are saved when you re-render.</p>
+        </div>
+
+        <!-- Background Music (Phase 5) -->
+        <div class="field">
+          <label class="field__label">Background music</label>
+          <div class="stack" style="gap: var(--space-2);">
+            <label class="switch-row">
+              <input type="checkbox" name="music_enabled" class="switch" role="switch" value="1" id="switch-music" {% if clip.music_track %}checked{% endif %} onchange="document.getElementById('music-track-row').style.display = this.checked ? 'flex' : 'none';">
+                            <span>Ducked background music</span>
+            </label>
+            <div id="music-track-row" class="row" style="display: {% if clip.music_track %}flex{% else %}none{% endif %}; gap: var(--space-2); margin-top: var(--space-1);">
+              <span class="small muted" style="min-width: 80px;">Track:</span>
+              <select name="music_track" class="select" style="flex: 1;">
+                <option value="auto">Auto (by mood: {{ clip.mood or 'chill' }})</option>
+                {% for trk in music_tracks or [] %}
+                  <option value="{{ trk.path }}" title="{{ trk.use_for }}" {% if clip.music_track and (clip.music_track in trk.path or trk.stem in clip.music_track) %}selected{% endif %}>
+                    {{ trk.title }} ({{ trk.mood }}) · {{ trk.license }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <p class="field__help">Sits at -22 dB under speech and ducks automatically when someone talks.</p>
+          </div>
+        </div>
+
+        <!-- Effects & Pacing (Phase 5) -->
+        <div class="field">
+          <label class="field__label">Effects & pacing</label>
+          <div class="stack" style="gap: var(--space-2);">
+            <label class="switch-row">
+              <input type="checkbox" name="silence_trim" class="switch" role="switch" value="1" {% if clip.silence_trim == 1 %}checked{% endif %}>
+                            <span>Silence trim (cut dead air pauses > 1.2s)</span>
+            </label>
+            <label class="switch-row">
+              <input type="checkbox" name="punch_in_zoom" class="switch" role="switch" value="1" {% if clip.punch_in_zoom == 1 or clip.punch_in_zoom is none %}checked{% endif %}>
+                            <span>Punch-in zoom (1.15x dramatic ramp at peak)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card__footer">
+        <span class="card__footer-note">Version {{ clip.version or 1 }} · {% if clip.status == 'rendering' %}Rendering in the background. You can leave this page.{% else %}Renders in about a minute.{% endif %}</span>
+        <button type="submit" class="btn btn--secondary" {% if clip.status == 'rendering' %}disabled{% endif %} onclick="this.classList.add('is-loading')">
+          {{ ui.icon("arrow-clockwise", 16) }}
+          <span>Re-render clip</span>
+        </button>
+      </div>
+    </form>
+
+    <!-- Caption text editor: hides every other inspector section while open. Save copies the text into the re-render form and submits it. -->
+    <style>.inspector > [hidden] { display: none !important; } /* .inspector-section's display:flex would otherwise beat [hidden] */
+    #captions-panel:not([hidden]) { display: flex; flex-direction: column; min-height: calc(100vh - 160px); }</style>
+    <section id="captions-panel" class="card" hidden>
+      <div class="card__header">
+        <h3 class="card__title">Edit caption text</h3>
+        <p class="card__description">Fix words below while the clip plays on the left. Saving re-renders the clip with this text.</p>
+      </div>
+      <div class="card__body" style="flex: 1; display: flex;">
+        <textarea id="captions-textarea" class="input" style="flex: 1; width: 100%; min-height: 360px; font-size: 16px; line-height: 26px; resize: none;" aria-label="Caption text"></textarea>
+      </div>
+      <div class="card__footer">
+        <button type="button" class="btn btn--secondary" onclick="setCaptionPanel(false)">Cancel</button>
+        <button type="button" class="btn btn--primary" onclick="saveCaptions()">Save and re-render</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+{% if clip.status == 'rendering' %}
+<script>setTimeout(function () { location.reload(); }, 4000);</script>
+{% endif %}
+
+<footer style="margin-top: var(--space-8); padding-top: var(--space-4); border-top: 1px solid var(--color-border); font-size: 13px; color: var(--color-text-muted);">
+  Shortcuts: <kbd class="kbd">j</kbd> / <kbd class="kbd">k</kbd> next/prev, <kbd class="kbd">space</kbd> play, <kbd class="kbd">a</kbd> approve, <kbd class="kbd">r</kbd> reject, <kbd class="kbd">e</kbd> edit hook, <kbd class="kbd">?</kbd> all shortcuts
+</footer>
+
+<!-- Reject Dialog (DESIGN.md §9.15) -->
+<dialog id="reject-dialog" class="dialog">
+  <form method="post" action="/clips/{{ clip.id }}/reject">
+    <div class="dialog__body">
+      <h2 class="dialog__title">Reject clip?</h2>
+      <p class="dialog__text">This clip will be marked as rejected and removed from the active review queue.</p>
+      <div class="field" style="margin-top: var(--space-4);">
+        <label class="field__label" for="reject-reason">Reason for rejection (optional)</label>
+        <input type="text" name="reason" id="reject-reason" class="input" placeholder="e.g. punchline cutoff, dull moment, audio glitch">
+      </div>
+    </div>
+    <div class="dialog__footer">
+      <button type="button" class="btn btn--secondary" data-close-dialog>Cancel</button>
+      <button type="submit" class="btn btn--danger">Reject clip</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+let captionsOriginal = '';
+// The caption panel takes over the whole right column; the player on the left stays playable.
+function setCaptionPanel(open) {
+  document.querySelectorAll('.inspector > :not(#captions-panel)').forEach((el) => { el.hidden = open; });
+  document.getElementById('captions-panel').hidden = !open;
+}
+async function openCaptionEditor() {
+  const s = document.getElementById('input-start-s').value;
+  const e = document.getElementById('input-end-s').value;
+  const ta = document.getElementById('captions-textarea');
+  ta.value = 'Loading…';
+  setCaptionPanel(true);
+  window.scrollTo({ top: 0 });
+  try {
+    const r = await fetch(`/clips/{{ clip.id }}/captions?start_s=${s}&end_s=${e}`);
+    if (!r.ok) throw new Error();
+    captionsOriginal = (await r.json()).text;
+    ta.value = captionsOriginal;
+  } catch (_) {
+    ta.value = '';
+    showToast('Could not load captions');
+  }
+}
+function saveCaptions() {
+  const text = document.getElementById('captions-textarea').value.trim();
+  if (!text || text === captionsOriginal) { setCaptionPanel(false); return; }
+  const f = document.getElementById('caption-text-field');
+  f.value = text;
+  f.disabled = false;
+  f.form.requestSubmit();
+}
+function toggleTitleEdit(on) {
+  document.getElementById('title-form').style.display = on ? 'flex' : 'none';
+  document.getElementById('clip-title').parentElement.style.display = on ? 'none' : '';
+  if (on) document.querySelector('#title-form input').select();
+}
+function nudge(inputId, delta) {
+  const el = document.getElementById(inputId);
+  if (el) {
+    let val = parseFloat(el.value) || 0;
+    val = Math.max(0, val + delta);
+    el.value = val.toFixed(1);
+  }
+}
+</script>
+{% endblock %}

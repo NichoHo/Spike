@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header__left">
+    <h1 class="page-header__title">Posts</h1>
+    <p class="page-header__description">Scheduled, published, and failed short-form posts across connected platforms.</p>
+  </div>
+</header>
+
+<div class="tabs" role="tablist" aria-label="Post status tabs">
+  <a href="/posts?tab=scheduled" class="tab {% if tab == 'scheduled' %}is-active{% endif %}" role="tab" aria-selected="{{ 'true' if tab == 'scheduled' else 'false' }}">
+    <span>Scheduled</span>
+    {% if scheduled_count > 0 %}
+      <span class="badge badge--muted" style="margin-left: var(--space-2);">{{ scheduled_count }}</span>
+    {% endif %}
+  </a>
+  <a href="/posts?tab=posted" class="tab {% if tab == 'posted' %}is-active{% endif %}" role="tab" aria-selected="{{ 'true' if tab == 'posted' else 'false' }}">
+    <span>Posted</span>
+    {% if posted_count > 0 %}
+      <span class="badge badge--muted" style="margin-left: var(--space-2);">{{ posted_count }}</span>
+    {% endif %}
+  </a>
+  <a href="/posts?tab=failed" class="tab {% if tab == 'failed' %}is-active{% endif %}" role="tab" aria-selected="{{ 'true' if tab == 'failed' else 'false' }}">
+    <span>Failed</span>
+    {% if failed_count > 0 %}
+      <span class="badge badge--danger" style="margin-left: var(--space-2);">{{ failed_count }}</span>
+    {% endif %}
+  </a>
+</div>
+
+{% if posts %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 48px;">Clip</th>
+          <th>Title</th>
+          <th>Account</th>
+          <th>Status</th>
+          <th>Time</th>
+          <th style="width: 40px;">Link</th>
+          <th class="actions">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in posts %}
+          <tr>
+            <td style="padding: var(--space-2) var(--space-3);">
+              <a href="/clips/{{ p.clip_id }}" style="display: block; width: 32px; height: 56px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-bg-subtle);">
+                {% if p.clip_thumb_path %}
+                  <img src="/media/clip/{{ p.clip_id }}/thumb" alt="Thumbnail" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy">
+                {% else %}
+                  <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted);">
+                    {{ ui.icon("film-strip", 16) }}
+                  </div>
+                {% endif %}
+              </a>
+            </td>
+            <td class="primary-cell">
+              <a href="/clips/{{ p.clip_id }}" class="truncate" style="display: block; max-width: 320px; font-weight: 500;">
+                {{ p.clip_title or p.clip_hook or 'Clip #' ~ p.clip_id }}
+              </a>
+              {% if p.caption and p.caption != p.clip_title %}
+                <span class="small muted truncate" style="display: block; max-width: 320px;">{{ p.caption }}</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="row row--sm">
+                {% if p.account_platform == 'tiktok' %}
+                  <span class="badge">TikTok</span>
+                {% elif p.account_platform == 'youtube' %}
+                  <span class="badge badge--accent">YouTube</span>
+                {% elif p.account_platform == 'instagram' %}
+                  <span class="badge">Instagram</span>
+                {% else %}
+                  <span class="badge">{{ p.account_platform }}</span>
+                {% endif %}
+                <span class="mono small">{{ p.account_name }}</span>
+              </div>
+            </td>
+            <td>
+              {% if p.status == 'posted' %}
+                <span class="badge badge--success">Posted</span>
+              {% elif p.status == 'sent_to_inbox' %}
+                <span class="badge badge--success">Sent to inbox</span>
+              {% elif p.status == 'scheduled' %}
+                <span class="badge">Scheduled</span>
+              {% elif p.status == 'uploading' %}
+                <span class="badge badge--accent"><span class="badge__spinner"></span><span>Uploading</span></span>
+              {% elif p.status == 'failed' %}
+                <span class="badge badge--danger" {% if p.error %}data-tooltip="{{ p.error }}"{% endif %}>Failed</span>
+              {% else %}
+                <span class="badge">{{ p.status }}</span>
+              {% endif %}
+            </td>
+            <td class="tabular muted small">
+              {% if p.status in ('posted', 'sent_to_inbox') and p.posted_at %}
+                <span title="{{ p.posted_at | local_time }}">{{ p.posted_at | relative_time }}</span>
+              {% elif p.scheduled_for %}
+                <span title="{{ p.scheduled_for | local_time }}">{{ p.scheduled_for | relative_time }}</span>
+              {% else %}
+                <span>-</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if p.url %}
+                <a href="{{ p.url }}" target="_blank" rel="noopener noreferrer" class="btn btn--ghost btn--icon btn--sm" data-tooltip="View on {{ p.account_platform }}">
+                  {{ ui.icon("arrow-up-right", 14) }}
+                </a>
+              {% else %}
+                <span class="muted">-</span>
+              {% endif %}
+            </td>
+            <td class="actions">
+              {% if p.status == 'failed' %}
+                <form method="post" action="/posts/{{ p.id }}/retry" style="display: inline;">
+                  <button type="submit" class="btn btn--secondary btn--sm">
+                    {{ ui.icon("arrow-clockwise", 14) }}
+                    <span>Retry</span>
+                  </button>
+                </form>
+              {% elif p.status == 'scheduled' %}
+                <form method="post" action="/posts/{{ p.id }}/cancel" style="display: inline;">
+                  <button type="submit" class="btn btn--ghost btn--sm">
+                    <span>Cancel</span>
+                  </button>
+                </form>
+              {% else %}
+                <span class="muted">-</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="empty">
+    <div class="empty__icon">{{ ui.icon("paper-plane-tilt", 24) }}</div>
+    <div class="empty__title">
+      {% if tab == 'scheduled' %}
+        No scheduled posts
+      {% elif tab == 'posted' %}
+        No published posts yet
+      {% else %}
+        No failed posts
+      {% endif %}
+    </div>
+    <p class="empty__text">
+      {% if tab == 'scheduled' %}
+        Approve clips in Review to schedule them for publishing.
+      {% elif tab == 'posted' %}
+        Clips published to TikTok, YouTube, or Instagram will appear here.
+      {% else %}
+        All posts have dispatched cleanly without errors.
+      {% endif %}
+    </p>
+    {% if tab != 'scheduled' %}
+      <a href="/posts?tab=scheduled" class="btn btn--secondary btn--sm">View scheduled posts</a>
+    {% else %}
+      <a href="/" class="btn btn--primary btn--sm">Review ready clips</a>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

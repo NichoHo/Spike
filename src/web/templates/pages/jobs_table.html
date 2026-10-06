@@ -1,0 +1,66 @@
+{% import "macros/ui.html" as ui %}
+
+<tbody id="jobs-tbody" hx-get="/jobs/table" hx-trigger="every 5s" hx-swap="outerHTML">
+  {% if not jobs %}
+    <tr>
+      <td colspan="5" style="text-align: center; padding: var(--space-8); color: var(--color-text-muted);">
+        No processing jobs recorded yet.
+      </td>
+    </tr>
+  {% else %}
+    {% for j in jobs %}
+      <tr>
+        <td>
+          <div class="primary-cell truncate" style="max-width: 380px;">{{ j.title or j.url }}</div>
+          <span class="secondary-line">{{ j.source_name or j.origin }} · #{{ j.id }}</span>
+          {% if j.status == 'failed' and j.error %}
+            <details style="margin-top: 4px;">
+              <summary style="font-size: 12px; color: var(--color-danger-text);">
+                {{ ui.icon("warning-circle", 12) }}
+                <span>Error details</span>
+              </summary>
+              <pre class="mono" style="margin-top: 4px; padding: 6px; background: var(--color-bg-subtle); border-radius: var(--radius-sm); font-size: 11px; white-space: pre-wrap; color: var(--color-danger-text);">{{ j.error }}</pre>
+            </details>
+          {% endif %}
+        </td>
+        <td>
+          {{ ui.status("job", j.status) }}
+        </td>
+        <td>
+          <span class="small" style="font-family: var(--font-mono);">{{ j.stage or 'queued' }}</span>
+          {% set steps = ['fetch_meta','fetch_audio','fetch_chat','fetch_crowd','transcribe','signals','moments','fetch_sections','render','render_vertical'] %}
+          {% if j.status in ('queued', 'running') and j.stage in steps %}
+            <div class="secondary-line">Step {{ steps.index(j.stage) + 1 }} of {{ steps | length }}{% if j.eta_s is not none %} · ~{% if j.eta_s < 60 %}{{ j.eta_s | round | int }}s{% else %}{{ (j.eta_s / 60) | round | int }} min{% endif %} left{% endif %}</div>
+          {% endif %}
+        </td>
+        <td>
+          {% if j.created_at %}
+            <span title="{{ j.created_at | local_time }}" class="tabular small">{{ j.created_at | relative_time }}</span>
+          {% else %}
+            <span class="subtle">-</span>
+          {% endif %}
+        </td>
+        <td class="actions">
+          <div class="row" style="justify-content: flex-end;">
+            {% if j.status == 'failed' %}
+              <form method="post" action="/jobs/{{ j.id }}/retry" style="display: inline;">
+                <button type="submit" class="btn btn--secondary btn--sm">
+                  {{ ui.icon("arrow-clockwise", 14) }}
+                  <span>Retry</span>
+                </button>
+              </form>
+            {% elif j.status in ('queued', 'running') %}
+              <form method="post" action="/jobs/{{ j.id }}/cancel" style="display: inline;">
+                <button type="submit" class="btn btn--ghost btn--sm" style="color: var(--color-danger-text);">
+                  <span>Cancel</span>
+                </button>
+              </form>
+            {% else %}
+              <span class="subtle small">Done</span>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+  {% endif %}
+</tbody>

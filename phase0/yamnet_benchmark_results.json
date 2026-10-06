@@ -1,0 +1,24 @@
+{
+  "yamnet": {
+    "model": "YAMNet (tf.lite.Interpreter, yamnet.tflite)",
+    "audio_duration_s": 1907.1,
+    "inference_time_s": 9.7,
+    "cpu_minutes_per_audio_hour": 0.3,
+    "realtime_factor": 0.005,
+    "n_frames": 3971,
+    "hop_s": 0.48,
+    "laugh_class_count": 5,
+    "shout_class_count": 4,
+    "laugh_frames_above_0.3": 4,
+    "laugh_runs_ge_0.5s": 3,
+    "shout_frames_above_0.3": 0,
+    "shout_runs_ge_0.5s": 0,
+    "laugh_max_prob": 0.414,
+    "shout_max_prob": 0.199,
+    "laugh_mean_prob": 0.0019
+  },
+  "panns": {
+    "panns_available": false,
+    "note": "PANNs CNN14 ruled out: ~20x heavier than YAMNet (81M vs 3.7M params), no PyPI package, CPU inference too slow for production use."
+  }
+}

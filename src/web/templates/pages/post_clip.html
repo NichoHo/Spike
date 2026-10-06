@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header__left">
+    <a href="/clips/{{ clip.id }}" class="back-link">
+      {{ ui.icon("caret-left", 14) }}
+      <span>Clip detail</span>
+    </a>
+    <h1 class="page-header__title">Post clip</h1>
+    <p class="page-header__description">
+      Publish or schedule this vertical clip to connected video platforms.
+    </p>
+  </div>
+</header>
+
+<div class="stack stack--lg" style="max-width: var(--content-narrow);">
+  {% if blocked %}
+    <!-- Blueprint §12: Hard Permission Block Alert -->
+    <div class="alert alert--danger" role="alert">
+      {{ ui.icon("warning-circle", 20) }}
+      <div>
+        <div class="alert__title">Posting permanently blocked</div>
+        <div class="alert__body">
+          Source <strong>{{ clip.source_name or 'Source' }}</strong> is configured with <code>permission = 'none'</code> (private review only).
+          Per licensing and compliance rules, commercial or platform posting is prohibited for this source.
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: var(--space-4);">
+      <a href="/clips/{{ clip.id }}" class="btn btn--secondary">Return to clip</a>
+    </div>
+
+  {% elif not accounts %}
+    <div class="alert alert--warning" role="alert">
+      {{ ui.icon("warning", 20) }}
+      <div>
+        <div class="alert__title">No platform accounts connected</div>
+        <div class="alert__body">
+          To publish clips to TikTok, YouTube Shorts, or Instagram Reels, an admin must connect an account in Settings first.
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: var(--space-4);">
+      <a href="/settings" class="btn btn--primary">Go to Settings</a>
+      <a href="/clips/{{ clip.id }}" class="btn btn--secondary" style="margin-left: var(--space-2);">Return to clip</a>
+    </div>
+
+  {% else %}
+    <form method="post" action="/clips/{{ clip.id }}/post" class="card">
+      <div class="card__header">
+        <h2 class="card__title">Publishing details</h2>
+        <p class="card__description">Select account, schedule slot, and caption metadata.</p>
+      </div>
+
+      <div class="card__body stack stack--md">
+        <!-- Target Platform Account -->
+        <div class="field">
+          <label class="field__label" for="field-account">Connected account</label>
+          <select name="account_id" id="field-account" class="select" required>
+            {% for a in accounts %}
+              <option value="{{ a.id }}">
+                {{ a.platform | upper }}: {{ a.display_name }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Posting Timing -->
+        <div class="field">
+          <label class="field__label">Post timing</label>
+          <div class="segmented" style="width: 100%;">
+            <input type="radio" name="timing" id="timing-now" value="now" checked onchange="toggleTiming()">
+            <label for="timing-now">Publish now</label>
+
+            <input type="radio" name="timing" id="timing-scheduled" value="scheduled" onchange="toggleTiming()">
+            <label for="timing-scheduled">Schedule for slot</label>
+          </div>
+        </div>
+
+        <!-- Scheduled Time Picker (shown when scheduled is selected) -->
+        <div class="field" id="field-scheduled-wrap" style="display: none;">
+          <label class="field__label" for="field-scheduled-time">Scheduled time (UTC or next slot)</label>
+          <input type="text" name="scheduled_for" id="field-scheduled-time" class="input input--mono" value="{{ next_slot }}" placeholder="YYYY-MM-DD HH:MM">
+          <p class="field__help">Default slots are 12:00 and 19:00 local time.</p>
+        </div>
+
+        <!-- Caption -->
+        <div class="field">
+          <label class="field__label" for="field-caption">Caption</label>
+          <textarea name="caption" id="field-caption" class="textarea" rows="3" placeholder="Engaging video caption..." required>{{ prefilled_caption }}</textarea>
+          <p class="field__help">Includes video hook and summary for the platform feed.</p>
+        </div>
+
+        <!-- Hashtags -->
+        <div class="field">
+          <label class="field__label" for="field-hashtags">Hashtags</label>
+          <input type="text" name="hashtags" id="field-hashtags" class="input" value="{{ prefilled_tags }}" placeholder="#Shorts #gaming #streamer">
+          <p class="field__help">Space-separated list of tags.</p>
+        </div>
+      </div>
+
+      <div class="card__footer">
+        <a href="/clips/{{ clip.id }}" class="btn btn--secondary">Cancel</a>
+        <button type="submit" id="btn-submit-post" class="btn btn--primary" onclick="this.classList.add('is-loading')">
+          {{ ui.icon("paper-plane-tilt", 16) }}
+          <span id="btn-post-label">Post now</span>
+        </button>
+      </div>
+    </form>
+  {% endif %}
+</div>
+
+<script>
+function toggleTiming() {
+  const isScheduled = document.getElementById("timing-scheduled").checked;
+  const wrap = document.getElementById("field-scheduled-wrap");
+  const label = document.getElementById("btn-post-label");
+  if (isScheduled) {
+    wrap.style.display = "block";
+    if (label) label.textContent = "Schedule post";
+  } else {
+    wrap.style.display = "none";
+    if (label) label.textContent = "Post now";
+  }
+}
+</script>
+{% endblock %}

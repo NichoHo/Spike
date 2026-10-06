@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<div class="stack" style="text-align: center; max-width: 480px; margin: var(--space-16) auto; align-items: center;">
+  <h1 style="font-size: 24px; font-weight: 600;">Page not found</h1>
+  <p class="muted" style="font-size: 14px;">The page or clip you requested could not be found or has been removed.</p>
+  <div style="margin-top: var(--space-4);">
+    {{ ui.button("Go to Review", variant="secondary", href="/") }}
+  </div>
+</div>
+{% endblock %}

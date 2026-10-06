@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header__left">
+    <h1 class="page-header__title">Sources</h1>
+    <p class="page-header__description">Streamers and channels Spike watches for new videos.</p>
+  </div>
+  <div class="page-header__actions">
+    {{ ui.button("Add source", variant="primary", icon="plus", href="/sources/new") }}
+  </div>
+</header>
+
+{% if not sources %}
+  {{ ui.empty_state("broadcast", "No sources added yet", "Add a Twitch streamer or YouTube channel to automatically watch for new VODs.", "Add source", "/sources/new") }}
+{% else %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Permission</th>
+          <th>Auto-process</th>
+          <th>Last VOD</th>
+          <th class="num">Clips</th>
+          <th class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sources %}
+          <tr class="is-link" onclick="window.location.href='/sources/{{ s.id }}'">
+            <td>
+              <a href="/sources/{{ s.id }}" class="primary-cell">{{ s.display_name }}</a>
+              <span class="secondary-line">{{ s.kind | capitalize }} · {{ s.external_id }}</span>
+            </td>
+            <td>
+              {{ ui.status("permission", s.permission) }}
+            </td>
+            <td>
+              {% if s.auto_process %}
+                <span style="color: var(--color-text);">On</span>
+              {% else %}
+                <span class="muted">Off</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if s.last_vod_at %}
+                <span title="{{ s.last_vod_at | local_time }}">{{ s.last_vod_at | relative_time }}</span>
+              {% else %}
+                <span class="subtle">None yet</span>
+              {% endif %}
+            </td>
+            <td class="num">
+              {{ s.clip_count or 0 }}
+            </td>
+            <td class="actions" onclick="event.stopPropagation()">
+              <div class="row" style="justify-content: flex-end;">
+                <a href="/sources/{{ s.id }}" class="btn btn--ghost btn--sm" aria-label="Edit source">
+                  {{ ui.icon("pencil-simple", 14) }}
+                  <span>Edit</span>
+                </a>
+                <form method="post" action="/sources/{{ s.id }}/delete" onsubmit="return confirm('Delete source {{ s.display_name }}?');" style="display: inline;">
+                  <button type="submit" class="btn btn--ghost btn--sm" style="color: var(--color-danger-text);" aria-label="Delete source">
+                    {{ ui.icon("trash", 14) }}
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

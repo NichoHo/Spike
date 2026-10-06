@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header__left">
+    <h1 class="page-header__title">Jobs</h1>
+    <p class="page-header__description">Pipeline status, execution history, and active background tasks.</p>
+  </div>
+</header>
+
+<div class="stack stack--lg">
+  <!-- Top: Disk Usage Meter (DESIGN.md §9.19, §10.7) -->
+  <div class="card card--compact" style="max-width: 360px;">
+    <div class="card__body stack stack--sm">
+      <div class="row row--between">
+        <span class="small muted">Storage used</span>
+        <span class="small tabular font-medium">{{ disk_used_str }} of {{ disk_total_str }} ({{ disk_pct }}%)</span>
+      </div>
+      <meter min="0" max="100" optimum="50" low="80" high="90" value="{{ disk_pct }}"></meter>
+    </div>
+  </div>
+
+  <!-- Jobs Table -->
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Video</th>
+          <th>Status</th>
+          <th>Stage</th>
+          <th>Started</th>
+          <th class="actions">Actions</th>
+        </tr>
+      </thead>
+      {% include "pages/jobs_table.html" %}
+    </table>
+  </div>
+</div>
+{% endblock %}

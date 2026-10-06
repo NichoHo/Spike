@@ -1,0 +1,185 @@
+{# UI Macros per DESIGN.md §9 & §16 #}
+
+{% macro _svg(name, size=16) -%}
+  <svg width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false">
+    <use href="/static/icons/sprite.svg#{{ name }}"></use>
+  </svg>
+{%- endmacro %}
+
+{% macro icon(name, size=16) -%}{{ _svg(name, size) }}{%- endmacro %}
+
+{% macro button(label, variant="secondary", size="md", icon=None, href=None, type="button", icon_only=False, id=None, disabled=False, attrs={}) -%}
+  {%- set cls = "btn btn--" ~ variant ~ (" btn--" ~ size if size != "md" else "") ~ (" btn--icon" if icon_only else "") -%}
+  {%- set extra = attrs | xmlattr -%}
+  {%- if href -%}
+    <a class="{{ cls }}" href="{{ href }}" {% if id %}id="{{ id }}"{% endif %} {% if icon_only %}aria-label="{{ label }}" data-tooltip="{{ label }}"{% endif %} {% if disabled %}aria-disabled="true"{% endif %} {{ extra }}>
+  {%- else -%}
+    <button class="{{ cls }}" type="{{ type }}" {% if id %}id="{{ id }}"{% endif %} {% if icon_only %}aria-label="{{ label }}" data-tooltip="{{ label }}"{% endif %} {% if disabled %}disabled{% endif %} {{ extra }}>
+  {%- endif -%}
+    {%- if icon %}{{ _svg(icon, 14 if size == "sm" else 16) }}{% endif -%}
+    {%- if not icon_only %}<span>{{ label }}</span>{% endif -%}
+  {%- if href %}</a>{% else %}</button>{% endif -%}
+{%- endmacro %}
+
+{% macro badge(label, tone="neutral", icon=None, extra_cls="") -%}
+  <span class="badge {% if tone != 'neutral' %}badge--{{ tone }}{% endif %} {{ extra_cls }}">
+    {%- if icon %}{{ _svg(icon, 12) }}{% endif -%}
+    <span>{{ label }}</span>
+  </span>
+{%- endmacro %}
+
+{% macro score(n) -%}
+  {%- set val = n | int if n is not none else 0 -%}
+  {%- if val >= 80 -%}
+    <span class="badge badge--success badge--score">{{ val }}</span>
+  {%- elif val >= 60 -%}
+    <span class="badge badge--score">{{ val }}</span>
+  {%- else -%}
+    <span class="badge badge--score badge--muted">{{ val }}</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro status(entity, value) -%}
+  {%- if entity == "job" -%}
+    {%- if value == "queued" -%}
+      <span class="badge">Queued</span>
+    {%- elif value == "running" -%}
+      <span class="badge badge--accent"><span class="badge__spinner"></span><span>Running</span></span>
+    {%- elif value == "ready" -%}
+      <span class="badge badge--warning">Needs review</span>
+    {%- elif value == "done" -%}
+      <span class="badge">Done</span>
+    {%- elif value == "failed" -%}
+      <span class="badge badge--danger">Failed</span>
+    {%- else -%}
+      <span class="badge">{{ value }}</span>
+    {%- endif -%}
+  {%- elif entity == "clip" -%}
+    {%- if value == "rendering" -%}
+      <span class="badge badge--accent"><span class="badge__spinner"></span><span>Rendering</span></span>
+    {%- elif value == "ready" -%}
+      <span class="badge badge--warning">Needs review</span>
+    {%- elif value == "approved" -%}
+      <span class="badge badge--success">Approved</span>
+    {%- elif value == "rejected" -%}
+      <span class="badge">Rejected</span>
+    {%- elif value == "posted" -%}
+      <span class="badge badge--success">Posted</span>
+    {%- else -%}
+      <span class="badge">{{ value }}</span>
+    {%- endif -%}
+  {%- elif entity == "permission" -%}
+    {%- if value == "own" -%}
+      <span class="badge">Own channel</span>
+    {%- elif value == "written" -%}
+      <span class="badge">Written permission</span>
+    {%- elif value == "program" -%}
+      <span class="badge">Clipping program</span>
+    {%- else -%}
+      <span class="badge badge--warning">Review only</span>
+    {%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro page_header(title, description=None, actions=[], back_href=None, back_label=None) -%}
+  <header class="page-header">
+    <div class="page-header__left">
+      {%- if back_href -%}
+        <a href="{{ back_href }}" class="back-link">
+          {{ _svg("caret-left", 14) }}
+          <span>{{ back_label or "Back" }}</span>
+        </a>
+      {%- endif -%}
+      <h1 class="page-header__title">{{ title }}</h1>
+      {%- if description -%}
+        <p class="page-header__description">{{ description }}</p>
+      {%- endif -%}
+    </div>
+    {%- if actions -%}
+      <div class="page-header__actions">
+        {%- for act in actions -%}
+          {{ act }}
+        {%- endfor -%}
+      </div>
+    {%- endif -%}
+  </header>
+{%- endmacro %}
+
+{% macro empty_state(icon_name, title, text, action_label=None, action_href=None) -%}
+  <div class="empty">
+    <div class="empty__icon">{{ _svg(icon_name, 20) }}</div>
+    <div class="empty__title">{{ title }}</div>
+    <p class="empty__text">{{ text }}</p>
+    {%- if action_label and action_href -%}
+      {{ button(action_label, variant="primary", href=action_href) }}
+    {%- endif -%}
+  </div>
+{%- endmacro %}
+
+{% macro alert(type, title, body) -%}
+  <div class="alert alert--{{ type }}" role="alert">
+    {%- if type == "warning" -%}
+      {{ _svg("warning", 16) }}
+    {%- elif type == "danger" -%}
+      {{ _svg("warning-circle", 16) }}
+    {%- else -%}
+      {{ _svg("info", 16) }}
+    {%- endif -%}
+    <div>
+      <div class="alert__title">{{ title }}</div>
+      <div class="alert__body">{{ body }}</div>
+    </div>
+  </div>
+{%- endmacro %}
+
+{% macro kbd(key) -%}
+  <kbd class="kbd">{{ key }}</kbd>
+{%- endmacro %}
+
+{# Radio card pickers with a visual preview. `current` is the selected value. #}
+{% macro layout_picker(prefix, current) -%}
+  {%- set layouts = [
+    ("split", "Split", "Streamer on top, game below."),
+    ("face_track", "Face track", "Tall crop that follows the face."),
+    ("center", "Center", "Tall crop from the middle."),
+    ("letterbox", "Letterbox", "Wide frame, blurred fill."),
+  ] -%}
+  <div class="layout-picker">
+    {%- for value, name, desc in layouts %}
+      <input type="radio" name="layout" id="{{ prefix }}-{{ value }}" value="{{ value }}" {% if current == value %}checked{% endif %}>
+      <label for="{{ prefix }}-{{ value }}" class="layout-option">
+        <span class="layout-thumb layout-thumb--{{ value }}" aria-hidden="true">
+          {%- if value == "split" %}<span class="lt-cam"></span><span class="lt-content"></span>
+          {%- elif value == "face_track" %}<span class="lt-cam"></span>
+          {%- elif value == "center" %}<span class="lt-content"></span>
+          {%- else %}<span class="lt-blur"></span><span class="lt-content"></span><span class="lt-blur"></span>{% endif -%}
+          <span class="lt-caption"></span>
+        </span>
+        <span class="layout-option__name">{{ name }}</span>
+        <span class="layout-option__desc">{{ desc }}</span>
+      </label>
+    {%- endfor %}
+  </div>
+{%- endmacro %}
+
+{% macro caption_picker(prefix, current) -%}
+  {%- set styles = [
+    ("bold_pop", "Bold pop", "Big uppercase, thick outline."),
+    ("karaoke", "Karaoke", "Words fill in as spoken."),
+    ("clean", "Clean", "Plain white with soft shadow."),
+  ] -%}
+  <div class="layout-picker">
+    {%- for value, name, desc in styles %}
+      <input type="radio" name="caption_style" id="{{ prefix }}-{{ value }}" value="{{ value }}" {% if current == value %}checked{% endif %}>
+      <label for="{{ prefix }}-{{ value }}" class="layout-option">
+        <span class="caption-thumb caption-thumb--{{ value }}" aria-hidden="true">
+          {%- if value == "karaoke" %}<span class="ct-hl">LET’S</span> GO
+          {%- elif value == "bold_pop" %}LET’S <span class="ct-hl">GO</span>
+          {%- else %}Let’s go{% endif -%}
+        </span>
+        <span class="layout-option__name">{{ name }}</span>
+        <span class="layout-option__desc">{{ desc }}</span>
+      </label>
+    {%- endfor %}
+  </div>
+{%- endmacro %}

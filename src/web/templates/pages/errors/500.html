@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<div class="stack" style="text-align: center; max-width: 480px; margin: var(--space-16) auto; align-items: center;">
+  <h1 style="font-size: 24px; font-weight: 600;">Something went wrong</h1>
+  <p class="muted" style="font-size: 14px;">An unexpected error occurred while processing your request.</p>
+  {% if error_id %}
+    <p class="mono muted" style="font-size: 12px;">Error ID: {{ error_id }}</p>
+  {% endif %}
+  <div style="margin-top: var(--space-4);">
+    {{ ui.button("Go to Review", variant="secondary", href="/") }}
+  </div>
+</div>
+{% endblock %}

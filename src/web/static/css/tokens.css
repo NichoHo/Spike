@@ -1,0 +1,128 @@
+:root {
+  color-scheme: dark;
+
+  /* Fonts */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+
+  /* Type scale: size / line height */
+  --text-display-size: 32px;  --text-display-lh: 40px;
+  --text-title-size: 24px;    --text-title-lh: 32px;
+  --text-heading-size: 16px;  --text-heading-lh: 24px;
+  --text-body-size: 14px;     --text-body-lh: 20px;
+  --text-small-size: 13px;    --text-small-lh: 18px;
+  --text-caption-size: 12px;  --text-caption-lh: 16px;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --content-wide: 1440px;
+  --content-default: 1120px;
+  --content-narrow: 640px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* Z-index */
+  --z-sticky: 10;
+  --z-sidebar: 20;
+  --z-popover: 30;
+  --z-toast: 40;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Colors: dark (default) */
+  --color-bg: #0a0a0a;
+  --color-bg-subtle: #111111;
+  --color-surface: #161616;
+  --color-surface-hover: #1f1f1f;
+  --color-surface-active: #262626;
+  --color-border: #262626;
+  --color-border-strong: #3a3a3a;
+  --color-border-hover: #525252;
+  --color-text: #ededed;
+  --color-text-muted: #a1a1a1;
+  --color-text-subtle: #808080;
+  --color-text-disabled: #525252;
+  --color-text-inverse: #0a0a0a;
+  --color-primary: #ededed;
+  --color-primary-hover: #d4d4d4;
+  --color-accent: #0068d6;
+  --color-accent-text: #4ea1ff;
+  --color-accent-subtle: rgb(78 161 255 / 0.12);
+  --color-focus: #4ea1ff;
+  --color-success-text: #4cc38a;
+  --color-success-subtle: rgb(76 195 138 / 0.12);
+  --color-warning-text: #f5a524;
+  --color-warning-subtle: rgb(245 165 36 / 0.12);
+  --color-danger: #d93036;
+  --color-danger-hover: #c1272d;
+  --color-danger-text: #ff6166;
+  --color-danger-subtle: rgb(255 97 102 / 0.12);
+  --color-media-bg: #000000;
+  --color-overlay: rgb(0 0 0 / 0.6);
+
+  /* Shadows (floating elements only) */
+  --shadow-popover: 0 4px 12px rgb(0 0 0 / 0.4);
+  --shadow-dialog: 0 16px 48px rgb(0 0 0 / 0.5);
+
+  /* Select caret, color matches --color-text-muted */
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='%23a1a1a1'%3E%3Cpath d='M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z'/%3E%3C/svg%3E");
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #fafafa;
+  --color-bg-subtle: #f5f5f5;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f2f2f2;
+  --color-surface-active: #ebebeb;
+  --color-border: #e5e5e5;
+  --color-border-strong: #d4d4d4;
+  --color-border-hover: #a3a3a3;
+  --color-text: #171717;
+  --color-text-muted: #666666;
+  --color-text-subtle: #737373;
+  --color-text-disabled: #a3a3a3;
+  --color-text-inverse: #ffffff;
+  --color-primary: #171717;
+  --color-primary-hover: #383838;
+  --color-accent: #0068d6;
+  --color-accent-text: #0068d6;
+  --color-accent-subtle: rgb(0 104 214 / 0.08);
+  --color-focus: #0068d6;
+  --color-success-text: #1a7f4b;
+  --color-success-subtle: rgb(26 127 75 / 0.08);
+  --color-warning-text: #a35200;
+  --color-warning-subtle: rgb(163 82 0 / 0.08);
+  --color-danger: #d93036;
+  --color-danger-hover: #c1272d;
+  --color-danger-text: #d93036;
+  --color-danger-subtle: rgb(217 48 54 / 0.08);
+  --color-overlay: rgb(0 0 0 / 0.4);
+
+  --shadow-popover: 0 4px 12px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-dialog: 0 16px 48px rgb(0 0 0 / 0.12), 0 2px 4px rgb(0 0 0 / 0.04);
+
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='%23666666'%3E%3Cpath d='M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z'/%3E%3C/svg%3E");
+}

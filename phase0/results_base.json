@@ -1,0 +1,12 @@
+{
+  "model": "base",
+  "audio_duration_s": 1907.1,
+  "transcription_time_s": 188.7,
+  "model_load_time_s": 25.5,
+  "rtf": 0.099,
+  "real_time_factor_description": "10.1x faster than real-time",
+  "segments": 355,
+  "words": 4403,
+  "detected_language": "en",
+  "language_probability": 0.997
+}

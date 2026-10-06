@@ -1,0 +1,38 @@
+[
+  {
+    "model": "base",
+    "audio_duration_s": 1907.1,
+    "transcription_time_s": 188.7,
+    "model_load_time_s": 25.5,
+    "rtf": 0.099,
+    "real_time_factor_description": "10.1x faster than real-time",
+    "segments": 355,
+    "words": 4403,
+    "detected_language": "en",
+    "language_probability": 0.997
+  },
+  {
+    "model": "small",
+    "audio_duration_s": 1907.1,
+    "transcription_time_s": 619.5,
+    "model_load_time_s": 2.3,
+    "rtf": 0.325,
+    "real_time_factor_description": "3.1x faster than real-time",
+    "segments": 641,
+    "words": 4418,
+    "detected_language": "en",
+    "language_probability": 0.996
+  },
+  {
+    "model": "medium",
+    "audio_duration_s": 1907.1,
+    "transcription_time_s": 1423.7,
+    "model_load_time_s": 5.0,
+    "rtf": 0.747,
+    "real_time_factor_description": "1.3x faster than real-time",
+    "segments": 377,
+    "words": 4400,
+    "detected_language": "en",
+    "language_probability": 0.995
+  }
+]

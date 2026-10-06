@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-theme="{{ theme or 'dark' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title }} | Spike</title>
+  <link rel="preload" href="/static/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <script src="/static/js/htmx.min.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- Mobile Topbar -->
+  <header class="mobile-topbar">
+    <span style="font-weight: 600; font-size: 16px;">Spike</span>
+    <div class="row">
+      <button class="btn btn--ghost btn--sm btn--icon" type="button" onclick="toggleTheme()" aria-label="Toggle theme">
+        <svg width="14" height="14" aria-hidden="true"><use href="/static/icons/sprite.svg#sun"></use></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="shell">
+    {% include "partials/sidebar.html" %}
+    <main id="main" class="shell__main">
+      <div class="page page--{{ page_width or 'wide' }}">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  <div class="toast-region" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- Global Keyboard Shortcuts Modal Dialog (?) -->
+  <dialog id="shortcuts-dialog" class="dialog">
+    <div class="dialog__body">
+      <h2 class="dialog__title">Keyboard shortcuts</h2>
+      <div class="stack stack--sm" style="margin-top: var(--space-4);">
+        <div class="row row--between"><span>Next / previous clip</span><div><kbd class="kbd">j</kbd> <kbd class="kbd">k</kbd></div></div>
+        <div class="row row--between"><span>Play / pause</span><kbd class="kbd">space</kbd></div>
+        <div class="row row--between"><span>Approve clip</span><kbd class="kbd">a</kbd></div>
+        <div class="row row--between"><span>Reject clip</span><kbd class="kbd">r</kbd></div>
+        <div class="row row--between"><span>Download clip</span><kbd class="kbd">d</kbd></div>
+        <div class="row row--between"><span>Edit hook / captions</span><kbd class="kbd">e</kbd></div>
+        <div class="row row--between"><span>Show shortcuts</span><kbd class="kbd">?</kbd></div>
+      </div>
+    </div>
+    <div class="dialog__footer">
+      <button class="btn btn--secondary" type="button" data-close-dialog>Close</button>
+    </div>
+  </dialog>
+</body>
+</html>
