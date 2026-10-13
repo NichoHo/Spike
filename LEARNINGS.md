@@ -69,6 +69,17 @@
 - **Decided (same day):** added `baseline_behaviors` to the creator
   profile, episodes per stream, one clip per episode per humor type, and
   manual cut ranges on the clip page (§6.7, §10.1).
+- **Decided (2026-10-14):** add Top 3 / Top 5 compilations as a themed,
+  escalating countdown built on the story-combo multi-segment clip (§6.7).
+  Sourced from vendor blogs only (vidiq, VueReka, ClipFarmer, StreamsCharts):
+  tease #1 early, rank label per entry, 20 to 45 s single clips retain
+  best. YouTube Shorts max 3 min since Oct 2024 (several sources agree);
+  TikTok and Reels limits vary by source, not verified.
+- **Decided (2026-10-14):** clips get a `concept` (single, story, pov,
+  top3, top5), shown in its own UI section, not under layout. AI picks the
+  default; the user can change it or build any concept by hand. POV rules
+  from POV-format guides (socialk.it, meme.com, sendible): caption is the
+  setup and the clip the payoff, short enough to read in 1 s, no bragging.
 - **Open:** check why stage 3 got no YouTube chat for #38. User has not
   reviewed #38 past 44:00, so recall there is unknown.
 

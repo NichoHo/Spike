@@ -681,6 +681,44 @@ in time order, total 60 s or less, for example hubris then the loss).
 Runs through `claude -p` on the user's Pro plan (Sonnet). Falls back to the
 Gemini ranking when the call fails or the plan limit is hit.
 
+**Concepts.** Each clip has a `concept`, separate from its layout (layout
+is framing; concept is what the clip is): `single` (default), `story`
+(2 to 3 segments, hubris then fall), `pov`, `top3`, `top5`. The editor pass
+picks the concept per output. The user can change it, or build any concept
+by hand from ticked candidates. The AI pick is only the default.
+
+**POV.** One short clip (5 to 15 s) with a "POV: ..." caption at the top
+for the whole clip. The caption is the setup; the clip is the payoff, shown
+out of context. Starts just before the reaction, no setup footage. Use it
+when the reaction is the joke but the real setup is long, in-jokey, or
+`needs_context` is true. This rescues moments the single-clip judge
+rejects. Caption rules (sourced from POV-format guides, see LEARNINGS):
+starts with "POV:", second person, one specific situation the viewer is
+in, readable in about 1 s (at most 10 words), no transcript quote, no
+bragging, not a description of what the clip shows.
+
+**Compilations (Top 3 / Top 5).** A compilation is a multi-segment clip
+(same machinery as story combos) with rank cards. Rules, from short-form
+practice (vendor blogs, treat as hypotheses to test with post stats):
+
+- Only made when one theme holds 3 (or 5) entries. Random "best of" lists
+  are not funny. Themes: one episode ("every goal Kvaratskhelia scored on
+  Speed"), one humor type ("Speed vs chat"), one recurring bit. This is
+  where `baseline_behaviors` moments belong: repeated rage is dull alone
+  and funny as an escalating list.
+- Order is escalation: weakest first, #1 last. Open with a 1 to 2 s tease
+  of #1's peak plus hook text, then count down.
+- Each entry is cut tighter than a single clip: setup plus payoff, 6 to 25
+  s, `cut_lines` applied. Each entry gets a rank card (top, about 1.5 s):
+  `#3` plus a short funny label, written like a viewer, not a category.
+- Length caps: Top 3 at most 75 s, Top 5 at most 150 s. Shorts allows 3
+  min, but completion rate decides reach. End right after #1's reaction.
+- One layout for all entries. Loudness normalized per entry before the
+  final pass. Hard cuts, no transitions (sound effects stay skipped, §7.4).
+- The editor pass proposes 0 to 2 compilations per VOD. Entries may come
+  from `low_score` candidates when the theme makes them work. The user can
+  also tick candidates in "Other moments" and press "Make Top 3/5".
+
 **Scores.** The UI shows the calibrated raw score (0 to 100), not the
 within-VOD percentile. Percentiles only order candidates, with average rank
 for ties. `min_llm_score` rises to 65. Clip count is no longer fixed per
@@ -996,8 +1034,11 @@ available.
   - "Ask the editor": free-text comment ("cut the first 5 seconds", "end
     after he throws the controller"). An LLM turns it into an edit (trim,
     removed intervals, zooms, title) and re-renders. History kept per clip.
+  - Concept section (separate from Layout): Single, Story, POV, Top 3,
+    Top 5, with the fields that concept needs (POV text, entry list).
 - Per video: "Other moments" list of `low_score` and `rejected` candidates
-  (title, stream timestamp, score). One click queues a render.
+  (title, stream timestamp, score). One click queues a render. Tick
+  several and pick a concept to build a Story, POV, Top 3, or Top 5 by hand.
 - Keys: `j`/`k` next/previous, `space` play/pause, `a` approve, `r` reject,
   `d` download, `[`/`]` nudge start, `{`/`}` nudge end, `e` edit captions.
 
@@ -1283,7 +1324,8 @@ Build §6.7 in this order, and run `spike eval` on video #38 after each step:
 2. Creator and session profile, `creator_type` presets.
 3. Judge rewrite, streamer name, store all candidates.
 4. Phrase lines and new edge rules.
-5. Claude editor pass with story combos.
+5. Claude editor pass, then concepts: story, POV, Top 3 / Top 5, and
+   building any concept by hand.
 6. UI: timestamp chip, silence trim default, other-moments list, zoom
    editor, "Ask the editor".
 

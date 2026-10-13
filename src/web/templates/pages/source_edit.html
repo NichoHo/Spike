@@ -83,7 +83,12 @@
 
         <div class="field">
           <label class="field__label">Default framing layout</label>
-          {{ ui.layout_picker('src-layout', source.layout if source and source.layout else 'split') }}
+          {{ ui.layout_picker('src-layout', source.layout if source and source.layout else 'split', source.letterbox_style if source and source.letterbox_style else 'title') }}
+          <script>
+            document.querySelectorAll('input[name="layout"]').forEach((r) => r.addEventListener('change', () => {
+              document.getElementById('src-layout-letterbox-opt').style.display = r.value === 'letterbox' ? '' : 'none';
+            }));
+          </script>
         </div>
 
         <div class="field">

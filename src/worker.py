@@ -90,6 +90,7 @@ def run_worker_cycle() -> bool:
                 "default_music_mood": src_dict.get("default_music_mood", "chill"),
                 "silence_trim": bool(src_dict.get("silence_trim", False)),
                 "punch_in_zoom": bool(src_dict.get("punch_in_zoom", True)),
+                "letterbox_style": src_dict.get("letterbox_style") or "title",
                 "style_notes": src_dict.get("style_notes"),
                 "language": src_dict.get("language"),
                 "chat_offset_s": src_dict.get("chat_offset_s", 12.0),

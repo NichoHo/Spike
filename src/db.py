@@ -208,7 +208,8 @@ def init_db():
             "ALTER TABLE videos ADD COLUMN settings TEXT",  # JSON processing options chosen at submit
             "ALTER TABLE clips ADD COLUMN show_hook INTEGER DEFAULT 0",  # hook title burned into the video
             "ALTER TABLE clips ADD COLUMN layout_changes TEXT",  # JSON [{t, layout}] mid-clip layout switches
-            "ALTER TABLE clips ADD COLUMN letterbox_style TEXT DEFAULT 'blur'",  # "title" (white bars + title) or "blur"
+            "ALTER TABLE clips ADD COLUMN letterbox_style TEXT DEFAULT 'blur'",
+            "ALTER TABLE sources ADD COLUMN letterbox_style TEXT DEFAULT 'title'",  # "title" (white bars + title) or "blur"
         ]
         for stmt in migration_statements:
             try:
@@ -652,8 +653,8 @@ def create_source(data: Dict[str, Any]) -> int:
                 kind, external_id, display_name, permission, permission_note,
                 auto_process, style_notes, language, layout, facecam_box,
                 caption_style, caption_y, music, default_music_mood,
-                silence_trim, punch_in_zoom, chat_offset_s, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                silence_trim, punch_in_zoom, chat_offset_s, letterbox_style, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(kind, external_id) DO UPDATE SET
                 display_name = excluded.display_name,
                 permission = excluded.permission,
@@ -669,7 +670,8 @@ def create_source(data: Dict[str, Any]) -> int:
                 default_music_mood = excluded.default_music_mood,
                 silence_trim = excluded.silence_trim,
                 punch_in_zoom = excluded.punch_in_zoom,
-                chat_offset_s = excluded.chat_offset_s
+                chat_offset_s = excluded.chat_offset_s,
+                letterbox_style = excluded.letterbox_style
             RETURNING id
             """,
             (
@@ -690,6 +692,7 @@ def create_source(data: Dict[str, Any]) -> int:
                 1 if data.get("silence_trim") else 0,
                 1 if data.get("punch_in_zoom", 1) else 0,
                 data.get("chat_offset_s", 12.0),
+                data.get("letterbox_style", "title"),
                 now
             )
         )
@@ -705,7 +708,7 @@ def update_source(source_id: int, data: Dict[str, Any]) -> bool:
                 auto_process = ?, style_notes = ?, language = ?, layout = ?,
                 facecam_box = ?, caption_style = ?, caption_y = ?, music = ?,
                 default_music_mood = ?, silence_trim = ?, punch_in_zoom = ?,
-                chat_offset_s = ?
+                chat_offset_s = ?, letterbox_style = ?
             WHERE id = ?
             """,
             (
@@ -724,6 +727,7 @@ def update_source(source_id: int, data: Dict[str, Any]) -> bool:
                 1 if data.get("silence_trim") else 0,
                 1 if data.get("punch_in_zoom", 1) else 0,
                 data.get("chat_offset_s", 12.0),
+                data.get("letterbox_style", "title"),
                 source_id
             )
         )

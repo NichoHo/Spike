@@ -210,6 +210,7 @@ async def create_source_action(
     default_music_mood: str = Form("chill"),
     silence_trim: bool = Form(False),
     punch_in_zoom: bool = Form(True),
+    letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     style_notes: str = Form(""),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -225,6 +226,7 @@ async def create_source_action(
         "default_music_mood": default_music_mood,
         "silence_trim": 1 if silence_trim else 0,
         "punch_in_zoom": 1 if punch_in_zoom else 0,
+        "letterbox_style": "title" if letterbox_style == "title" else "blur",
         "style_notes": style_notes.strip(),
     }
     create_source(data)
@@ -270,6 +272,7 @@ async def update_source_action(
     default_music_mood: str = Form("chill"),
     silence_trim: bool = Form(False),
     punch_in_zoom: bool = Form(True),
+    letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     style_notes: str = Form(""),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -288,6 +291,7 @@ async def update_source_action(
         "default_music_mood": default_music_mood,
         "silence_trim": 1 if silence_trim else 0,
         "punch_in_zoom": 1 if punch_in_zoom else 0,
+        "letterbox_style": "title" if letterbox_style == "title" else "blur",
         "style_notes": style_notes.strip(),
     }
     update_source(source_id, data)
