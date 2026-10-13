@@ -10,6 +10,7 @@ import traceback
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from src.cleanup import cleanup_after_pipeline
 from src.config import VIDEOS_DIR
 from src.db import (
     init_db,
@@ -61,7 +62,7 @@ def run_pipeline(
         update_video_stage(video_id, "fetch_audio", status="running")
         audio_path = run_stage2_audio(video_dir, meta)
 
-        # Stage 3: fetch_chat (Twitch only, skipped for YouTube/uploads)
+        # Stage 3: fetch_chat (Twitch VODs and finished YouTube streams; skipped for uploads)
         update_video_stage(video_id, "fetch_chat", status="running")
         chat_override = Path(source_settings["chat_file"]) if source_settings and source_settings.get("chat_file") else None
         chat_data = run_stage3_chat(video_dir, meta, source_input, chat_file_override=chat_override)
@@ -87,6 +88,7 @@ def run_pipeline(
         if not candidates:
             print("  [pipeline] No candidate moments met selection criteria.")
             finish_video(video_id, status="ready")
+            cleanup_after_pipeline(video_dir, meta, [])
             return {"video_id": video_id, "candidates": []}
 
         # Stage 8: fetch_sections
@@ -124,6 +126,7 @@ def run_pipeline(
 
         # Finished!
         finish_video(video_id, status="ready")
+        cleanup_after_pipeline(video_dir, meta, candidates)
 
         # Stage 10: notify via Discord webhook
         send_job_ready_notification(video_id)

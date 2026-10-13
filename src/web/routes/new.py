@@ -4,6 +4,7 @@ Blueprint §10.4, §8 (Security T2: upload verification & URL whitelist).
 """
 
 import os
+import time
 import uuid
 import subprocess
 from urllib.parse import urlparse
@@ -12,7 +13,7 @@ from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Request, Depends, Form, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
-from starlette.status import HTTP_400_BAD_REQUEST, HTTP_303_SEE_OTHER
+from starlette.status import HTTP_400_BAD_REQUEST, HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
 from src.config import (
     UPLOADS_DIR,
@@ -25,6 +26,7 @@ from src.config import (
 from src.db import (
     register_video,
     list_sources,
+    get_source,
     list_review_clips,
     log_event,
 )
@@ -54,7 +56,7 @@ def _verify_video_file(file_path: Path) -> bool:
 @router.get("/new", response_class=HTMLResponse)
 async def new_job_page(
     request: Request,
-    tab: str = "upload",
+    tab: str = "streamer",
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     templates = request.app.state.templates
@@ -76,6 +78,33 @@ async def new_job_page(
     )
 
 
+_VOD_TTL = 300
+_vod_cache: Dict[int, tuple] = {}
+
+
+@router.get("/new/vods")
+def recent_vods(
+    source_id: int,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Recent videos for a source, used to autofill the VOD field."""
+    src = get_source(source_id)
+    if not src:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Source not found.")
+
+    hit = _vod_cache.get(source_id)
+    if hit and hit[0] > time.time():
+        return {"results": hit[1]}
+
+    from src.watcher import fetch_youtube_channel_rss, fetch_twitch_latest_vods  # lazy: pulls in yt_dlp
+
+    fetch = fetch_youtube_channel_rss if src["kind"] == "youtube" else fetch_twitch_latest_vods
+    results = fetch(src["external_id"])[:10]
+    if results:  # don't cache a failed/empty fetch
+        _vod_cache[source_id] = (time.time() + _VOD_TTL, results)
+    return {"results": results}
+
+
 @router.post("/new/submit")
 async def submit_new_job(
     request: Request,
@@ -83,30 +112,35 @@ async def submit_new_job(
     url: Optional[str] = Form(None),
     source_id: Optional[int] = Form(None),
     vod_url: Optional[str] = Form(None),
-    target_clips: int = Form(3),
+    target_clips: str = Form(""),  # blank = auto (stage 6 scales it with video length)
     layout: str = Form("auto"),
     captions: str = Form("on"),
     music: str = Form("auto"),
     cut_pauses: str = Form("auto"),
+    letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     file: Optional[UploadFile] = File(None),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
     if (
-        layout not in VALID_LAYOUTS
+        not (target_clips.strip() == "" or target_clips.strip().isdigit())
+        or layout not in VALID_LAYOUTS
         or captions not in ("on", "off")
         or music not in ("auto", "on", "off")
         or cut_pauses not in ("auto", "tight", "natural", "off")
+        or letterbox_style not in ("title", "blur")
     ):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid processing option.")
     settings = {
-        "target_clips": max(1, min(MAX_TARGET_CLIPS, target_clips)),
         "layout": layout,
         "captions": captions == "on",
         "music": "auto" if music == "auto" else music == "on",
         "cut_pauses": cut_pauses,
+        "letterbox_style": letterbox_style,
     }
+    if target_clips.strip():
+        settings["target_clips"] = max(1, min(MAX_TARGET_CLIPS, int(target_clips)))
 
     if tab == "upload":
         if not file or not file.filename:

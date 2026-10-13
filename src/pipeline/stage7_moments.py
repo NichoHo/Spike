@@ -99,6 +99,11 @@ def build_annotated_lines(
     signals = np.load(signals_npz_path) if signals_npz_path.exists() else {}
     laugh = signals.get("laugh", np.zeros(1))
     shout = signals.get("shout", np.zeros(1))
+    jump = signals.get("voice_jump", np.zeros(1))
+    # Per-video top-2% thresholds saved by stage 6 (§6.7); old runs fall back to fixed values
+    laugh_thr = float(signals["laugh_thr"]) if "laugh_thr" in signals else 0.25
+    shout_thr = float(signals["shout_thr"]) if "shout_thr" in signals else 0.30
+    jump_thr = float(signals["jump_thr"]) if "jump_thr" in signals else float("inf")
 
     window_segs = [s for s in segments if s.get("end", 0) >= start_t and s.get("start", 0) <= end_t]
 
@@ -115,11 +120,13 @@ def build_annotated_lines(
         sec_e = min(len(laugh), int(seg_end) + 1)
         tags = []
 
-        if sec_s < len(laugh) and np.max(laugh[sec_s:sec_e]) > 0.25:
+        if sec_s < len(laugh) and np.max(laugh[sec_s:sec_e]) >= laugh_thr and laugh_thr > 0:
             dur = max(0.5, seg_end - seg_start)
             tags.append(f"[laughter {dur:.1f}s]")
-        if sec_s < len(shout) and np.max(shout[sec_s:sec_e]) > 0.30:
+        if sec_s < len(shout) and np.max(shout[sec_s:sec_e]) >= shout_thr:
             tags.append("[shouting]")
+        if sec_s < len(jump) and np.max(jump[sec_s:sec_e]) >= jump_thr:
+            tags.append("[voice jump]")
 
         # Check for stretched word (> 1.5s)
         for w in seg.get("words", []):
@@ -146,47 +153,52 @@ def build_annotated_lines(
 
 def propose_transcript_chunks(
     transcript: Dict[str, Any],
-    video_duration: float
+    video_duration: float,
+    signals_npz_path: Optional[Path] = None,
+    meta: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Propose candidate moments by scanning 8-minute chunks with 1-min overlap (Blueprint §6.2)."""
+    """Propose candidate moments by scanning 5-minute chunks with 1-minute overlap (§6.7).
+    Each chunk is sent whole, with the same audio markers the judge sees."""
     client = get_gemini_client()
     segments = transcript.get("segments", [])
     if not segments:
         return []
 
-    chunk_len = 8 * 60  # 480 s
-    overlap = 60        # 60 s
+    meta = meta or {}
+    streamer = meta.get("uploader") or "the streamer"
+    title = meta.get("title") or ""
+    chunk_len = 5 * 60
+    overlap = 60
     proposals = []
 
     curr_start = 0.0
     while curr_start < video_duration:
         curr_end = min(video_duration, curr_start + chunk_len)
-        chunk_segs = [s for s in segments if s.get("end", 0) >= curr_start and s.get("start", 0) <= curr_end]
-        if not chunk_segs or len(chunk_segs) < 5:
+        lines, line_meta = build_annotated_lines(
+            segments, curr_start, curr_end, signals_npz_path or Path("missing.npz")
+        )
+        if len(lines) < 5:
             curr_start += (chunk_len - overlap)
             continue
 
-        text_preview = "\n".join(
-            f"[{format_timestamp(s.get('start', 0))}] {s.get('text', '')}"
-            for s in chunk_segs[:80]
-        )
-
-        prompt = f"""You are analyzing a video transcript chunk from {format_timestamp(curr_start)} to {format_timestamp(curr_end)}.
-Propose up to 3 candidate entertaining or funny moments that could make viral standalone short clips (15 to 50 seconds long).
+        prompt = f"""You are analyzing a transcript chunk from {format_timestamp(curr_start)} to {format_timestamp(curr_end)} of a stream by {streamer}. Stream title: {title}
+Propose up to 5 candidate entertaining or funny moments that could make standalone short clips ({int(MIN_CLIP_DURATION_S)} to {int(MAX_CLIP_DURATION_S)} seconds long).
+Moment types to look for: rage after a loss or a conceded goal, bragging then failing, confusion at chat, roasts, language bits, absurd claims.
+Lines carry markers: [laughter], [shouting], [voice jump] (sudden loud burst).
 Return a JSON object with this exact structure:
 {{
   "moments": [
     {{
       "start_time_s": 120.0,
       "end_time_s": 155.0,
-      "topic": "Streamer raging at game bug"
+      "topic": "{streamer} rages at game bug"
     }}
   ]
 }}
 
 Transcript:
 <untrusted_transcript>
-{text_preview}
+{chr(10).join(lines)}
 </untrusted_transcript>
 """
         try:
@@ -347,6 +359,7 @@ Editing choices for the vertical cut:
   like a viewer describing it to a friend. Name who or what it is about.
   Good: "Josh Allen flops like a soccer player", "He thinks the Lions defense is a scam".
   Bad: a quote from the transcript, the first sentence, or a vague "You won't believe this".
+  You may end it with one emoji that fits the moment (e.g. 😭, 💀, 🤣), or none.
 - music_track: when music is true, the id (first column) of the catalogue track whose feel fits
   the clip's tone: sneaky/awkward moments get mysterious pizzicato, rage or hype gets driving
   tracks, wholesome moments get bright ones. Empty when music is false.
@@ -582,8 +595,8 @@ def run_stage7_moments(
 
     print(f"  [stage 7] Evaluating moments: {len(signal_peaks)} signal peaks (has_chat={has_chat})...")
 
-    # Propose transcript chunks for uploads / non-stream videos (§6.2)
-    chunk_props = propose_transcript_chunks(transcript, duration_s)
+    # Chunk proposals run on every source, chat or not (§6.7)
+    chunk_props = propose_transcript_chunks(transcript, duration_s, video_dir / "signals.npz", meta)
     all_candidates = merge_candidate_sources(signal_peaks, chunk_props)
     print(f"  [stage 7] Total candidate pool: {len(all_candidates)} ({len(chunk_props)} from transcript chunks).")
 

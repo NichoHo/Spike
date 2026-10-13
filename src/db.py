@@ -207,6 +207,8 @@ def init_db():
             "ALTER TABLE clips ADD COLUMN punch_in_zoom INTEGER DEFAULT 1",
             "ALTER TABLE videos ADD COLUMN settings TEXT",  # JSON processing options chosen at submit
             "ALTER TABLE clips ADD COLUMN show_hook INTEGER DEFAULT 0",  # hook title burned into the video
+            "ALTER TABLE clips ADD COLUMN layout_changes TEXT",  # JSON [{t, layout}] mid-clip layout switches
+            "ALTER TABLE clips ADD COLUMN letterbox_style TEXT DEFAULT 'blur'",  # "title" (white bars + title) or "blur"
         ]
         for stmt in migration_statements:
             try:
@@ -466,6 +468,7 @@ def create_or_update_clip(
     punch_in_zoom: int = 1,
     status: str = "ready",
     show_hook: int = 0,
+    letterbox_style: str = "title",
 ) -> int:
     """Insert or update a clip for a candidate."""
     now = now_utc_iso()
@@ -481,12 +484,12 @@ def create_or_update_clip(
                 UPDATE clips
                 SET version = ?, layout = ?, caption_style = ?, trim_start_s = ?, trim_end_s = ?,
                     music_track = ?, silence_trim = ?, punch_in_zoom = ?, show_hook = ?,
-                    file_path = ?, thumb_path = ?, status = ?
+                    letterbox_style = ?, file_path = ?, thumb_path = ?, status = ?
                 WHERE id = ?
                 """,
                 (
                     new_version, layout, caption_style, trim_start_s, trim_end_s,
-                    music_track, silence_trim, punch_in_zoom, show_hook,
+                    music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
                     file_path, thumb_path, status, clip_id
                 )
             )
@@ -496,14 +499,14 @@ def create_or_update_clip(
                 """
                 INSERT INTO clips (
                     candidate_id, version, layout, caption_style, trim_start_s, trim_end_s,
-                    music_track, silence_trim, punch_in_zoom, show_hook,
+                    music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
                     file_path, thumb_path, status, created_at
-                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
                     candidate_id, layout, caption_style, trim_start_s, trim_end_s,
-                    music_track, silence_trim, punch_in_zoom, show_hook,
+                    music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
                     file_path, thumb_path, status, now
                 )
             )
@@ -582,6 +585,11 @@ def set_clip_render_state(clip_id: int, status: str) -> bool:
     """Flip only clips.status (rendering marker / restore); leaves review fields alone."""
     with get_connection() as conn:
         return conn.execute("UPDATE clips SET status = ? WHERE id = ?", (status, clip_id)).rowcount > 0
+
+
+def set_clip_layout_changes(clip_id: int, layout_changes_json: Optional[str]) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE clips SET layout_changes = ? WHERE id = ?", (layout_changes_json, clip_id))
 
 
 def reset_stuck_renders() -> int:

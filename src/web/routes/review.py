@@ -3,6 +3,7 @@ Spike: Review routes.
 Blueprint §10.1 & DESIGN.md §10.1.
 """
 
+import json
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse
@@ -107,6 +108,20 @@ async def clip_detail(
     caption = clip.get("cand_caption") or clip.get("cand_title") or ""
     credit = music_credit(clip.get("music_track"))
 
+    # Pause cuts in the current render, so the page can map player time <-> source time
+    # for layout switches. ponytail: assumes "natural" pacing; a first render made with
+    # "tight" maps a little off until it is re-rendered from this page.
+    from src.config import VIDEOS_DIR
+    from src.pipeline.stage9c_render import find_silence_cut_intervals
+    from src.web.routes.clips import _load_words
+    clip_start = clip.get("trim_start_s") or clip.get("orig_start_s") or 0
+    clip_end = clip.get("trim_end_s") or clip.get("orig_end_s") or 0
+    cuts = []
+    if clip.get("silence_trim") == 1:
+        words = _load_words(VIDEOS_DIR / str(clip["video_id"]), clip["candidate_id"])
+        cuts = find_silence_cut_intervals(words, clip_start, clip_end)
+    layout_changes = json.loads(clip.get("layout_changes") or "[]")
+
     return templates.TemplateResponse(
         request=request,
         name="pages/clip_detail.html",
@@ -118,6 +133,8 @@ async def clip_detail(
             "clip": clip,
             "music_tracks": music_tracks,
             "copy_caption": f"{caption}\n\n{credit}" if credit else caption,
+            "layout_changes": layout_changes,
+            "cut_intervals": cuts,
             "prev_clip_id": prev_id,
             "next_clip_id": next_id,
             "review_count": len(all_clips),

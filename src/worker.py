@@ -21,6 +21,7 @@ from src.db import (
     log_event,
     update_video_stage,
 )
+from src.cleanup import sweep_old_sections
 from src.pipeline.runner import run_pipeline
 
 # ponytail: One worker, one job at a time. A second worker needs a row-level
@@ -137,6 +138,7 @@ def start_worker(poll_interval_s: float = 5.0):
     print(f"[worker] Spike background worker running (PID {os.getpid()}). Press Ctrl+C to stop.")
 
     last_scheduler_check = 0.0
+    last_sweep = 0.0
     while _RUNNING:
         try:
             now_ts = time.time()
@@ -149,6 +151,10 @@ def start_worker(poll_interval_s: float = 5.0):
                 except Exception as sc_err:
                     print(f"[worker] Scheduler cycle error: {sc_err}")
                 last_scheduler_check = now_ts
+
+            if now_ts - last_sweep >= 3600.0:
+                sweep_old_sections()
+                last_sweep = now_ts
 
             processed = run_worker_cycle()
             if not processed:

@@ -59,6 +59,7 @@ def run_stage5_transcribe(video_dir: Path, audio_path: Path, model_size: str = D
         str(audio_path),
         vad_filter=True,
         word_timestamps=True,
+        multilingual=True,
     )
 
     segments_out = []

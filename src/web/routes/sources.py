@@ -3,7 +3,13 @@ Spike: Sources management routes.
 Blueprint §10.3, §10.5, §10.6 & DESIGN.md §10.5, §10.6.
 """
 
-from typing import Dict, Any
+import json
+import re
+import time
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, Any, List
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
@@ -16,10 +22,134 @@ from src.db import (
     delete_source,
     list_review_clips,
 )
+from src.config import YOUTUBE_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
 from src.web.auth import get_current_user
 
 
 router = APIRouter()
+
+_YT_ID_RE = re.compile(r"^UC[\w-]{22}$")
+_LOOKUP_TTL = 600
+# ponytail: in-process cache; YouTube search costs 100 quota units of 10k/day
+_lookup_cache: Dict[tuple, tuple] = {}
+_twitch_token = {"value": "", "expires": 0.0}
+
+
+def _get_json(url: str, headers: Dict[str, str] = None, data: bytes = None) -> Dict[str, Any]:
+    req = urllib.request.Request(url, data=data, headers={"User-Agent": "Mozilla/5.0", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return json.loads(r.read().decode())
+
+
+def _youtube_lookup(q: str) -> List[Dict[str, str]]:
+    def call(endpoint: str, **params) -> Dict[str, Any]:
+        params["key"] = YOUTUBE_API_KEY
+        return _get_json(f"https://www.googleapis.com/youtube/v3/{endpoint}?{urllib.parse.urlencode(params)}")
+
+    def row(channel_id: str, sn: Dict[str, Any]) -> Dict[str, str]:
+        return {
+            "id": channel_id,
+            "name": sn.get("title") or sn.get("channelTitle", ""),
+            "sub": sn.get("customUrl", ""),
+            "thumb": (sn.get("thumbnails", {}).get("default") or {}).get("url", ""),
+        }
+
+    def with_stats(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        # search.list has no statistics; one batched channels.list (1 unit) adds them
+        if rows:
+            items = call("channels", part="statistics", id=",".join(r["id"] for r in rows), maxResults=len(rows)).get("items", [])
+            stats = {it["id"]: it.get("statistics", {}) for it in items}
+            for r in rows:
+                st = stats.get(r["id"], {})
+                if not st.get("hiddenSubscriberCount") and "subscriberCount" in st:
+                    r["followers"] = int(st["subscriberCount"])
+        return rows
+
+    if _YT_ID_RE.match(q):
+        return with_stats([row(it["id"], it["snippet"]) for it in call("channels", part="snippet", id=q).get("items", [])])
+
+    out: List[Dict[str, str]] = []
+    if " " not in q:
+        handle = q if q.startswith("@") else "@" + q
+        out = [row(it["id"], it["snippet"]) for it in call("channels", part="snippet", forHandle=handle).get("items", [])]
+    found = call("search", part="snippet", type="channel", q=q, maxResults=5).get("items", [])
+    seen = {r["id"] for r in out}
+    for it in found:
+        cid = it["snippet"]["channelId"]
+        if cid not in seen:
+            out.append(row(cid, it["snippet"]))
+            seen.add(cid)
+    return with_stats(out)
+
+
+def _twitch_lookup(q: str) -> List[Dict[str, str]]:
+    if _twitch_token["expires"] < time.time():
+        tok = _get_json(
+            "https://id.twitch.tv/oauth2/token",
+            data=urllib.parse.urlencode({
+                "client_id": TWITCH_CLIENT_ID,
+                "client_secret": TWITCH_CLIENT_SECRET,
+                "grant_type": "client_credentials",
+            }).encode(),
+        )
+        _twitch_token.update(value=tok["access_token"], expires=time.time() + tok.get("expires_in", 3600) - 60)
+    headers = {"Client-ID": TWITCH_CLIENT_ID, "Authorization": f"Bearer {_twitch_token['value']}"}
+    login = q.lstrip("@")
+    base = "https://api.twitch.tv/helix"
+    # external_id for Twitch is the login name (the watcher builds twitch.tv/<login> URLs).
+    # Helix search ranks poorly for exact names, so look the exact login up first.
+    exact = _get_json(f"{base}/users?{urllib.parse.urlencode({'login': login})}", headers=headers).get("data", [])
+    found = _get_json(f"{base}/search/channels?{urllib.parse.urlencode({'query': login, 'first': 5})}", headers=headers).get("data", [])
+    out = [
+        {"id": u["login"], "bid": u["id"], "name": u["display_name"], "sub": f"twitch.tv/{u['login']}", "thumb": u.get("profile_image_url", "")}
+        for u in exact
+    ]
+    seen = {r["id"] for r in out}
+    out += [
+        {"id": it["broadcaster_login"], "bid": it["id"], "name": it["display_name"], "sub": f"twitch.tv/{it['broadcaster_login']}", "thumb": it.get("thumbnail_url", "")}
+        for it in found
+        if it["broadcaster_login"] not in seen
+    ]
+
+    def followers(r: Dict[str, str]) -> None:
+        try:
+            r["followers"] = _get_json(f"{base}/channels/followers?broadcaster_id={r['bid']}&first=1", headers=headers)["total"]
+        except Exception:
+            pass  # count is cosmetic; keep the result without it
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        list(pool.map(followers, out))
+    for r in out:
+        del r["bid"]
+    return out
+
+
+@router.get("/sources/lookup")
+def lookup_channel(
+    kind: str,
+    q: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Autocomplete: name, handle, or channel ID -> matching channels."""
+    q = q.strip()
+    if kind not in ("youtube", "twitch") or not 2 <= len(q) <= 100:
+        return {"results": []}
+    if kind == "youtube" and not YOUTUBE_API_KEY:
+        return {"results": [], "error": "YOUTUBE_API_KEY is not set."}
+    if kind == "twitch" and not (TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET):
+        return {"results": [], "error": "Twitch credentials are not set."}
+
+    key = (kind, q.lower())
+    hit = _lookup_cache.get(key)
+    if hit and hit[0] > time.time():
+        return {"results": hit[1]}
+    try:
+        results = _youtube_lookup(q) if kind == "youtube" else _twitch_lookup(q)
+    except Exception as e:
+        print(f"  [sources] lookup failed ({kind}, {q!r}): {e}")
+        return {"results": [], "error": "Lookup failed. Enter the ID manually."}
+    _lookup_cache[key] = (time.time() + _LOOKUP_TTL, results)
+    return {"results": results}
 
 
 @router.get("/sources", response_class=HTMLResponse)
@@ -72,8 +202,7 @@ async def create_source_action(
     kind: str = Form("twitch"),
     external_id: str = Form(...),
     display_name: str = Form(...),
-    permission: str = Form("none"),
-    permission_note: str = Form(""),
+    permission: str = Form("review"),
     auto_process: bool = Form(False),
     layout: str = Form("split"),
     caption_style: str = Form("bold_pop"),
@@ -89,7 +218,6 @@ async def create_source_action(
         "external_id": external_id.strip(),
         "display_name": display_name.strip(),
         "permission": permission,
-        "permission_note": permission_note.strip(),
         "auto_process": auto_process,
         "layout": layout,
         "caption_style": caption_style,
@@ -134,8 +262,7 @@ async def edit_source_form(
 async def update_source_action(
     source_id: int,
     display_name: str = Form(...),
-    permission: str = Form("none"),
-    permission_note: str = Form(""),
+    permission: str = Form("review"),
     auto_process: bool = Form(False),
     layout: str = Form("split"),
     caption_style: str = Form("bold_pop"),
@@ -153,7 +280,7 @@ async def update_source_action(
     data = {
         "display_name": display_name.strip(),
         "permission": permission,
-        "permission_note": permission_note.strip(),
+        "permission_note": src_row["permission_note"],  # field removed from the form; keep any saved note
         "auto_process": auto_process,
         "layout": layout,
         "caption_style": caption_style,

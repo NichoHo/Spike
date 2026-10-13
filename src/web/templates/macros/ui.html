@@ -69,14 +69,10 @@
       <span class="badge">{{ value }}</span>
     {%- endif -%}
   {%- elif entity == "permission" -%}
-    {%- if value == "own" -%}
-      <span class="badge">Own channel</span>
-    {%- elif value == "written" -%}
-      <span class="badge">Written permission</span>
-    {%- elif value == "program" -%}
-      <span class="badge">Clipping program</span>
+    {%- if value in ("own", "written", "program") -%}
+      <span class="badge">No review needed</span>
     {%- else -%}
-      <span class="badge badge--warning">Review only</span>
+      <span class="badge badge--warning">Needs review</span>
     {%- endif -%}
   {%- endif -%}
 {%- endmacro %}
@@ -137,12 +133,13 @@
 {%- endmacro %}
 
 {# Radio card pickers with a visual preview. `current` is the selected value. #}
-{% macro layout_picker(prefix, current) -%}
+{# letterbox_style: pass "title" or "blur" to show the letterbox style toggle under the picker. #}
+{% macro layout_picker(prefix, current, letterbox_style=none) -%}
   {%- set layouts = [
     ("split", "Split", "Streamer on top, game below."),
     ("face_track", "Face track", "Tall crop that follows the face."),
     ("center", "Center", "Tall crop from the middle."),
-    ("letterbox", "Letterbox", "Wide frame, blurred fill."),
+    ("letterbox", "Letterbox", "Whole wide frame, bars above and below."),
   ] -%}
   <div class="layout-picker">
     {%- for value, name, desc in layouts %}
@@ -160,6 +157,12 @@
       </label>
     {%- endfor %}
   </div>
+  {%- if letterbox_style is not none %}
+  <label class="switch-row" id="{{ prefix }}-letterbox-opt" style="margin-top: var(--space-3);{% if current != 'letterbox' %} display: none;{% endif %}">
+    <input type="checkbox" name="letterbox_style" class="switch" role="switch" value="title" {% if letterbox_style == 'title' %}checked{% endif %}>
+    <span>Letterbox: white bars with the hook title on top. Off: blurred fill.</span>
+  </label>
+  {%- endif %}
 {%- endmacro %}
 
 {% macro caption_picker(prefix, current) -%}

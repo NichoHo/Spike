@@ -1,8 +1,9 @@
 """
 Stage 3: fetch_chat
 Blueprint §5:
-Twitch only. Download chat replay JSON using TwitchDownloaderCLI.
-Skipped for other sources.
+Twitch: download chat replay JSON using TwitchDownloaderCLI.
+YouTube: download the live chat replay of a finished stream via yt-dlp, converted to the Twitch shape.
+Skipped for other sources, and for YouTube uploads with no live chat.
 Output: data/videos/<id>/chat.json
 """
 
@@ -11,12 +12,90 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Iterable, List
+
+import yt_dlp
 
 from src.config import TWITCH_DOWNLOADER_PATH
 
 
 TWITCH_VOD_RE = re.compile(r'(?:twitch\.tv/videos/|/v/)(\d+)')
+YOUTUBE_RE = re.compile(r'(?:youtube\.com|youtu\.be)/')
+
+
+def convert_youtube_live_chat(lines: Iterable[str]) -> List[Dict[str, Any]]:
+    """Convert yt-dlp .live_chat.json lines into the TwitchDownloaderCLI comment shape stage 6/7 read."""
+    comments = []
+    for line in lines:
+        if not line.strip():
+            continue
+        replay = json.loads(line).get("replayChatItemAction", {})
+        offset_ms = replay.get("videoOffsetTimeMsec")
+        if offset_ms is None:
+            continue
+        for action in replay.get("actions", []):
+            msg = action.get("addChatItemAction", {}).get("item", {}).get("liveChatTextMessageRenderer")
+            if not msg:
+                continue
+            parts = []
+            for run in msg.get("message", {}).get("runs", []):
+                if "text" in run:
+                    parts.append(run["text"])
+                elif "emoji" in run:
+                    emoji = run["emoji"]
+                    # Standard emoji ids are the character itself, so "😂" matches the token lists.
+                    token = (emoji.get("shortcuts") or [""])[0] if emoji.get("isCustomEmoji") else emoji.get("emojiId", "")
+                    parts.append(f" {token} ")
+            body = " ".join("".join(parts).split())
+            if not body:
+                continue
+            comments.append({
+                "content_offset_seconds": int(offset_ms) / 1000.0,
+                "commenter": {"display_name": msg.get("authorName", {}).get("simpleText", "")},
+                "message": {"body": body},
+            })
+    return comments
+
+
+def fetch_youtube_live_chat(video_dir: Path, url: str, chat_path: Path) -> Optional[Dict[str, Any]]:
+    """Download a finished stream's chat replay. None for uploads, chat-disabled streams, or errors."""
+    print("  [stage 3] Checking for YouTube live chat replay via yt-dlp...")
+    ydl_opts = {
+        "skip_download": True,
+        "writesubtitles": True,
+        "subtitleslangs": ["live_chat"],
+        "outtmpl": str(video_dir / "yt_chat.%(ext)s"),
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+    }
+    raw_path = video_dir / "yt_chat.live_chat.json"
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True) or {}
+        if not raw_path.exists():
+            why = ("was a live stream, so the creator likely disabled the chat replay"
+                   if info.get("was_live") else "is a regular upload with no live chat")
+            print(f"  [stage 3] No live chat replay offered by YouTube (video {why}; "
+                  f"subtitle tracks: {sorted((info.get('subtitles') or {}).keys())}); skipping chat.")
+            return None
+        with open(raw_path, "r", encoding="utf-8") as f:
+            comments = convert_youtube_live_chat(f)
+    except Exception as e:
+        print(f"  [stage 3] Warning: YouTube live chat fetch failed ({type(e).__name__}): {e}")
+        return None
+    finally:
+        # The raw replay is ~35 MB per busy hour; chat.json keeps only what later stages read.
+        raw_path.unlink(missing_ok=True)
+
+    if not comments:
+        print("  [stage 3] Live chat replay file had no text messages after conversion; skipping chat.")
+        return None
+    data = {"comments": comments}
+    with open(chat_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    print(f"  [stage 3] Downloaded {len(comments):,} YouTube chat messages.")
+    return data
 
 
 def extract_twitch_vod_id(source_str: str) -> Optional[str]:
@@ -66,6 +145,8 @@ def run_stage3_chat(
     vod_id = extract_twitch_vod_id(webpage_url) or extract_twitch_vod_id(source_input)
 
     if not vod_id:
+        if YOUTUBE_RE.search(webpage_url) and not meta.get("is_local"):
+            return fetch_youtube_live_chat(video_dir, webpage_url, chat_path)
         print("  [stage 3] Non-Twitch source; skipping chat fetch.")
         return None
 

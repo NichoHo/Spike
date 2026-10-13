@@ -299,3 +299,183 @@ window.toggleTheme = function() {
   root.setAttribute("data-theme", next);
   document.cookie = `spike_theme=${next};path=/;max-age=31536000;SameSite=Lax`;
 };
+
+// ── Source form: ID help toggle + channel lookup autocomplete ────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  const infoBtn = document.getElementById("ext-id-info-btn");
+  const infoPanel = document.getElementById("ext-id-info");
+  if (infoBtn && infoPanel) {
+    infoBtn.addEventListener("click", () => {
+      infoPanel.hidden = !infoPanel.hidden;
+      infoBtn.setAttribute("aria-expanded", String(!infoPanel.hidden));
+    });
+  }
+
+  const input = document.getElementById("field-ext-id");
+  const list = document.getElementById("ext-id-results");
+  if (!input || !list || !input.dataset.lookup) return;
+  const kind = document.getElementById("field-kind");
+  const nameInput = document.getElementById("field-name");
+  const status = document.getElementById("ext-id-status");
+  const idleText = status.textContent;
+  let timer = null;
+  let seq = 0;
+  let lastAutofill = nameInput.value;
+
+  const hide = () => { list.hidden = true; list.replaceChildren(); };
+  const countLabel = (n) =>
+    new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n) +
+    (kind.value === "youtube" ? " subscribers" : " followers");
+
+  function pick(r) {
+    input.value = r.id;
+    // Don't overwrite a display name the user typed themselves.
+    if (!nameInput.value || nameInput.value === lastAutofill) {
+      nameInput.value = r.name;
+      lastAutofill = r.name;
+    }
+    status.textContent = `Matched: ${r.name}${r.sub ? " (" + r.sub + ")" : ""}${r.followers != null ? ", " + countLabel(r.followers) : ""}`;
+    hide();
+  }
+
+  function render(results) {
+    list.replaceChildren();
+    results.forEach((r) => {
+      const li = document.createElement("li");
+      li.className = "lookup__item";
+      li.setAttribute("role", "option");
+      if (r.thumb) {
+        const img = document.createElement("img");
+        img.className = "lookup__thumb";
+        img.src = r.thumb;
+        img.alt = "";
+        li.appendChild(img);
+      }
+      const text = document.createElement("div");
+      text.className = "lookup__text";
+      const name = document.createElement("span");
+      name.className = "lookup__name";
+      name.textContent = r.name;
+      const sub = document.createElement("span");
+      sub.className = "lookup__sub";
+      sub.textContent = [r.sub, r.id].filter(Boolean).join(" · ");
+      text.append(name, sub);
+      li.appendChild(text);
+      if (r.followers != null) {
+        const count = document.createElement("span");
+        count.className = "lookup__count";
+        count.textContent = countLabel(r.followers);
+        li.appendChild(count);
+      }
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); pick(r); });
+      list.appendChild(li);
+    });
+    list.hidden = results.length === 0;
+  }
+
+  async function search() {
+    const q = input.value.trim();
+    if (q.length < 2) { hide(); status.textContent = idleText; return; }
+    const mine = ++seq;
+    status.textContent = "Searching...";
+    // A pasted YouTube channel ID can only be YouTube, whatever the dropdown says.
+    if (/^UC[\w-]{22}$/.test(q)) kind.value = "youtube";
+    try {
+      const res = await fetch(`${input.dataset.lookup}?kind=${encodeURIComponent(kind.value)}&q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (mine !== seq) return; // a newer keystroke superseded this request
+      if (data.error) { hide(); status.textContent = data.error; return; }
+      if (!data.results.length) { hide(); status.textContent = "No channel found. You can still save the value as typed."; return; }
+      // Exact ID/login typed or pasted: confirm it directly instead of listing.
+      const exact = data.results.find((r) => r.id.toLowerCase() === q.toLowerCase());
+      if (exact) { pick(exact); return; }
+      status.textContent = "Pick a result to fill the ID and display name.";
+      render(data.results);
+    } catch (e) {
+      if (mine === seq) { hide(); status.textContent = "Lookup failed. Enter the ID manually."; }
+    }
+  }
+
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(search, 400); });
+  kind.addEventListener("change", () => { if (input.value.trim()) search(); });
+  input.addEventListener("blur", hide);
+  input.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+});
+
+// ── New job (From streamer): "add source" shortcut + recent-VOD picker ───────
+document.addEventListener("DOMContentLoaded", () => {
+  const select = document.getElementById("field-source");
+  const input = document.getElementById("field-vod-url");
+  const list = document.getElementById("vod-results");
+  const status = document.getElementById("vod-status");
+  if (!select || !input || !list) return;
+
+  const idleText = status.textContent;
+  let vods = [];
+  let seq = 0;
+
+  const hide = () => { list.hidden = true; };
+
+  function render() {
+    const q = input.value.trim().toLowerCase();
+    const shown = vods.filter((v) => !q || v.title.toLowerCase().includes(q) || v.id.toLowerCase().includes(q));
+    list.replaceChildren();
+    shown.forEach((v) => {
+      const li = document.createElement("li");
+      li.className = "lookup__item";
+      li.setAttribute("role", "option");
+      const text = document.createElement("div");
+      text.className = "lookup__text";
+      const title = document.createElement("span");
+      title.className = "lookup__name";
+      title.textContent = v.title || v.id;
+      const sub = document.createElement("span");
+      sub.className = "lookup__sub";
+      sub.textContent = v.url;
+      text.append(title, sub);
+      li.appendChild(text);
+      li.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        input.value = v.url;
+        status.textContent = `Selected: ${v.title || v.id}`;
+        hide();
+      });
+      list.appendChild(li);
+    });
+    list.hidden = shown.length === 0;
+  }
+
+  async function loadVods() {
+    vods = [];
+    hide();
+    const id = select.value;
+    if (!id) { status.textContent = idleText; return; }
+    const mine = ++seq;
+    status.textContent = "Loading recent videos...";
+    try {
+      const res = await fetch(`/new/vods?source_id=${encodeURIComponent(id)}`);
+      const data = await res.json();
+      if (mine !== seq) return; // source changed while loading
+      vods = data.results || [];
+      status.textContent = vods.length
+        ? "Choose a recent video, or paste a link. Leave empty for the latest."
+        : "No recent videos found. You can still paste a link.";
+    } catch (e) {
+      if (mine === seq) status.textContent = "Couldn't load recent videos. You can still paste a link.";
+    }
+  }
+
+  select.addEventListener("change", () => {
+    if (select.value === "__new__") {
+      select.value = ""; // so Back doesn't leave the placeholder value selected
+      window.location.href = "/sources/new";
+      return;
+    }
+    loadVods();
+  });
+  input.addEventListener("focus", render);
+  input.addEventListener("input", render);
+  input.addEventListener("blur", hide);
+  input.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  if (select.value) loadVods();
+});

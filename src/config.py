@@ -58,21 +58,27 @@ MAX_VIDEO_DURATION_S = 12 * 3600  # 12 hours max
 MIN_CLIP_DURATION_S = 12.0        # seconds
 MAX_CLIP_DURATION_S = 60.0        # seconds
 DEFAULT_TARGET_CLIPS_PER_HOUR = 2
-MAX_TARGET_CLIPS = 10
+MAX_TARGET_CLIPS = 15
+# Days a clip may sit ready/approved before its section source (needed for re-renders) is deleted
+SECTION_RETENTION_DAYS = int(os.environ.get("SPIKE_SECTION_RETENTION_DAYS", "7"))
 
 # Signal Weights without chat (§6.1)
+# Quality v2 (§6.7): audio_loud is kept as a signal but replaced in the fusion by voice_jump
 WEIGHTS_WITHOUT_CHAT = {
-    "laugh": 0.30,
-    "replay_heat": 0.25,
-    "comment_heat": 0.15,
-    "audio_loud": 0.15,
-    "shout": 0.10,
+    "laugh": 0.20,
+    "voice_jump": 0.20,
+    "rage_words": 0.15,
+    "shout": 0.15,
+    "replay_heat": 0.15,
+    "comment_heat": 0.10,
     "speech_rate": 0.05,
 }
 
 # Signal Weights with chat (§6.1)
 WEIGHTS_WITH_CHAT = {
-    "chat_users": 0.20,
+    "chat_users": 0.10,
+    "voice_jump": 0.05,
+    "rage_words": 0.05,
     "chat_laugh": 0.20,
     "clip_heat": 0.20,
     "laugh": 0.15,
@@ -83,10 +89,19 @@ WEIGHTS_WITH_CHAT = {
     "speech_rate": 0.05,
 }
 
+# Rage and shock words counted per second by the rage_words signal (§6.7); per-source terms are added
+RAGE_WORDS = {
+    "no", "bro", "what", "how", "why", "fuck", "fucking", "shit", "ref", "wtf", "bruh",
+    "nah", "stop", "cheating", "scam", "rigged", "are you serious", "oh my god",
+}
+
+# A second counts as laughter/shouting/voice jump when it is in the VOD's top share (§6.7)
+RELATIVE_TOP_PCT = 2.0
+
 # Blend weights (§6.4)
 LLM_WEIGHT_WITHOUT_CHAT = 0.70
 LLM_WEIGHT_WITH_CHAT = 0.50
-MIN_RAW_LLM_SCORE = 50.0  # Floor to prevent dull VODs from passing
+MIN_RAW_LLM_SCORE = 65.0  # Floor to prevent dull VODs from passing
 AUTO_POST_MIN_LLM_SCORE = 70.0
 
 # ─── Phase 2: Vertical edit settings (Blueprint §7) ────────────────────────
@@ -152,6 +167,8 @@ TWITCH_DOWNLOADER_PATH = TOOLS_DIR / "TwitchDownloaderCLI.exe"
 CHAT_BOT_NAMES = {
     "nightbot", "streamelements", "moobot", "fossabot",
     "soundalerts", "streamlabs", "wizebot", "stay_hydrated_bot",
+    # YouTube chat display names keep the "@" handle prefix
+    "@nightbot", "@streamelements", "@moobot", "@fossabot", "@streamlabs",
 }
 
 # Chat token dictionaries (§6.1)
@@ -159,6 +176,7 @@ CHAT_LAUGH_TOKENS = {
     "lul", "lulw", "kekw", "kekl", "omegalul", "icant", "pepelaugh",
     "lol", "lmao", "lmfao", "xd", "💀", "😂", "jaja", "kkkk", "rsrs",
     "555", "ㅋㅋㅋ", "www", "wkwk", "rofl", "dead",
+    "🤣", ":face-with-tears-of-joy:", ":rolling-on-the-floor-laughing:",
 }
 
 CHAT_HYPE_TOKENS = {

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # ASS style presets (Blueprint §7.2). All use Alignment 5 (centre) and are placed with \pos,
 # so the style's MarginV is unused.
@@ -166,7 +166,7 @@ def generate_ass(
     clip_end_s: float,
     style: str = "bold_pop",
     profanity_mask: bool = True,
-    caption_y_fraction: float = 0.68,
+    caption_y_fraction: "float | Callable[[float], float]" = 0.68,
     words_per_line: int = 3,
     hook_text: str = "",
     hook_duration_s: float = 2.5,
@@ -180,7 +180,8 @@ def generate_ass(
         clip_end_s: Clip end time in the original video seconds
         style: One of 'bold_pop', 'clean', 'karaoke'
         profanity_mask: If True, apply profanity masking
-        caption_y_fraction: Vertical centre of the caption line as a fraction of frame height
+        caption_y_fraction: Vertical centre of the caption line as a fraction of frame height,
+            or a function of seconds into the clip (layout switches move the captions)
         words_per_line: Max words per subtitle line
         hook_text: Optional title shown for the first hook_duration_s seconds at top (manual edits only)
         hook_duration_s: Duration in seconds for hook text overlay
@@ -193,7 +194,7 @@ def generate_ass(
         style_lines = style_lines + "\n" + _STYLE_DEFS["hook"]
     header = _ASS_HEADER_TEMPLATE.format(style_lines=style_lines)
 
-    pos = f"\\pos(540,{int(1920 * caption_y_fraction)})"
+    y_at = caption_y_fraction if callable(caption_y_fraction) else (lambda _t: caption_y_fraction)
     lines = []
     if hook_text:
         safe_hook = _escape_ass(hook_text)
@@ -211,6 +212,7 @@ def generate_ass(
     for group in _group_words(words, words_per_line, clip_start_s, clip_end_s, max_chars=max_chars):
         gw = group["words"]
         shown = [_display_word(w.get("word", ""), style, profanity_mask) for w in gw]
+        pos = f"\\pos(540,{int(1920 * y_at(group['start'] - clip_start_s))})"
 
         if style == "bold_pop":
             # One event per word so the spoken word lights up. The line pops in on its first word.

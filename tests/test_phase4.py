@@ -194,6 +194,28 @@ def test_upload_security_and_url_validation(client):
     )
     assert res_valid_url.status_code == 303
 
+    # Bad clip count -> 400
+    res_bad_count = client.post(
+        "/new/submit",
+        data={"tab": "url", "url": "https://www.youtube.com/watch?v=x", "target_clips": "abc"},
+    )
+    assert res_bad_count.status_code == 400
+
+
+def test_target_clips_auto_vs_explicit(client):
+    import json
+    from src.db import get_connection
+
+    def submit(count):
+        client.post("/new/submit", data={"tab": "url", "url": "https://www.youtube.com/watch?v=x", "target_clips": count},
+                    follow_redirects=False)
+        with get_connection() as conn:
+            return json.loads(conn.execute("SELECT settings FROM videos ORDER BY id DESC LIMIT 1").fetchone()[0])
+
+    assert "target_clips" not in submit("")  # Auto: stage 6 picks from video length
+    assert submit("4")["target_clips"] == 4
+    assert submit("50")["target_clips"] == 15
+
 
 # ── 6. Clip Lifecycle, Streaming & Download ───────────────────────────────────
 

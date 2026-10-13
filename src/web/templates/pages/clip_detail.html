@@ -63,6 +63,14 @@
       </video>
     </div>
 
+    <!-- Which layout plays when. Click to jump there. -->
+    <div class="layout-timeline">
+      <div class="layout-timeline__bar" id="lt-bar" role="slider" tabindex="0" aria-label="Layout timeline, click to seek" aria-valuemin="0" aria-valuenow="0">
+        <span class="layout-timeline__playhead" id="lt-playhead"></span>
+      </div>
+      <div class="layout-timeline__ticks"><span>0:00.0</span><span id="lt-end"></span></div>
+    </div>
+
     <div class="player-actions">
       <a href="/clips/{{ clip.id }}/post" class="btn btn--ghost btn--sm">
         {{ ui.icon("paper-plane-tilt", 14) }}
@@ -146,7 +154,31 @@
         <!-- Framing Layout -->
         <div class="field">
           <label class="field__label">Framing layout</label>
-          {{ ui.layout_picker('layout', clip.layout or 'split') }}
+          {{ ui.layout_picker('layout', clip.layout or 'split', clip.letterbox_style or 'blur') }}
+        </div>
+
+        <!-- Layout switches: change framing partway through the clip -->
+        <div class="field">
+          <label class="field__label" for="switch-layout">Layout switches</label>
+          <p class="field__help">For streams that change mid-clip, e.g. a reaction ends and the streamer just talks. Play or scrub the clip to the moment, then add a switch. Times are positions in the clip player.</p>
+          <div class="switch-add">
+            <div class="switch-add__time">
+              <span class="small muted">Playhead</span>
+              <span class="timecode-lg" id="playhead-tc" aria-live="off">0:00.0</span>
+            </div>
+            <select id="switch-layout" class="select" aria-label="Layout to switch to">
+              <option value="face_track">Face track</option>
+              <option value="split">Split</option>
+              <option value="center">Center</option>
+              <option value="letterbox">Letterbox</option>
+            </select>
+            <button type="button" class="btn btn--secondary btn--sm" onclick="addSwitch()">
+              {{ ui.icon("plus", 14) }}
+              <span>Add switch here</span>
+            </button>
+          </div>
+          <ol class="switch-list" id="switch-list"></ol>
+          <input type="hidden" name="layout_changes" id="layout-changes-field">
         </div>
 
         <!-- Caption Style -->
@@ -168,7 +200,7 @@
             <input type="checkbox" name="show_hook" class="switch" role="switch" value="1" {% if clip.show_hook == 1 %}checked{% endif %}>
             <span>Show on video (top, first 2.5 s)</span>
           </label>
-          <p class="field__help">Written by the AI. Edits are saved when you re-render.</p>
+          <p class="field__help">Written by the AI. Edits are saved when you re-render. With Letterbox white bars on, this is the title above the video.</p>
         </div>
 
         <!-- Background Music (Phase 5) -->
@@ -251,11 +283,7 @@
   <form method="post" action="/clips/{{ clip.id }}/reject">
     <div class="dialog__body">
       <h2 class="dialog__title">Reject clip?</h2>
-      <p class="dialog__text">This clip will be marked as rejected and removed from the active review queue.</p>
-      <div class="field" style="margin-top: var(--space-4);">
-        <label class="field__label" for="reject-reason">Reason for rejection (optional)</label>
-        <input type="text" name="reason" id="reject-reason" class="input" placeholder="e.g. punchline cutoff, dull moment, audio glitch">
-      </div>
+      <p class="dialog__text">This clip and its files will be permanently deleted and removed from the review queue.</p>
     </div>
     <div class="dialog__footer">
       <button type="button" class="btn btn--secondary" data-close-dialog>Cancel</button>
@@ -296,6 +324,98 @@ function saveCaptions() {
   f.disabled = false;
   f.form.requestSubmit();
 }
+// Layout switches are stored in source seconds; the page shows them as clip player time.
+// CUTS are the pauses removed from the current render, so the two timelines differ.
+const CLIP_START = {{ (clip.trim_start_s or clip.orig_start_s or 0) | tojson }};
+const CUTS = {{ cut_intervals | tojson }};
+const LAYOUT_NAMES = { split: 'Split', face_track: 'Face track', center: 'Center', letterbox: 'Letterbox' };
+let switches = {{ layout_changes | tojson }};
+const player = document.getElementById('main-clip-player');
+
+function toSource(tOut) {
+  let t = CLIP_START + tOut;
+  for (const [a, b] of CUTS) if (t > a) t += b - a;
+  return Math.round(t * 100) / 100;
+}
+function toClip(tAbs) {
+  let cut = 0;
+  for (const [a, b] of CUTS) {
+    if (tAbs <= a) break;
+    cut += Math.min(tAbs, b) - a;
+  }
+  return Math.max(0, tAbs - CLIP_START - cut);
+}
+function tc(t) {
+  const m = Math.floor(t / 60), s = t - m * 60;
+  return `${m}:${s.toFixed(1).padStart(4, '0')}`;
+}
+function baseLayout() {
+  return (document.querySelector('input[name="layout"]:checked') || {}).value || 'split';
+}
+function renderSwitches() {
+  switches.sort((x, y) => x.t - y.t);
+  document.getElementById('layout-changes-field').value = JSON.stringify(switches);
+  const list = document.getElementById('switch-list');
+  const rows = [`<li class="switch-list__row"><span class="timecode-lg">0:00.0</span><span>Starts as <strong>${LAYOUT_NAMES[baseLayout()]}</strong></span></li>`];
+  switches.forEach((sw, i) => rows.push(
+    `<li class="switch-list__row"><button type="button" class="timecode-lg timecode-btn" onclick="player.currentTime=${toClip(sw.t)}" aria-label="Jump to ${tc(toClip(sw.t))}">${tc(toClip(sw.t))}</button>` +
+    `<span>Switch to <strong>${LAYOUT_NAMES[sw.layout]}</strong></span>` +
+    `<button type="button" class="btn btn--ghost btn--sm" onclick="removeSwitch(${i})" aria-label="Remove switch at ${tc(toClip(sw.t))}">Remove</button></li>`));
+  list.innerHTML = rows.join('');
+  // The letterbox style toggle shows while any part of the clip uses Letterbox
+  const lbUsed = baseLayout() === 'letterbox' || switches.some((sw) => sw.layout === 'letterbox');
+  document.getElementById('layout-letterbox-opt').style.display = lbUsed ? '' : 'none';
+  drawTimeline();
+}
+function addSwitch() {
+  const tOut = player.currentTime || 0;
+  if (tOut < 0.2) { showToast('Move the playhead past the start first'); return; }
+  const t = toSource(tOut);
+  switches = switches.filter((sw) => Math.abs(sw.t - t) > 0.2);
+  switches.push({ t, layout: document.getElementById('switch-layout').value });
+  renderSwitches();
+}
+function removeSwitch(i) { switches.splice(i, 1); renderSwitches(); }
+function drawTimeline() {
+  const dur = player.duration;
+  const bar = document.getElementById('lt-bar');
+  bar.querySelectorAll('.lt-seg').forEach((el) => el.remove());
+  if (!dur || !isFinite(dur)) return;
+  document.getElementById('lt-end').textContent = tc(dur);
+  bar.setAttribute('aria-valuemax', dur.toFixed(1));
+  const segs = [{ t: 0, layout: baseLayout() }].concat(switches.map((sw) => ({ t: toClip(sw.t), layout: sw.layout })));
+  segs.forEach((sg, i) => {
+    const end = i + 1 < segs.length ? segs[i + 1].t : dur;
+    const el = document.createElement('span');
+    el.className = `lt-seg lt-seg--${sg.layout}`;
+    if (i === 0) el.style.borderLeft = '0';
+    el.style.left = `${(sg.t / dur) * 100}%`;
+    el.style.width = `${((end - sg.t) / dur) * 100}%`;
+    el.textContent = LAYOUT_NAMES[sg.layout];
+    el.title = `${tc(sg.t)} ${LAYOUT_NAMES[sg.layout]}`;
+    bar.prepend(el);
+  });
+}
+player.addEventListener('timeupdate', () => {
+  document.getElementById('playhead-tc').textContent = tc(player.currentTime);
+  const dur = player.duration;
+  if (dur) document.getElementById('lt-playhead').style.left = `${(player.currentTime / dur) * 100}%`;
+  document.getElementById('lt-bar').setAttribute('aria-valuenow', player.currentTime.toFixed(1));
+});
+player.addEventListener('loadedmetadata', drawTimeline);
+document.getElementById('lt-bar').addEventListener('click', (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  if (player.duration) player.currentTime = ((e.clientX - r.left) / r.width) * player.duration;
+});
+document.getElementById('lt-bar').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    player.currentTime = Math.max(0, player.currentTime + (e.key === 'ArrowLeft' ? -0.5 : 0.5));
+  }
+});
+document.querySelectorAll('input[name="layout"]').forEach((r) => r.addEventListener('change', renderSwitches));
+renderSwitches();
+
 function toggleTitleEdit(on) {
   document.getElementById('title-form').style.display = on ? 'flex' : 'none';
   document.getElementById('clip-title').parentElement.style.display = on ? 'none' : '';

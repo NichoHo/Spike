@@ -414,6 +414,10 @@ def evaluate_clip_autopost(
         # Permission is 'none' -> silently skip auto-post
         return []
 
+    # 'review' sources: a person approves and posts each clip, never automatic
+    if (clip.get("source_permission") or "").strip().lower() == "review":
+        return []
+
     # Check needs_context flag
     if clip.get("needs_context"):
         return []

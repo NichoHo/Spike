@@ -11,7 +11,8 @@ Layouts (§7.1):
   auto        – split when a small fixed facecam is detected, else face_track
   split       – facecam (top 960px, auto-detected) + content crop (bottom 960px), captions on the seam
   center      – static centre crop
-  letterbox   – full frame scaled to width, blurred+zoomed background fill
+  letterbox   – full frame scaled to width. letterbox_style "title": white bars with the
+                hook title above the video (title_card.py); "blur": blurred+zoomed fill
 
 Effects (§7.4):
   Hook title    – optional, manual edits only (hook_text shown for the first 2.5 s at the top)
@@ -74,7 +75,8 @@ from src.pipeline.stage9a_face_track import (
     get_video_dimensions,
     run_face_track,
 )
-from src.pipeline.stage9b_captions import generate_ass, write_ass_file
+from src.pipeline.stage9b_captions import _mask_profanity, generate_ass, write_ass_file
+from src.pipeline.title_card import render_title_card, strip_emoji
 
 logger = logging.getLogger("spike.render")
 
@@ -226,8 +228,8 @@ def _build_sendcmd_file(
         y = max(0, cy - ch / 2)
         x = min(x, max(0, src_w - cw))
         y = min(y, max(0, src_h - ch))
-        lines.append(f"{t:.3f} crop x {int(x)};")
-        lines.append(f"{t:.3f} crop y {int(y)};")
+        lines.append(f"{t:.3f} crop@ft x {int(x)};")
+        lines.append(f"{t:.3f} crop@ft y {int(y)};")
     return "\n".join(lines) + "\n"
 
 
@@ -364,6 +366,95 @@ def split_crops(
     return (fc_x, fc_y, even(fc_w), even(fc_h)), (gp_x, 0, even(gp_w), even(gp_h))
 
 
+SWITCH_LAYOUTS = ("split", "face_track", "center", "letterbox")
+
+
+def layout_segments_for(
+    base_layout: str,
+    layout_changes: Optional[List[Dict[str, Any]]],
+    clip_start: float,
+    clip_end: float,
+    cut_intervals: List[Tuple[float, float]],
+) -> List[Tuple[float, str]]:
+    """
+    Turn user layout switches ({t: source seconds, layout}) into (start on the trimmed
+    clip timeline, layout) segments. Drops switches outside the clip, merges repeats,
+    and lets a switch within 0.2 s of the previous one replace it.
+    """
+    segs: List[Tuple[float, str]] = [(0.0, base_layout)]
+    for ch in sorted(layout_changes or [], key=lambda c: float(c["t"])):
+        t, lay = float(ch["t"]), ch.get("layout")
+        if lay not in SWITCH_LAYOUTS or not clip_start < t < clip_end:
+            continue
+        t_out = round(map_timestamp_to_trimmed(t, clip_start, cut_intervals), 3)
+        if t_out - segs[-1][0] < 0.2:
+            segs[-1] = (segs[-1][0], lay)
+        else:
+            segs.append((t_out, lay))
+    merged = [segs[0]]
+    for seg in segs[1:]:
+        if seg[1] != merged[-1][1]:
+            merged.append(seg)
+    return merged
+
+
+def _layout_filters(
+    layout: str,
+    src: str,
+    dst: str,
+    src_w: int,
+    src_h: int,
+    keyframes: Optional[List[Dict[str, Any]]],
+    sc_rel: Optional[str],
+    facecam_box: Optional[Dict[str, float]],
+    letterbox_style: str = "blur",
+) -> List[str]:
+    """Filters turning [src] into a 1080x1920 [dst] for one layout."""
+    if layout == "face_track" and sc_rel:
+        first_kf = keyframes[0] if keyframes else {
+            "cx_px": src_w / 2, "cy_px": src_h / 2, "crop_w_px": src_w, "crop_h_px": src_h
+        }
+        cw = int(first_kf.get("crop_w_px", src_w))
+        ch = int(first_kf.get("crop_h_px", src_h))
+        init_x = int(max(0, first_kf["cx_px"] - cw / 2))
+        init_y = int(max(0, first_kf["cy_px"] - ch / 2))
+        # Named crop so sendcmd only moves this one, not the split layout's crops
+        return [
+            f"[{src}]crop@ft={cw}:{ch}:{init_x}:{init_y},sendcmd=f={sc_rel},"
+            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1[{dst}]"
+        ]
+    if layout == "split":
+        (fc_x, fc_y, fc_w, fc_h), (gp_x, gp_y, gp_w, gp_h) = split_crops(facecam_box, src_w, src_h)
+        return [
+            f"[{src}]split=2[fc_in][gp_in]",
+            f"[fc_in]crop={fc_w}:{fc_h}:{fc_x}:{fc_y},scale={OUTPUT_WIDTH}:{SPLIT_FACECAM_H},setsar=1[facecam]",
+            f"[gp_in]crop={gp_w}:{gp_h}:{gp_x}:{gp_y},scale={OUTPUT_WIDTH}:{SPLIT_GAMEPLAY_H},setsar=1[gameplay]",
+            f"[facecam][gameplay]vstack=inputs=2[{dst}]",
+        ]
+    if layout == "letterbox" and letterbox_style == "title":  # title card is overlaid after the zoom
+        return [
+            f"[{src}]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[{dst}]"
+        ]
+    if layout == "letterbox":
+        return [
+            f"[{src}]split=2[bg_in][fg_in]",
+            f"[bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=20:5,setsar=1[bg]",
+            f"[fg_in]scale={OUTPUT_WIDTH}:-1,setsar=1[fg]",
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2[{dst}]",
+        ]
+    # center
+    crop_h = src_h
+    crop_w = int(src_h * OUTPUT_WIDTH / OUTPUT_HEIGHT)
+    if crop_w > src_w:
+        crop_w = src_w
+        crop_h = int(src_w * OUTPUT_HEIGHT / OUTPUT_WIDTH)
+    cx = int((src_w - crop_w) / 2)
+    cy = int((src_h - crop_h) / 2)
+    return [f"[{src}]crop={crop_w}:{crop_h}:{cx}:{cy},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1[{dst}]"]
+
+
 # ── Unified Filtergraph Builder ───────────────────────────────────────────────
 
 def build_vertical_filtergraph(
@@ -380,6 +471,9 @@ def build_vertical_filtergraph(
     facecam_box: Optional[Dict[str, float]] = None,
     punch_in_zoom: bool = True,
     has_music: bool = False,
+    layout_segments: Optional[List[Tuple[float, str]]] = None,
+    letterbox_style: str = "blur",
+    title_input: Optional[int] = None,
 ) -> str:
     """
     Build complete native FFmpeg filtergraph:
@@ -417,40 +511,23 @@ def build_vertical_filtergraph(
             f"[0:a]atrim=start={in_sec_start:.3f}:end={in_sec_start + dur:.3f},asetpts=PTS-STARTPTS[a_trimmed]"
         )
 
-    # 2. Layout Transformation
-    if layout == "face_track" and sc_rel:
-        first_kf = keyframes[0] if keyframes else {
-            "cx_px": src_w / 2, "cy_px": src_h / 2, "crop_w_px": src_w, "crop_h_px": src_h
-        }
-        cw = int(first_kf.get("crop_w_px", src_w))
-        ch = int(first_kf.get("crop_h_px", src_h))
-        init_x = int(max(0, first_kf["cx_px"] - cw / 2))
-        init_y = int(max(0, first_kf["cy_px"] - ch / 2))
-        filters.append(
-            f"[v_trimmed]crop={cw}:{ch}:{init_x}:{init_y},sendcmd=f={sc_rel},"
-            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
-            f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1[v_layout]"
-        )
-    elif layout == "split":
-        (fc_x, fc_y, fc_w, fc_h), (gp_x, gp_y, gp_w, gp_h) = split_crops(facecam_box, src_w, src_h)
-        filters.append(f"[v_trimmed]split=2[fc_in][gp_in]")
-        filters.append(f"[fc_in]crop={fc_w}:{fc_h}:{fc_x}:{fc_y},scale={OUTPUT_WIDTH}:{SPLIT_FACECAM_H},setsar=1[facecam]")
-        filters.append(f"[gp_in]crop={gp_w}:{gp_h}:{gp_x}:{gp_y},scale={OUTPUT_WIDTH}:{SPLIT_GAMEPLAY_H},setsar=1[gameplay]")
-        filters.append(f"[facecam][gameplay]vstack=inputs=2[v_layout]")
-    elif layout == "letterbox":
-        filters.append(f"[v_trimmed]split=2[bg_in][fg_in]")
-        filters.append(f"[bg_in]scale={OUTPUT_WIDTH}:-1,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=20:5,setsar=1[bg]")
-        filters.append(f"[fg_in]scale={OUTPUT_WIDTH}:-1,setsar=1[fg]")
-        filters.append(f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v_layout]")
-    else:  # center
-        crop_h = src_h
-        crop_w = int(src_h * OUTPUT_WIDTH / OUTPUT_HEIGHT)
-        if crop_w > src_w:
-            crop_w = src_w
-            crop_h = int(src_w * OUTPUT_HEIGHT / OUTPUT_WIDTH)
-        cx = int((src_w - crop_w) / 2)
-        cy = int((src_h - crop_h) / 2)
-        filters.append(f"[v_trimmed]crop={crop_w}:{crop_h}:{cx}:{cy},scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},setsar=1[v_layout]")
+    # 2. Layout Transformation. With layout switches, each layout used runs over the whole
+    # trimmed clip, then each segment is cut from its layout's output and the pieces joined.
+    segments = layout_segments or [(0.0, layout)]
+    lay_args = (src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style)
+    if len(segments) == 1:
+        filters += _layout_filters(segments[0][1], "v_trimmed", "v_layout", *lay_args)
+    else:
+        used = list(dict.fromkeys(lay for _, lay in segments))
+        filters.append(f"[v_trimmed]split={len(used)}" + "".join(f"[lin_{lay}]" for lay in used))
+        for lay in used:
+            filters += _layout_filters(lay, f"lin_{lay}", f"lout_{lay}", *lay_args)
+            idxs = [i for i, (_, l) in enumerate(segments) if l == lay]
+            filters.append(f"[lout_{lay}]split={len(idxs)}" + "".join(f"[lseg_{i}]" for i in idxs))
+        for i, (t0, _) in enumerate(segments):
+            end = f":end={segments[i + 1][0]:.3f}" if i + 1 < len(segments) else ""
+            filters.append(f"[lseg_{i}]trim=start={t0:.3f}{end},setpts=PTS-STARTPTS,setsar=1[lp_{i}]")
+        filters.append("".join(f"[lp_{i}]" for i in range(len(segments))) + f"concat=n={len(segments)}:v=1:a=0[v_layout]")
 
     # 3. Punch-in zoom, plus a small zoom on every other segment so jump cuts read as edits
     z_parts = []
@@ -466,8 +543,20 @@ def build_vertical_filtergraph(
     else:
         filters.append(f"[v_layout]null[v_zoomed]")
 
-    # 4. ASS Captions Overlay
-    filters.append(f"[v_zoomed]ass={ass_rel}[vout]")
+    # 4. Letterbox title card (after the zoom so the punch-in never crops it), then ASS captions
+    if title_input is not None:
+        spans = [
+            (t0, segments[i + 1][0] if i + 1 < len(segments) else None)
+            for i, (t0, lay) in enumerate(segments) if lay == "letterbox"
+        ]
+        enable = ""
+        if len(segments) > 1:
+            terms = [f"gte(t,{a:.3f})" if b is None else f"between(t,{a:.3f},{b:.3f})" for a, b in spans]
+            enable = f":enable='{'+'.join(terms)}'"
+        filters.append(f"[v_zoomed][{title_input}:v]overlay=0:0{enable}[v_titled]")
+        filters.append(f"[v_titled]ass={ass_rel}[vout]")
+    else:
+        filters.append(f"[v_zoomed]ass={ass_rel}[vout]")
 
     # 5. Audio Processing & Ducking
     if has_music:
@@ -559,6 +648,7 @@ def run_stage9c_render(
     else:
         cut_setting = "auto"
     punch_in_zoom = bool(src_settings.get("punch_in_zoom", True))
+    letterbox_style = src_settings.get("letterbox_style", "title")
 
     all_words = []
     for seg in transcript.get("segments", []):
@@ -614,6 +704,8 @@ def run_stage9c_render(
             music_track=str(chosen_track_path) if chosen_track_path else None,
             silence_trim=pace,
             punch_in_zoom=punch_in_zoom,
+            letterbox_style=letterbox_style,
+            title_text=cand.get("hook_text") or cand.get("title") or "",
         )
 
         if success and out_file.exists():
@@ -636,6 +728,7 @@ def run_stage9c_render(
                     silence_trim=0 if pace == "off" else 1,
                     punch_in_zoom=1 if punch_in_zoom else 0,
                     status="ready",
+                    letterbox_style=letterbox_style,
                 )
             except Exception as e:
                 logger.warning(f"Failed to record clip in DB: {e}")
@@ -670,12 +763,19 @@ def render_single_vertical_clip(
     music_track: Optional[str] = None,
     silence_trim: "bool | str" = False,
     punch_in_zoom: bool = True,
+    layout_changes: Optional[List[Dict[str, Any]]] = None,
+    letterbox_style: str = "blur",
+    title_text: str = "",
 ) -> bool:
     """
     Renders a single vertical clip from a downloaded section video file.
     Supports interactive adjustments to trims, layout, captions, music, silence trim, and zoom.
     silence_trim: False/"off", True/"natural" (cut pauses > 1.2 s) or "tight" (> 0.6 s).
     caption_y: None places captions on the split seam, or at 68% height for other layouts.
+    layout_changes: [{t, layout}] switches at source seconds, for streams that change
+    mid-clip (e.g. a reaction ends and the streamer goes full-cam).
+    letterbox_style: "title" draws title_text above the video on white bars while
+    letterbox shows; "blur" keeps the blurred fill. The title card replaces the 2.5 s hook.
     """
     if not sec_file.exists():
         print(f"  [stage 9c] Error: section file {sec_file} does not exist.")
@@ -690,8 +790,6 @@ def render_single_vertical_clip(
     sec_start = clip_start - section_clip_offset
 
     layout, facecam_box = resolve_layout(layout, sec_file, facecam_box)
-    if caption_y is None:
-        caption_y = SPLIT_FACECAM_H / OUTPUT_HEIGHT if layout == "split" else 0.68
 
     # 1. Silence trimming calculation
     pace = {True: "natural", False: "off"}.get(silence_trim, silence_trim)
@@ -710,6 +808,29 @@ def render_single_vertical_clip(
         effective_dur = clip_dur
         cut_intervals = []
 
+    segments = layout_segments_for(layout, layout_changes, clip_start, clip_end, cut_intervals)
+    used = {lay for _, lay in segments}
+    if "split" in used and not facecam_box:
+        facecam_box = detect_facecam(sec_file)
+    if caption_y is None:
+        seam = SPLIT_FACECAM_H / OUTPUT_HEIGHT
+
+        def caption_y(t: float) -> float:  # captions sit on the seam only while split is showing
+            lay = [l for t0, l in segments if t0 <= t + 0.05][-1]
+            return seam if lay == "split" else 0.68
+
+    # Letterbox title card
+    src_w, src_h = get_video_dimensions(sec_file)
+    title_png: Optional[Path] = None
+    if letterbox_style == "title" and "letterbox" in used:
+        card_text = _mask_profanity(title_text) if profanity_mask else title_text
+        video_h = min(OUTPUT_HEIGHT, int(OUTPUT_WIDTH * src_h / src_w))
+        title_png = out_file.parent / f"title_{out_file.stem}.png"
+        if render_title_card(card_text, video_h, title_png):
+            hook_text = ""  # the card already shows it
+        else:
+            title_png = None
+
     # Map peak time into trimmed timeline
     raw_peak_t = clip_start + clip_dur / 2.0
     peak_t_in_trimmed = map_timestamp_to_trimmed(raw_peak_t, clip_start, cut_intervals)
@@ -726,19 +847,18 @@ def render_single_vertical_clip(
         style=caption_style,
         profanity_mask=profanity_mask,
         caption_y_fraction=caption_y,
-        hook_text=hook_text,
+        hook_text=strip_emoji(hook_text),  # libass can't draw colour emoji
         hook_duration_s=HOOK_DURATION_S,
     )
     write_ass_file(ass_content, ass_path)
     ass_rel = _to_rel_path(ass_path)
 
     # 3. MediaPipe Face Tracking if needed
-    src_w, src_h = get_video_dimensions(sec_file)
     keyframes: List[Dict[str, Any]] = []
     sc_path: Optional[Path] = None
     sc_rel: Optional[str] = None
 
-    if layout == "face_track":
+    if "face_track" in used:
         keyframes = _retime_keyframes(
             run_face_track(sec_file, effective_dur + 10, src_w, src_h), sec_start, clip_start, cut_intervals
         )
@@ -766,6 +886,9 @@ def render_single_vertical_clip(
         facecam_box=facecam_box,
         punch_in_zoom=punch_in_zoom,
         has_music=has_music,
+        layout_segments=segments,
+        letterbox_style=letterbox_style,
+        title_input=(2 if has_music else 1) if title_png else None,
     )
 
     # 6. Execute FFmpeg Render Command (No Shell)
@@ -775,6 +898,8 @@ def render_single_vertical_clip(
     ]
     if has_music:
         cmd.extend(["-stream_loop", "-1", "-i", str(resolved_music)])
+    if title_png:
+        cmd.extend(["-i", str(title_png)])  # one still frame; overlay holds it for the whole clip
 
     cmd.extend([
         "-filter_complex", filtergraph,
@@ -799,12 +924,10 @@ def render_single_vertical_clip(
         t = str(effective_dur)
         _render_center_fallback(sec_file, out_file, ss, t, ass_rel)
 
-    # Cleanup temporary sendcmd file
-    if sc_path and sc_path.exists():
-        try:
-            sc_path.unlink()
-        except OSError:
-            pass
+    # Cleanup temporary sendcmd file and title card
+    for tmp in (sc_path, title_png):
+        if tmp:
+            Path(tmp).unlink(missing_ok=True)
 
     if out_file.exists() and out_file.stat().st_size > 1000:
         # Extract representative thumbnail

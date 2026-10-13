@@ -1,5 +1,77 @@
 # Spike: Learnings
 
+## 2026-10-13: Clip quality review (IShowSpeed FIFA stream, video #38)
+
+- **Done:** reviewed run #38 (`MBod0tK46Js`, 2.8 h, 6 clips) against the
+  user's notes. No code changed. Plan written into `BLUEPRINT.md` §6.7 and
+  Phase 7b.
+- **Learned (verified, `data/videos/38`):** the signal side was dead on this
+  run, so 5 of 6 clips came from transcript chunk proposals:
+  - `audio_loud` is -70 for every second: the `ebur128` stderr parse in
+    `stage6_signals.compute_audio_loudness` matched nothing.
+  - YAMNet `laugh` max 0.50 and `shout` max 0.33 over 2.8 h of a loud
+    streamer. Only 2 s pass the 0.25/0.30 absolute thresholds. Absolute
+    YAMNet thresholds do not work on streams with game audio.
+  - `replay_heat` all 0. `has_chat` false and no `chat.json` (cause not yet
+    checked: stage 3 did not fetch the YouTube live chat replay).
+  - Only 2 signal peaks (`height=1.5`, `prominence=0.8`) for a 6-clip target.
+- **Learned (verified, code):**
+  - `propose_transcript_chunks` sends only `chunk_segs[:80]`. Median segment
+    is 3.15 s, so the proposer saw about half of each 8-min chunk.
+  - Every candidate got raw LLM score 85.0 from `gemini-3.1-flash-lite`. The
+    UI shows the within-VOD percentile, and ties count as `<=`, so all show
+    98 to 99. The score carries no information.
+  - Whisper ran with one detected language (`en`, p=0.995). Indonesian
+    speech was forced into English, so the LLM could not see the bit.
+    `faster-whisper` 1.2.1 `transcribe()` has `multilingual` and
+    `language_detection_segments` params.
+  - Punch-in zoom fires at the clip midpoint (`stage9c_render.py`
+    `raw_peak_t = clip_start + clip_dur / 2.0`), not the punchline.
+  - Clip edges: lines are whole Whisper segments, the end snaps to the
+    end-line segment + 0.6 s, and the laugh extension never fires (laugh is
+    dead). Reactions with no words (screams, rage) get cut off.
+  - Only the selected candidates are written to the DB. Rejected and
+    low-score moments are lost.
+  - `claude --bare` never reads OAuth, so it cannot use a Pro subscription.
+    Use `--system-prompt`, `--tools ""`, `--setting-sources`, `--json-schema`,
+    `--no-session-persistence` instead (verified, `claude --help` 2.1.280).
+- **Learned (sourced, web 2026-10-13):** Gemini samples video at 1 fps by
+  default; a custom fps is set in video metadata. Gemini 2.5 Pro is a strong
+  temporal-grounding baseline (TimeLens2, arXiv 2607.17423). Trailer and golf
+  highlight systems set clip edges by snapping a padded window to shot or
+  audio boundaries (arXiv 2602.02630, 1707.07075). `claude -p` on a
+  subscription counts toward plan limits; reports disagree on a separate
+  Agent SDK credit since June 2026 (recalled from secondary sources, verify).
+- **User feedback (ground truth for this VOD):** clip 1 has Mandarin fluff
+  to 0:05 and the Indonesian bit ran much longer in the stream; clip 2 funny
+  part starts 0:26; clip 3 starts 0:13 (donation question) and would be
+  better stitched to a later rage/loss; clip 4 starts 0:30 and is weak;
+  clip 5 is 0:18 to 0:42 and weak; clip 6 not funny. Missed: rage after
+  conceding goals and after losing matches.
+- **Decided:** fix signals and proposal coverage before tuning prompts.
+  Gemini Flash-Lite stays for cheap scanning only. A stronger model judges.
+  Claude (Sonnet via `claude -p`, Pro plan) does one editor pass per VOD and
+  the comment-driven re-edit. Details in `BLUEPRINT.md` §6.7.
+- **Decided (same day):** video watching stays on Gemini Flash. Claude has
+  no audio input, and rage is mostly audio. Feeding Claude frames costs
+  about 2 M image tokens per 2.8 h stream at 0.5 fps (recalled formula:
+  tokens = width x height / 750), which would use up a Pro plan. Gemini
+  takes the YouTube URL with audio directly.
+- **Decided (same day):** add a per-source creator profile, a per-video
+  session profile, and learned preferences from user feedback. The profile
+  steers prompts and picks a fixed `creator_type` preset. See §6.7.
+- **Ground truth #38 (user, first match vs Kvaratskhelia only, about
+  29:00 to 44:00; rest of the stream not watched):** concedes at 30:30,
+  32:50, 39:58, 43:30 (fourth goal, loses the match). 33:27 goes from cocky
+  to raging, needs a manual cut inside. User: only 1 or 2 of these should
+  be clips. Plain rage is not interesting because Speed rages all the time.
+  Pick the craziest rage, or pair it with the cocky part before it.
+- **Decided (same day):** added `baseline_behaviors` to the creator
+  profile, episodes per stream, one clip per episode per humor type, and
+  manual cut ranges on the clip page (§6.7, §10.1).
+- **Open:** check why stage 3 got no YouTube chat for #38. User has not
+  reviewed #38 past 44:00, so recall there is unknown.
+
 ## 2026-10-01: Phase 6 — Posting (Platform upload, token encryption at rest, permissions enforcement, auto-post rules, scheduling)
 
 - **Done:**

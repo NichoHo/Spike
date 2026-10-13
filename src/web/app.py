@@ -52,6 +52,8 @@ app = FastAPI(title="Spike", debug=False, docs_url=None, redoc_url=None, lifespa
 # Templates
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 register_filters(templates.env)
+# Cache-bust static assets: the URL changes whenever the file's mtime does.
+templates.env.globals["static_v"] = lambda name: int((STATIC_DIR / name).stat().st_mtime)
 app.state.templates = templates
 
 # Mount static files

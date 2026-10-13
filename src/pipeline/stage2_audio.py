@@ -58,5 +58,9 @@ def run_stage2_audio(video_dir: Path, meta: Dict[str, Any]) -> Path:
         if found:
             audio_path = found[0]
 
+    for leftover in video_dir.glob("audio.*"):  # e.g. audio.webm left by yt-dlp
+        if leftover != audio_path:
+            leftover.unlink(missing_ok=True)
+
     print(f"  [stage 2] Audio ready: {audio_path.name} ({audio_path.stat().st_size / (1024*1024):.1f} MB)")
     return audio_path

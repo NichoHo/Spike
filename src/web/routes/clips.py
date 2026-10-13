@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from starlette.status import HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
 from src.config import VIDEOS_DIR
+from src.cleanup import delete_rejected_clip_files
 from src.db import (
     get_clip_with_details,
     update_clip_status,
@@ -25,10 +26,11 @@ from src.db import (
     update_candidate_hook,
     create_or_update_clip,
     set_clip_render_state,
+    set_clip_layout_changes,
     list_review_clips,
     log_event,
 )
-from src.pipeline.stage9c_render import render_single_vertical_clip
+from src.pipeline.stage9c_render import SWITCH_LAYOUTS, render_single_vertical_clip
 from src.web.auth import get_current_user
 
 
@@ -134,7 +136,10 @@ async def reject_clip_action(
 ):
     """Mark clip as rejected with optional feedback reason."""
     clean_reason = (reason or "").strip()
+    clip_row = get_clip_with_details(clip_id)
     update_clip_status(clip_id, "rejected", user_id=user.get("id"), reject_reason=clean_reason)
+    if clip_row and clip_row["status"] != "rendering":  # a running re-render would recreate files
+        delete_rejected_clip_files(dict(clip_row))
     log_event("info", f"Clip #{clip_id} rejected by {user['login']} (Reason: '{clean_reason}')")
     return RedirectResponse(url="/", status_code=HTTP_303_SEE_OTHER)
 
@@ -202,6 +207,25 @@ def _in_window(w: Dict[str, Any], start_s: float, end_s: float) -> bool:
     return start_s <= w.get("start", 0) < end_s and bool(w.get("word", "").strip())
 
 
+def _parse_layout_changes(raw: str, start_s: float, end_s: float) -> list:
+    """Form JSON [{t, layout}] (t in source seconds) -> cleaned, sorted list. Bad input is dropped."""
+    try:
+        items = json.loads(raw) if raw.strip() else []
+    except ValueError:
+        return []
+    if not isinstance(items, list):
+        return []
+    out = []
+    for it in items[:20]:
+        try:
+            t = round(float(it["t"]), 2)
+        except (TypeError, KeyError, ValueError):
+            continue
+        if it.get("layout") in SWITCH_LAYOUTS and start_s < t < end_s:
+            out.append({"t": t, "layout": it["layout"]})
+    return sorted(out, key=lambda c: c["t"])
+
+
 @router.get("/clips/{clip_id}/captions")
 async def get_clip_captions(
     clip_id: int,
@@ -233,6 +257,8 @@ async def rerender_clip_action(
     silence_trim: bool = Form(False),
     punch_in_zoom: bool = Form(True),
     caption_text: Optional[str] = Form(None),
+    layout_changes: str = Form(""),
+    letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Interactively re-render vertical clip with user trims and style options."""
@@ -259,6 +285,7 @@ async def rerender_clip_action(
         )
 
     all_words = _load_words(video_dir, cand_id)
+    switches = _parse_layout_changes(layout_changes, start_s, end_s)
 
     # Edited caption text: unchanged words keep their timing, changed spots are re-spread
     # (see _retime_edit). Saved so later re-renders keep the edit.
@@ -288,6 +315,8 @@ async def rerender_clip_action(
     new_thumb_file = renders_dir / f"clip_{cand_id}_v{new_version}_thumb.jpg"
 
     clean_hook = (hook_text or "").strip()
+    if letterbox_style not in ("title", "blur"):
+        letterbox_style = "blur"
 
     prev_status = clip["status"]
     user_login = user["login"]
@@ -310,6 +339,9 @@ async def rerender_clip_action(
                 music_track=chosen_music_str,
                 silence_trim=silence_trim,
                 punch_in_zoom=punch_in_zoom,
+                layout_changes=switches,
+                letterbox_style=letterbox_style,
+                title_text=clean_hook or clip.get("cand_title") or "",
             )
         except Exception as exc:
             ok = False
@@ -334,7 +366,13 @@ async def rerender_clip_action(
             punch_in_zoom=1 if punch_in_zoom else 0,
             status="ready",
             show_hook=1 if show_hook and clean_hook else 0,
+            letterbox_style=letterbox_style,
         )
+        set_clip_layout_changes(clip_id, json.dumps(switches) if switches else None)
+        # Drop the superseded version so re-renders don't pile up on disk
+        for old in (clip.get("file_path"), clip.get("thumb_path")):
+            if old and Path(old) not in (new_out_file, new_thumb_file):
+                Path(old).unlink(missing_ok=True)
         if clean_hook and clean_hook != (clip.get("cand_hook") or ""):
             update_candidate_hook(cand_id, clean_hook)
         log_event("info", f"Clip #{clip_id} re-rendered (v{new_version}, {layout}, {caption_style}, music={bool(chosen_music_str)}, silence_trim={silence_trim}) by {user_login}")

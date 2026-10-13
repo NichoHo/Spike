@@ -562,6 +562,149 @@ labeled window.
 - **Revisit:** facecam smile scores from MediaPipe (already installed for
   face tracking), only if the eval shows Spike misses silent reactions.
 
+### 6.7 Quality v2 (2026-10-13, from the review of run #38)
+
+Run #38 (IShowSpeed, FIFA, 2.8 h) picked 6 clips: 3 weak, 3 with the right
+moment but wrong edges. It missed most rage moments. Root causes and fixes
+are listed in `LEARNINGS.md` (2026-10-13). This section overrides §6.1 to
+§6.4 where they disagree.
+
+**Creator profile (new, runs before moment detection).** What is funny,
+and how long a moment runs, depends on the creator. A rage streamer's
+moment is a 15 to 30 s scream after a loss. A podcast moment is a 45 to
+90 s story with a long setup. Two layers:
+
+- **Creator profile**, per source (or per channel id for one-off URLs),
+  cached in `sources.creator_profile` (JSON), editable on the Sources
+  screen. Built once by one Claude call from: channel name, the last 20
+  video titles (yt-dlp flat playlist), the stream title, and 6 two-minute
+  transcript excerpts spread across the VOD. Refreshed when the user asks,
+  or after 20 reviewed clips. Fields: `display_name`, `aliases`,
+  `creator_type` (one of `gaming`, `irl`, `just_chatting`, `podcast`,
+  `comedy`, `reaction`, `sports`, `educational`, `other`), `energy`
+  (`loud`, `medium`, `calm`), `humor_styles` (ranked: `rage`, `hubris`,
+  `roast`, `banter`, `storytelling`, `absurd`, `cringe`, `wholesome`,
+  `deadpan`), `fans_clip` (what fans clip, 3 to 6 bullets),
+  `recurring_bits` (catchphrases, running jokes), `baseline_behaviors`
+  (what the creator does all the time, so it is not clip-worthy alone, for
+  example "rages at every conceded goal"), `languages`, `avoid`
+  (sponsor reads, sensitive topics), `notes` (free text, max 600 chars).
+- **Session profile**, per video, from the same excerpts with Flash-Lite:
+  activity (game or topic), the events that cause reactions (conceding a
+  goal, losing a match, a donation read), guests, languages heard.
+- **Learned preferences**, per source: the user's reject reasons and
+  "Ask the editor" comments, summarized into at most 10 bullets after each
+  5 new items. Example: "Speed: cut straight to the donation question".
+
+Use: the compact profile (under 400 tokens) goes into the chunk proposal,
+judge, editor, and re-edit prompts. `creator_type` picks a preset from a
+fixed table in `config.py`: clip length range, setup pad, end extension,
+signal weight multipliers (bounded 0.5 to 2), default zoom strength. The
+AI never writes weights directly. Spike falls back to the `other` preset
+when no profile exists.
+
+**Episodes and baseline behavior.** A stream is a chain of episodes (one
+match, one game, one conversation topic). The session profile call lists
+them as `[{start_s, end_s, label}]`, from the transcript excerpts plus a
+cheap pass over chunk summaries. Rules:
+
+- A moment whose `humor_type` is in `baseline_behaviors` and has no
+  contrast (no hubris before it, no unusual outcome) is capped at score 55.
+  Plain rage from a streamer who rages all the time is not a clip.
+- The chunk scanner also tags `hubris` lines (bragging, trash talk,
+  predictions) even when they are not funny alone, so they can be paired.
+- The editor pass keeps at most one clip per episode per `humor_type`. For
+  a repeated reaction it picks the most extreme one (judge score, then
+  peak `voice_jump`), or builds a story combo: hubris, then the fall
+  (conceded goals, the loss).
+
+**Signals (§6.1).**
+
+- `audio_loud`: per-second RMS in dBFS from the 16 kHz waveform that YAMNet
+  already decodes. No `ebur128` stderr parsing.
+- `laugh` and `shout`: per-VOD relative, not absolute. A second counts when
+  it is in the VOD's top 2% for that class. The laugh gate keeps its word
+  check, with the relative threshold.
+- New `voice_jump`: loudness minus its rolling 30 s median, clipped at 0.
+  A sudden +10 dB is a scream or a rage burst.
+- New `rage_words`: per-second count of rage and shock words from the
+  transcript (`no`, `bro`, `what`, `how`, `why`, `fuck`, `shit`, `are you
+  serious`, `ref`, plus per-source terms), smoothed over 5 s.
+- Without chat: `0.20 laugh + 0.20 voice_jump + 0.15 rage_words + 0.15
+  shout + 0.15 replay_heat + 0.10 comment_heat + 0.05 speech_rate`. With
+  chat, `voice_jump` and `rage_words` take 0.05 each from `chat_users`.
+  Still guesses until §6.5.
+- Peaks: always return `3 x target` peaks. Drop the fixed `height`, keep
+  `prominence`, sort by prominence. `distance` 45 s.
+- If a YouTube stream has no `chat.json`, log why (no replay, fetch error).
+
+**Discovery.**
+
+- Chunk proposals send the whole chunk (no 80-line cap). Chunks are 5 min
+  with 1 min overlap. Lines carry the same markers as the judge
+  (`[laughter]`, `[shouting]`, `[voice jump]`, chat count). Up to 5 moments
+  per chunk. The prompt names the streamer, the stream title, and the moment
+  types to look for: rage after a loss or a conceded goal, hubris then fail,
+  confusion with chat, roasts, language bits, absurd claims.
+- Chunk proposals also run on streams with chat (they were upload-only in
+  the plan, but this run shows they carry the picks).
+- Optional Gemini watch pass for public YouTube URLs: 20-min windows, low
+  resolution, about 0.5 fps, Gemini Flash (not Lite). It lists moments with
+  `mm:ss` and a one-line reason. Its times only seed candidates; edges still
+  come from words and audio.
+- Whisper runs with `multilingual=True`, so a language switch mid-stream is
+  transcribed in that language.
+
+**Judge (§6.3).**
+
+- Prompt gives `streamer_name` (source display name, else yt-dlp
+  `uploader`). Titles and hooks must use it. Code replaces any leftover
+  "streamer" with the name.
+- Output order: `why_funny` (what happens, what the viewer feels, and why:
+  schadenfreude, hubris then fall, absurdity, cringe, relatable rage),
+  `humor_type`, `needs_context`, then `score`. Score anchors: 30 = only fans
+  smile, 50 = a stranger chuckles, 70 = a stranger shares it, 90 = viral.
+  `keep` is false unless a stranger with no context would laugh.
+- Structure fields replace `start_line`/`end_line`: `topic_start_line`,
+  `setup_start_line`, `payoff_line`, `reaction_end_line`, and `cut_lines`
+  (lines inside the window that are fluff).
+- Models: Flash-Lite only for chunk scanning. The per-candidate judge uses
+  Gemini Flash. The final pick is the Claude editor pass below.
+- Pairwise re-rank sends the transcript excerpt and `why_funny`, not only
+  the title. Pool of 8.
+
+**Editor pass (Claude, one call per VOD).** Input: the top 15 to 20 judged
+candidates, each with `why_funny`, signal values, and its numbered lines.
+Output per pick: rank, final line range, `cut_lines`, `zooms`, title and
+hook with the streamer's name, and optional `story` combos (2 to 3 segments
+in time order, total 60 s or less, for example hubris then the loss).
+Runs through `claude -p` on the user's Pro plan (Sonnet). Falls back to the
+Gemini ranking when the call fails or the plan limit is hit.
+
+**Scores.** The UI shows the calibrated raw score (0 to 100), not the
+within-VOD percentile. Percentiles only order candidates, with average rank
+for ties. `min_llm_score` rises to 65. Clip count is no longer fixed per
+hour: every pick at or above the floor, up to `MAX_TARGET_CLIPS` (raise to
+15).
+
+**Edges (§6.4).**
+
+- Lines are phrases, not Whisper segments: split at punctuation or at 2.5 s.
+- Context window `[p - 90, p + 45]`, so the model sees the topic change
+  before and the aftermath after.
+- Start: the later of `topic_start_line` and 3 s before `setup_start_line`,
+  then snap to a pause. Never include lines of the previous topic.
+- End: from `reaction_end_line`, extend while `voice_jump`, `shout`, or
+  `laugh` stays high, up to 8 s, then add 0.8 s.
+- `cut_lines` become removed intervals, rendered with the same keep-interval
+  path as silence trim.
+- Every candidate the judge sees is stored, with status `selected`,
+  `low_score`, or `rejected`, so the user can render any of them.
+
+**Zoom (§7.4).** Zoom keyframes come from the editor pass or the user, never
+from the clip midpoint. Default: one zoom at the payoff word or the loudest
+`voice_jump` second inside the clip, or none.
+
 ---
 
 ## 7. Editing: layout, captions, music, effects
@@ -612,9 +755,9 @@ one-time box per streamer is faster to build and never wrong.
 | Effect | Rule |
 |---|---|
 | Hook title | `hook_text` shown for the first 2.5 s, top of frame |
-| Punch-in zoom | 1.0x to 1.15x over 0.3 s at the peak second, back out over 1 s. Once per clip |
+| Punch-in zoom | List of keyframes per clip: time, strength (1.10 subtle, 1.20 medium, 1.35 strong), hold. Eased in over about 0.2 s, out over about 0.5 s. Centered on the face (facecam panel in `split`). Set by the editor pass or by hand in the zoom editor. Empty list means no zoom (§6.7) |
 | Loudness | `loudnorm` two-pass to -14 LUFS, true peak -1.5 dB |
-| Silence trim | Cut internal pauses longer than 1.2 s (optional, per source) |
+| Silence trim | Cut internal pauses longer than 1.2 s (per source, on by default for new sources) |
 
 Skipped: sound effects, emoji overlays, B-roll, progress bars. Add one when
 the team asks for it and Phase 7's numbers say captions and hooks are not
@@ -843,6 +986,18 @@ available.
   - Caption text editor (word list, text only).
   - Re-render (goes to the front of the queue, about a minute).
   - Approve, Reject (with a reason), Download, Copy caption, Post / Schedule.
+  - Stream timestamp as a clear chip (`15:52`, or `1:15:52` past an hour),
+    linked to the source at that time. Also on each review card.
+  - Manual cuts: mark a start and end from the playhead, "Cut this part",
+    list of cuts with delete. The player skips cut ranges during preview.
+    Cuts render as removed intervals, the same path as `cut_lines`.
+  - Zoom editor (popover): list of zooms with time ("use playhead"),
+    strength, and hold; add and delete; live CSS preview; then re-render.
+  - "Ask the editor": free-text comment ("cut the first 5 seconds", "end
+    after he throws the controller"). An LLM turns it into an edit (trim,
+    removed intervals, zooms, title) and re-renders. History kept per clip.
+- Per video: "Other moments" list of `low_score` and `rejected` candidates
+  (title, stream timestamp, score). One click queues a render.
 - Keys: `j`/`k` next/previous, `space` play/pause, `a` approve, `r` reject,
   `d` download, `[`/`]` nudge start, `{`/`}` nudge end, `e` edit captions.
 
@@ -1119,6 +1274,24 @@ clip cannot post through any path.
 **Done when:** unplugging the network mid-job ends in a clean retry, a
 stopped worker produces an alert within 35 minutes, and the Stats view shows
 real numbers.
+
+### Phase 7b: Clip quality v2 and editor tools
+
+Build §6.7 in this order, and run `spike eval` on video #38 after each step:
+
+1. Signal fixes, full-chunk proposals, multilingual Whisper.
+2. Creator and session profile, `creator_type` presets.
+3. Judge rewrite, streamer name, store all candidates.
+4. Phrase lines and new edge rules.
+5. Claude editor pass with story combos.
+6. UI: timestamp chip, silence trim default, other-moments list, zoom
+   editor, "Ask the editor".
+
+**Done when:** on #38 the picks for the 29:00 to 44:00 match are one or
+two clips (the craziest rage, or a cocky-then-loss story), all five
+user-marked moments appear among stored candidates, no pick starts inside
+the previous topic, and the user rates at least half the picks as
+postable.
 
 ### Phase 8: Security and hardening (T2, Internal/Team)
 

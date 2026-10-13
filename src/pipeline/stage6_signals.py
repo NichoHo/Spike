@@ -3,7 +3,7 @@ Stage 6: signals
 Blueprint §6.1 & §6.2:
 Compute per-second signal series:
 - laugh & shout (YAMNet tflite with laughter gate)
-- audio_loud (ffmpeg ebur128 loudness)
+- audio_loud (per-second RMS dBFS), voice_jump (loudness above rolling median), rage_words
 - speech_rate (words/sec smoothed over 5s)
 - replay_heat (yt-dlp heatmap)
 - comment_heat (YouTube comments with laugh weighting)
@@ -37,6 +37,8 @@ from src.config import (
     WEIGHTS_WITH_CHAT,
     DEFAULT_TARGET_CLIPS_PER_HOUR,
     MAX_TARGET_CLIPS,
+    RAGE_WORDS,
+    RELATIVE_TOP_PCT,
     CHAT_BOT_NAMES,
     CHAT_LAUGH_TOKENS,
     CHAT_HYPE_TOKENS,
@@ -68,8 +70,8 @@ def load_yamnet_classmap() -> Tuple[List[int], List[int]]:
     return laugh_indices, shout_indices
 
 
-def compute_yamnet_series(audio_path: Path, duration_s: int) -> Tuple[np.ndarray, np.ndarray]:
-    """Run YAMNet tflite inference and return per-second laugh and shout series."""
+def compute_yamnet_series(audio_path: Path, duration_s: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Run YAMNet tflite inference; return per-second laugh, shout and loudness (dBFS) series."""
     import tensorflow as tf
 
     laugh_idxs, shout_idxs = load_yamnet_classmap()
@@ -128,62 +130,68 @@ def compute_yamnet_series(audio_path: Path, duration_s: int) -> Tuple[np.ndarray
             if s_prob > shout_max_per_sec[t_sec]:
                 shout_max_per_sec[t_sec] = s_prob
 
-    return laugh_max_per_sec, shout_max_per_sec
+    return laugh_max_per_sec, shout_max_per_sec, rms_db_per_second(waveform, duration_s)
+
+
+def relative_threshold(series: np.ndarray, top_pct: float = RELATIVE_TOP_PCT, floor: float = 0.05) -> float:
+    """Value a second must reach to be in this video's top `top_pct` percent (§6.7)."""
+    if len(series) == 0:
+        return floor
+    return max(float(np.percentile(series, 100.0 - top_pct)), floor)
 
 
 def apply_laughter_gate(raw_laugh: np.ndarray, words: List[Dict[str, Any]]) -> np.ndarray:
     """
-    Apply laughter gate (Blueprint §6.1):
-    Laughter counts only when the run lasts >= 0.5s (prob > 0.3)
+    Laughter counts only when the second is in the video's top 2% for laugh probability
     and transcript words fall within 3s of it (drops canned meme laughs played over silence).
-    # ponytail: heuristic tuned against real VODs in Phase 0.
     """
     gated = np.zeros_like(raw_laugh)
     word_times = np.array([w.get("start", 0.0) for w in words])
+    threshold = relative_threshold(raw_laugh)
 
-    threshold = 0.3
-    duration_s = len(raw_laugh)
-
-    for t in range(duration_s):
-        if raw_laugh[t] >= threshold:
-            # Check if words fall within 3s
-            if len(word_times) > 0:
-                has_nearby_words = np.any(np.abs(word_times - t) <= 3.0)
-            else:
-                has_nearby_words = True
-
-            if has_nearby_words:
-                gated[t] = raw_laugh[t]
+    for t in np.nonzero(raw_laugh >= threshold)[0]:
+        if len(word_times) == 0 or np.any(np.abs(word_times - t) <= 3.0):
+            gated[t] = raw_laugh[t]
 
     return gated
 
 
-def compute_audio_loudness(audio_path: Path, duration_s: int) -> np.ndarray:
-    """Compute per-second short-term loudness (LUFS) using ffmpeg ebur128."""
-    cmd = [
-        "ffmpeg", "-hide_banner", "-nostats",
-        "-i", str(audio_path),
-        "-filter_complex", "ebur128=metadata=1",
-        "-f", "null", "-"
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    loudness = np.full(duration_s, -70.0, dtype=np.float32)
+def rms_db_per_second(waveform: np.ndarray, duration_s: int, sr: int = 16000) -> np.ndarray:
+    """Per-second RMS loudness in dBFS from a mono waveform. Silence reads -90."""
+    out = np.full(duration_s, -90.0, dtype=np.float32)
+    for sec in range(min(duration_s, len(waveform) // sr + 1)):
+        chunk = waveform[sec * sr:(sec + 1) * sr]
+        if len(chunk):
+            rms = float(np.sqrt(np.mean(np.square(chunk, dtype=np.float64))))
+            out[sec] = max(-90.0, 20.0 * np.log10(rms + 1e-9))
+    return out
 
-    time_re = re.compile(r't:\s*([\d\.]+)')
-    lufs_re = re.compile(r'M:\s*(-?[\d\.]+)')
 
-    curr_t = None
-    for line in res.stderr.splitlines():
-        tm = time_re.search(line)
-        lm = lufs_re.search(line)
-        if tm:
-            curr_t = float(tm.group(1))
-        if lm and curr_t is not None:
-            sec = int(curr_t)
-            if 0 <= sec < duration_s:
-                loudness[sec] = max(loudness[sec], float(lm.group(1)))
+def compute_voice_jump(loudness_db: np.ndarray, window_s: int = 30) -> np.ndarray:
+    """Loudness minus its rolling median, clipped at 0. A sudden +10 dB is a scream or rage burst."""
+    n = len(loudness_db)
+    out = np.zeros(n, dtype=np.float32)
+    half = window_s // 2
+    for t in range(n):
+        med = np.median(loudness_db[max(0, t - half):min(n, t + half + 1)])
+        out[t] = max(0.0, float(loudness_db[t]) - med)
+    return out
 
-    return loudness
+
+def compute_rage_words(words: List[Dict[str, Any]], duration_s: int, extra_terms: Optional[Set[str]] = None) -> np.ndarray:
+    """Per-second count of rage and shock words from word timestamps, smoothed over 5s."""
+    terms = {t.lower() for t in RAGE_WORDS} | {t.lower() for t in (extra_terms or set())}
+    toks = [(re.sub(r"[^\w']", "", w.get("word", "").lower()), w.get("start", 0.0)) for w in words]
+    counts = np.zeros(duration_s, dtype=np.float32)
+    for i, (tok, start) in enumerate(toks):
+        hit = tok in terms
+        for n in (2, 3):  # multi-word terms such as "are you serious"
+            if not hit and i + n <= len(toks):
+                hit = " ".join(t for t, _ in toks[i:i + n]) in terms
+        sec = int(start)
+        if hit and 0 <= sec < duration_s:
+            counts[sec] += 1.0
+    return np.convolve(counts, np.ones(5) / 5.0, mode="same").astype(np.float32)
 
 
 def compute_speech_rate(words: List[Dict[str, Any]], duration_s: int) -> np.ndarray:
@@ -541,12 +549,15 @@ def run_stage6_signals(
 
     # 1. YAMNet audio events (laugh, shout)
     print("  [stage 6] Running YAMNet audio event detection...")
-    raw_laugh, shout = compute_yamnet_series(audio_path, duration_s)
+    raw_laugh, shout, audio_loud = compute_yamnet_series(audio_path, duration_s)
     laugh = apply_laughter_gate(raw_laugh, all_words)
+    laugh_thr = relative_threshold(raw_laugh)
+    shout_thr = relative_threshold(shout)
 
-    # 2. Loudness
-    print("  [stage 6] Computing audio loudness (ebur128)...")
-    audio_loud = compute_audio_loudness(audio_path, duration_s)
+    # 2. Loudness-derived signals
+    voice_jump = compute_voice_jump(audio_loud)
+    rage_words = compute_rage_words(all_words, duration_s, set(meta.get("rage_terms") or []))
+    jump_thr = relative_threshold(voice_jump, floor=3.0)
 
     # 3. Speech rate
     speech_rate = compute_speech_rate(all_words, duration_s)
@@ -596,6 +607,8 @@ def run_stage6_signals(
             "laugh": laugh,
             "shout": shout,
             "audio_loud": audio_loud,
+            "voice_jump": voice_jump,
+            "rage_words": rage_words,
             "speech_rate": speech_rate,
             "replay_heat": replay_heat,
             "comment_heat": comment_heat,
@@ -620,6 +633,8 @@ def run_stage6_signals(
             "laugh": laugh,
             "shout": shout,
             "audio_loud": audio_loud,
+            "voice_jump": voice_jump,
+            "rage_words": rage_words,
             "speech_rate": speech_rate,
             "replay_heat": replay_heat,
             "comment_heat": comment_heat,
@@ -647,20 +662,15 @@ def run_stage6_signals(
     hype_smoothed = np.convolve(hype, k10, mode="same")
 
     # Peak finding
-    peaks, _ = find_peaks(
-        hype_smoothed,
-        height=1.5,
-        distance=60,
-        prominence=0.8,
-    )
+    # No height cut: always return the top 3 x target by prominence (§6.7)
+    peaks, props = find_peaks(hype_smoothed, distance=45, prominence=0)
 
     hours = max(1.0, duration_s / 3600.0)
     target_clips = min(MAX_TARGET_CLIPS, max(2, int(round(hours * DEFAULT_TARGET_CLIPS_PER_HOUR))))
     n_propose = target_clips * 3
 
-    peak_scores = [(p, float(hype_smoothed[p])) for p in peaks]
-    peak_scores.sort(key=lambda x: x[1], reverse=True)
-    selected_peaks = peak_scores[:n_propose]
+    ranked = sorted(zip(peaks, props["prominences"]), key=lambda x: x[1], reverse=True)
+    selected_peaks = [(int(p), float(hype_smoothed[p])) for p, _ in ranked[:n_propose]]
 
     # Generate candidate peak records
     candidates_from_peaks = []
@@ -722,6 +732,9 @@ def run_stage6_signals(
         signals_npz_path,
         hype=hype,
         hype_smoothed=hype_smoothed,
+        laugh_thr=np.float32(laugh_thr),
+        shout_thr=np.float32(shout_thr),
+        jump_thr=np.float32(jump_thr),
         **all_signals
     )
 
