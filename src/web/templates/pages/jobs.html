@@ -21,6 +21,29 @@
     </div>
   </div>
 
+  <!-- Claude Pro usage: Spike's own `claude -p` calls only -->
+  <div class="card card--compact" style="max-width: 360px;">
+    <div class="card__body stack stack--sm">
+      <span class="small muted">Claude Pro usage by Spike</span>
+      {% for name, key, cap in [("Last 5 hours", "h5", claude_5h_cap), ("Last 7 days", "d7", claude_week_cap)] %}
+        <div class="row row--between">
+          <span class="small">{{ name }}</span>
+          <span class="small tabular font-medium">
+            {{ "{:,}".format(claude[key].tokens) }} tokens · {{ claude[key].calls }} calls{% if cap %} · {{ (claude[key].tokens * 100 / cap) | round | int }}%{% endif %}
+          </span>
+        </div>
+      {% endfor %}
+      {% if claude.by_label %}
+        <details>
+          <summary class="small muted">By operation (7 days)</summary>
+          {% for r in claude.by_label %}
+            <div class="row row--between small"><span>{{ r.label }}</span><span class="tabular">{{ "{:,}".format(r.tokens) }} · {{ r.calls }}x</span></div>
+          {% endfor %}
+        </details>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Jobs Table -->
   <div class="table-wrap">
     <table class="table">

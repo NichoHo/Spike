@@ -224,12 +224,37 @@ async def submit_new_job(
         if not source_id:
             raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Please select a streamer source.")
 
-        target_url = vod_url.strip() if vod_url and vod_url.strip() else f"streamer:{source_id}"
+        src = get_source(source_id)
+        if not src:
+            raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Source not found.")
+
+        from starlette.concurrency import run_in_threadpool
+        from src.watcher import latest_finished_vod, vod_url_for  # lazy: pulls in yt_dlp
+
+        vod_id, vod_title = None, None
+        if vod_url and vod_url.strip():
+            target_url = vod_url_for(src["kind"], vod_url)
+        else:  # "leave empty to fetch the latest past broadcast"
+            item = await run_in_threadpool(latest_finished_vod, src["kind"], src["external_id"])
+            if not item:
+                raise HTTPException(
+                    status_code=HTTP_400_BAD_REQUEST,
+                    detail=f"No finished stream found for {src['display_name'] or src['external_id']} yet. Pick a video or paste a link.",
+                )
+            target_url, vod_id, vod_title = item["url"], item["id"], item.get("title")
+
+        hostname = (urlparse(target_url).hostname or "").lower()
+        if not any(hostname == d or hostname.endswith("." + d) for d in ALLOWED_URL_DOMAINS):
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail=f"URL host '{hostname}' is not supported. Allowed: {', '.join(sorted(ALLOWED_URL_DOMAINS))}"
+            )
         video_id = register_video(
             origin="streamer",
             url_or_path=target_url,
+            external_id=vod_id,
             source_id=source_id,
-            title=target_url,
+            title=vod_title or target_url,
             submitted_by=user.get("id"),
             priority=10,
             settings=settings,

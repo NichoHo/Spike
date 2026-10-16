@@ -128,22 +128,21 @@ class TestFaceTrackEMA(unittest.TestCase):
 
 
 class TestZoomExpr(unittest.TestCase):
-    def test_contains_peak_frame(self):
-        """zoom expr should reference the peak frame number."""
-        expr = _zoom_expr(peak_t=5.0)
-        # At 30fps, peak is at frame 150
+    def test_contains_pulse_frames(self):
+        """A pulse at 5 s starts at frame 150 (30 fps)."""
+        expr = _zoom_expr([{"t": 5.0, "scale": 1.2, "hold_s": 1.0}])
         self.assertIn("150", expr)
+        self.assertIn("0.200", expr)  # strength is scale - 1
 
-    def test_contains_zoom_factor(self):
-        from src.config import ZOOM_FACTOR
-        expr = _zoom_expr(peak_t=3.0)
-        self.assertIn(str(ZOOM_FACTOR), expr)
+    def test_pulses_add_and_are_capped(self):
+        from src.config import ZOOM_MAX
+        expr = _zoom_expr([{"t": 1.0, "scale": 1.2, "hold_s": 1.0}, {"t": 4.0, "scale": 1.35, "hold_s": 1.0}])
+        self.assertIn("0.200*", expr)
+        self.assertIn("0.350*", expr)
+        self.assertTrue(expr.startswith(f"min({ZOOM_MAX},"))
 
-    def test_zero_peak(self):
-        """Zero peak time should not raise."""
-        expr = _zoom_expr(peak_t=0.0)
-        self.assertIsInstance(expr, str)
-        self.assertIn("if(", expr)
+    def test_no_zooms_is_a_constant(self):
+        self.assertEqual(_zoom_expr([]), "1.0")
 
 
 if __name__ == "__main__":

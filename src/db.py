@@ -5,7 +5,7 @@ Blueprint §9: WAL mode, foreign keys on, times in UTC ISO-8601.
 
 import sqlite3
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from src.config import DB_PATH
@@ -48,7 +48,7 @@ def init_db():
             caption_y REAL DEFAULT 0.85,
             music INTEGER DEFAULT 0,
             default_music_mood TEXT DEFAULT 'chill',
-            silence_trim INTEGER DEFAULT 0,
+            silence_trim INTEGER DEFAULT 1,
             punch_in_zoom INTEGER DEFAULT 1,
             chat_offset_s REAL DEFAULT 12.0,
             chat_tokens TEXT,
@@ -145,6 +145,16 @@ def init_db():
             value TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS claude_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            video_id INTEGER,
+            label TEXT NOT NULL,
+            tokens_in INTEGER NOT NULL DEFAULT 0,
+            tokens_out INTEGER NOT NULL DEFAULT 0,
+            cost_usd REAL
+        );
+
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             platform TEXT CHECK(platform IN ('youtube', 'tiktok', 'instagram')),
@@ -186,6 +196,30 @@ def init_db():
             shares INTEGER DEFAULT 0
         );
 
+        CREATE TABLE IF NOT EXISTS clip_ai_edits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            clip_id INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+            comment TEXT NOT NULL,
+            result_json TEXT,
+            ok INTEGER DEFAULT 1,
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS candidate_renders (
+            candidate_id INTEGER PRIMARY KEY REFERENCES candidates(id) ON DELETE CASCADE,
+            status TEXT DEFAULT 'queued',
+            error TEXT,
+            requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TEXT,
+            finished_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS creator_profiles (
+            channel_key TEXT PRIMARY KEY,
+            profile_json TEXT NOT NULL,
+            updated_at TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS stage_timings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
@@ -206,9 +240,29 @@ def init_db():
             "ALTER TABLE clips ADD COLUMN silence_trim INTEGER DEFAULT 0",
             "ALTER TABLE clips ADD COLUMN punch_in_zoom INTEGER DEFAULT 1",
             "ALTER TABLE videos ADD COLUMN settings TEXT",  # JSON processing options chosen at submit
+            "ALTER TABLE videos ADD COLUMN continue_count INTEGER DEFAULT 0",  # Continue presses; Retry shows once one failed again
             "ALTER TABLE clips ADD COLUMN show_hook INTEGER DEFAULT 0",  # hook title burned into the video
             "ALTER TABLE clips ADD COLUMN layout_changes TEXT",  # JSON [{t, layout}] mid-clip layout switches
             "ALTER TABLE clips ADD COLUMN letterbox_style TEXT DEFAULT 'blur'",
+            "ALTER TABLE candidates ADD COLUMN cuts TEXT",  # JSON [[start_s, end_s]] removed from the clip (stream seconds)
+            "ALTER TABLE candidates ADD COLUMN payoff_t REAL",  # stream second of the payoff line, the default zoom spot
+            "ALTER TABLE clips ADD COLUMN cuts TEXT",  # JSON [[start_s, end_s]]; edited on the clip page and by "Ask the editor"
+            "ALTER TABLE clips ADD COLUMN concept TEXT DEFAULT 'single'",  # single, story, pov, top3, top5
+            "ALTER TABLE clips ADD COLUMN segments TEXT",  # JSON [{candidate_id, start_s, end_s, remove, rank, label}], stream seconds
+            "ALTER TABLE clips ADD COLUMN overlay TEXT",   # JSON {pov_text, pov_options, emotion, skip_card, callback_quote, foreshadow}
+            "ALTER TABLE clips ADD COLUMN theme TEXT",
+            "ALTER TABLE clips ADD COLUMN concept_source TEXT",  # ai or user
+            "ALTER TABLE candidates ADD COLUMN concept TEXT DEFAULT 'single'",
+            "ALTER TABLE candidates ADD COLUMN concept_spec TEXT",  # JSON {segments, overlay, theme, concept_source}: what the worker renders
+            "ALTER TABLE sources ADD COLUMN auto_concepts TEXT",  # JSON list of concepts the pipeline may propose
+            "ALTER TABLE candidates ADD COLUMN segments TEXT",  # JSON [[start_s, end_s]] of a story clip (stream seconds)
+            "ALTER TABLE candidates ADD COLUMN zooms TEXT",  # JSON [{t, scale, hold_s}]; t is clip time for stories
+            "ALTER TABLE clips ADD COLUMN zooms TEXT",  # JSON [{t, scale, hold_s}]; an empty list means no zoom
+            "ALTER TABLE candidates ADD COLUMN humor_type TEXT",
+            "ALTER TABLE candidates ADD COLUMN why_funny TEXT",
+            "ALTER TABLE candidates ADD COLUMN status_reason TEXT",  # why a candidate is low_score or rejected
+            "ALTER TABLE sources ADD COLUMN creator_profile TEXT",  # JSON, see src/profile.py
+            "ALTER TABLE sources ADD COLUMN learned_prefs TEXT",  # JSON list of up to 10 strings
             "ALTER TABLE sources ADD COLUMN letterbox_style TEXT DEFAULT 'title'",  # "title" (white bars + title) or "blur"
         ]
         for stmt in migration_statements:
@@ -296,7 +350,9 @@ def register_video(
             INSERT INTO videos (origin, external_id, url, title, source_id, submitted_by, priority, settings, status, stage, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'fetch_meta', ?)
             ON CONFLICT(origin, external_id) DO UPDATE SET
-                status = CASE WHEN status = 'failed' THEN 'queued' ELSE status END,
+                status = CASE WHEN status = 'failed' OR error = 'Cancelled by user' THEN 'queued' ELSE status END,
+                stage = CASE WHEN status = 'failed' OR error = 'Cancelled by user' THEN 'fetch_meta' ELSE stage END,
+                error = CASE WHEN status = 'failed' OR error = 'Cancelled by user' THEN NULL ELSE error END,
                 priority = MAX(priority, excluded.priority),
                 settings = COALESCE(excluded.settings, settings)
             RETURNING id
@@ -376,17 +432,32 @@ def list_jobs(limit: int = 100) -> List[sqlite3.Row]:
         ).fetchall()
 
 
-def retry_job(video_id: int) -> bool:
+def continue_job(video_id: int) -> bool:
+    """Requeue a failed job. The pipeline skips every stage whose output is already on disk."""
     with get_connection() as conn:
         res = conn.execute(
             """
             UPDATE videos
-            SET status = 'queued', error = NULL
+            SET status = 'queued', stage = NULL, error = NULL, continue_count = COALESCE(continue_count, 0) + 1
             WHERE id = ? AND status = 'failed'
             """,
             (video_id,)
         )
         return res.rowcount > 0
+
+
+def restart_job(video_id: int) -> bool:
+    """Requeue a failed job to run from the first stage: its candidates, clips and renders are deleted here
+    (the caller deletes the job's folder)."""
+    with get_connection() as conn:
+        failed = conn.execute("SELECT 1 FROM videos WHERE id = ? AND status = 'failed'", (video_id,)).fetchone()
+        if not failed:
+            return False
+        conn.execute("DELETE FROM candidates WHERE video_id = ?", (video_id,))  # clips and renders cascade
+        conn.execute(
+            "UPDATE videos SET status = 'queued', stage = 'fetch_meta', error = NULL, continue_count = 0 WHERE id = ?", (video_id,)
+        )
+        return True
 
 
 def cancel_job(video_id: int) -> bool:
@@ -413,8 +484,8 @@ def insert_candidate(video_id: int, cand: Dict[str, Any]) -> int:
                 video_id, peak_t, start_s, end_s, origin, chat_mood,
                 signal_score, llm_score, final_score, av_score,
                 punchline, features, title, hook_text, post_caption,
-                hashtags, reason, mood, needs_context, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                hashtags, reason, mood, needs_context, status, humor_type, why_funny, status_reason, cuts, payoff_t, segments, zooms, concept, concept_spec
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
             (
@@ -437,7 +508,16 @@ def insert_candidate(video_id: int, cand: Dict[str, Any]) -> int:
                 cand.get("reason"),
                 cand.get("mood"),
                 1 if cand.get("needs_context") else 0,
-                cand.get("status", "proposed")
+                cand.get("status", "proposed"),
+                cand.get("humor_type"),
+                cand.get("why_funny"),
+                cand.get("status_reason"),
+                json.dumps(cand.get("cuts") or []),
+                cand.get("payoff_t"),
+                json.dumps(cand["segments"]) if cand.get("segments") else None,
+                json.dumps(cand["zooms"]) if cand.get("zooms") is not None else None,
+                cand.get("concept") or "single",
+                json.dumps(cand["concept_spec"]) if cand.get("concept_spec") else None,
             )
         )
         return cur.fetchone()[0]
@@ -470,8 +550,15 @@ def create_or_update_clip(
     status: str = "ready",
     show_hook: int = 0,
     letterbox_style: str = "title",
+    cuts: Optional[str] = None,
+    zooms: Optional[str] = None,
+    concept: Optional[str] = None,
+    segments: Optional[str] = None,
+    overlay: Optional[str] = None,
+    theme: Optional[str] = None,
+    concept_source: Optional[str] = None,
 ) -> int:
-    """Insert or update a clip for a candidate."""
+    """Insert or update a clip for a candidate. `cuts` is JSON [[start_s, end_s]]; None keeps the stored cuts."""
     now = now_utc_iso()
     with get_connection() as conn:
         cur = conn.cursor()
@@ -485,13 +572,15 @@ def create_or_update_clip(
                 UPDATE clips
                 SET version = ?, layout = ?, caption_style = ?, trim_start_s = ?, trim_end_s = ?,
                     music_track = ?, silence_trim = ?, punch_in_zoom = ?, show_hook = ?,
-                    letterbox_style = ?, file_path = ?, thumb_path = ?, status = ?
+                    letterbox_style = ?, file_path = ?, thumb_path = ?, status = ?, cuts = COALESCE(?, cuts), zooms = COALESCE(?, zooms),
+                    concept = COALESCE(?, concept), segments = COALESCE(?, segments), overlay = COALESCE(?, overlay),
+                    theme = COALESCE(?, theme), concept_source = COALESCE(?, concept_source)
                 WHERE id = ?
                 """,
                 (
                     new_version, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, clip_id
+                    file_path, thumb_path, status, cuts, zooms, concept, segments, overlay, theme, concept_source, clip_id
                 )
             )
             return clip_id
@@ -501,14 +590,14 @@ def create_or_update_clip(
                 INSERT INTO clips (
                     candidate_id, version, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, created_at
-                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    file_path, thumb_path, status, created_at, cuts, zooms, concept, segments, overlay, theme, concept_source
+                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
                     candidate_id, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, now
+                    file_path, thumb_path, status, now, cuts, zooms, concept or "single", segments, overlay, theme, concept_source
                 )
             )
             return cur.fetchone()[0]
@@ -528,7 +617,7 @@ def get_clip_with_details(clip_id: int) -> Optional[sqlite3.Row]:
                    cand.punchline, cand.reason, cand.final_score, cand.signal_score,
                    cand.llm_score, cand.mood, cand.chat_mood, cand.features,
                    cand.needs_context, cand.post_caption as cand_caption,
-                   cand.start_s as orig_start_s, cand.end_s as orig_end_s,
+                   cand.start_s as orig_start_s, cand.end_s as orig_end_s, cand.payoff_t, cand.segments AS cand_segments,
                    v.id as video_id, v.title as video_title, v.url as video_url,
                    s.id as source_id, s.display_name as source_name, s.kind as source_kind,
                    s.permission as source_permission
@@ -549,8 +638,9 @@ def list_review_clips(source_id: Optional[int] = None, status: str = "ready") ->
             SELECT c.*,
                    cand.title as cand_title, cand.hook_text as cand_hook,
                    cand.reason, cand.final_score, cand.signal_score, cand.llm_score,
-                   cand.mood, cand.chat_mood,
-                   v.id as video_id, v.title as video_title, v.created_at as video_created_at,
+                   cand.mood, cand.chat_mood, cand.humor_type, cand.why_funny,
+                   cand.start_s as orig_start_s, cand.end_s as orig_end_s,
+                   v.id as video_id, v.title as video_title, v.url as video_url, v.created_at as video_created_at,
                    s.id as source_id, s.display_name as source_name
             FROM clips c
             JOIN candidates cand ON c.candidate_id = cand.id
@@ -689,7 +779,7 @@ def create_source(data: Dict[str, Any]) -> int:
                 data.get("caption_y", 0.85),
                 1 if data.get("music") else 0,
                 data.get("default_music_mood", "chill"),
-                1 if data.get("silence_trim") else 0,
+                1 if data.get("silence_trim", 1) else 0,
                 1 if data.get("punch_in_zoom", 1) else 0,
                 data.get("chat_offset_s", 12.0),
                 data.get("letterbox_style", "title"),
@@ -734,6 +824,150 @@ def update_source(source_id: int, data: Dict[str, Any]) -> bool:
         return res.rowcount > 0
 
 
+def get_json_column(source_id: int, column: str, default: Any) -> Any:
+    """Read a JSON TEXT column of sources (creator_profile, learned_prefs)."""
+    assert column in ("creator_profile", "learned_prefs", "auto_concepts")
+    with get_connection() as conn:
+        row = conn.execute(f"SELECT {column} FROM sources WHERE id = ?", (source_id,)).fetchone()
+    try:
+        return json.loads(row[0]) if row and row[0] else default
+    except (ValueError, TypeError):
+        return default
+
+
+def set_json_column(source_id: int, column: str, value: Any) -> None:
+    assert column in ("creator_profile", "learned_prefs", "auto_concepts")
+    with get_connection() as conn:
+        conn.execute(f"UPDATE sources SET {column} = ? WHERE id = ?", (json.dumps(value), source_id))
+
+
+def get_cached_profile(channel_key: str) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        row = conn.execute("SELECT profile_json FROM creator_profiles WHERE channel_key = ?", (channel_key,)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def set_cached_profile(channel_key: str, profile: Dict[str, Any]) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO creator_profiles (channel_key, profile_json, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(channel_key) DO UPDATE SET profile_json = excluded.profile_json, updated_at = excluded.updated_at",
+            (channel_key, json.dumps(profile), now_utc_iso()),
+        )
+
+
+# ── "Ask the editor" history ──────────────────────────────────────────────────
+
+def add_clip_ai_edit(clip_id: int, comment: str, result: Dict[str, Any], ok: bool) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO clip_ai_edits (clip_id, comment, result_json, ok, created_at) VALUES (?, ?, ?, ?, ?)",
+            (clip_id, comment, json.dumps(result), 1 if ok else 0, now_utc_iso()),
+        )
+
+
+def list_clip_ai_edits(clip_id: int) -> List[Dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT comment, result_json, ok, created_at FROM clip_ai_edits WHERE clip_id = ? ORDER BY id DESC LIMIT 10",
+            (clip_id,),
+        ).fetchall()
+    return [{"comment": r["comment"], "result": json.loads(r["result_json"] or "{}"), "ok": bool(r["ok"]), "created_at": r["created_at"]}
+            for r in rows]
+
+
+# ── Other moments: render a stored candidate on demand ───────────────────────
+
+def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[Dict[str, Any]]]:
+    """low_score and rejected candidates per video with their render job state, best score first.
+    video_ids=None means every video."""
+    if video_ids is not None and not video_ids:
+        return {}
+    marks = ",".join("?" * len(video_ids)) if video_ids else ""
+    where_video = f"c.video_id IN ({marks}) AND " if video_ids else ""
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT c.id, c.video_id, c.title, c.start_s, c.end_s, c.llm_score, c.status, c.status_reason, c.humor_type,
+                   r.status AS render_status, r.error AS render_error
+            FROM candidates c
+            LEFT JOIN candidate_renders r ON r.candidate_id = c.id
+            WHERE {where_video}c.status IN ('low_score', 'rejected')
+            ORDER BY c.video_id, c.llm_score DESC, c.start_s
+            """,
+            tuple(video_ids or ()),
+        ).fetchall()
+    out: Dict[int, List[Dict[str, Any]]] = {}
+    for r in rows:
+        out.setdefault(r["video_id"], []).append(dict(r))
+    return out
+
+
+def enqueue_candidate_render(candidate_id: int, user_id: Optional[int] = None) -> bool:
+    """Queue a worker job that fetches the section and renders this candidate. False if it is already queued
+    or running, or the candidate is gone."""
+    with get_connection() as conn:
+        if not conn.execute("SELECT 1 FROM candidates WHERE id = ?", (candidate_id,)).fetchone():
+            return False
+        row = conn.execute("SELECT status FROM candidate_renders WHERE candidate_id = ?", (candidate_id,)).fetchone()
+        if row and row["status"] in ("queued", "running"):
+            return False
+        conn.execute(
+            "INSERT INTO candidate_renders (candidate_id, status, requested_by, created_at) VALUES (?, 'queued', ?, ?) "
+            "ON CONFLICT(candidate_id) DO UPDATE SET status = 'queued', error = NULL, requested_by = excluded.requested_by, "
+            "created_at = excluded.created_at, finished_at = NULL",
+            (candidate_id, user_id, now_utc_iso()),
+        )
+    return True
+
+
+def claim_candidate_render() -> Optional[int]:
+    """Atomically take the oldest queued moment render. Returns the candidate id."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE candidate_renders SET status = 'running'
+            WHERE candidate_id = (SELECT candidate_id FROM candidate_renders WHERE status = 'queued' ORDER BY created_at LIMIT 1)
+            RETURNING candidate_id
+            """
+        ).fetchone()
+    return row[0] if row else None
+
+
+def finish_candidate_render(candidate_id: int, error: Optional[str] = None) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE candidate_renders SET status = ?, error = ?, finished_at = ? WHERE candidate_id = ?",
+            ("failed" if error else "done", error, now_utc_iso(), candidate_id),
+        )
+        if not error:  # it is a real pick now
+            conn.execute("UPDATE candidates SET status = 'selected', status_reason = 'rendered by hand' WHERE id = ?", (candidate_id,))
+        else:  # a clip that was waiting for this render keeps its old file
+            conn.execute("UPDATE clips SET status = 'ready' WHERE candidate_id = ? AND status = 'rendering'", (candidate_id,))
+
+
+def set_candidate_concept(candidate_id: int, concept: str, spec: Dict[str, Any], title: Optional[str], hook_text: Optional[str]) -> None:
+    """Point a candidate at a concept spec (segments, overlay, theme). The worker renders it from this."""
+    segs = spec.get("segments") or []
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE candidates SET concept = ?, concept_spec = ?, title = COALESCE(?, title), hook_text = COALESCE(?, hook_text), "
+            "start_s = ?, end_s = ?, segments = ?, status = 'selected' WHERE id = ?",
+            (concept, json.dumps(spec), title, hook_text, min([s["start_s"] for s in segs] or [0]), max([s["end_s"] for s in segs] or [0]),
+             json.dumps([[s["start_s"], s["end_s"]] for s in segs]) if concept != "single" else None, candidate_id),
+        )
+
+
+def set_clip_overlay(clip_id: int, overlay: Dict[str, Any]) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE clips SET overlay = ? WHERE id = ?", (json.dumps(overlay), clip_id))
+
+
+def get_candidate(candidate_id: int) -> Optional[sqlite3.Row]:
+    with get_connection() as conn:
+        return conn.execute("SELECT * FROM candidates WHERE id = ?", (candidate_id,)).fetchone()
+
+
 def delete_source(source_id: int) -> bool:
     with get_connection() as conn:
         res = conn.execute("DELETE FROM sources WHERE id = ?", (source_id,))
@@ -748,6 +982,35 @@ def log_event(level: str, message: str, video_id: Optional[int] = None):
             "INSERT INTO events (ts, video_id, level, message) VALUES (?, ?, ?, ?)",
             (now_utc_iso(), video_id, level, message)
         )
+
+
+def add_claude_usage(label: str, tokens_in: int, tokens_out: int, cost_usd: Optional[float], video_id: Optional[int] = None) -> None:
+    """One `claude -p` call. tokens_in counts cached input too."""
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO claude_usage (ts, video_id, label, tokens_in, tokens_out, cost_usd) VALUES (?, ?, ?, ?, ?, ?)",
+            (now_utc_iso(), video_id, label, tokens_in, tokens_out, cost_usd),
+        )
+
+
+def claude_usage_summary() -> Dict[str, Any]:
+    """Spike's own Claude usage: tokens and calls in the last 5 hours and 7 days (rolling), with the 7-day
+    tokens per operation. Plan limits are not published, so this is a count, not a percentage of the plan."""
+    now = datetime.now(timezone.utc)
+    out: Dict[str, Any] = {}
+    with get_connection() as conn:
+        for name, delta in (("h5", timedelta(hours=5)), ("d7", timedelta(days=7))):
+            row = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(tokens_in), 0), COALESCE(SUM(tokens_out), 0), COALESCE(SUM(cost_usd), 0) "
+                "FROM claude_usage WHERE ts >= ?", ((now - delta).isoformat(),),
+            ).fetchone()
+            out[name] = {"calls": row[0], "tokens_in": row[1], "tokens_out": row[2], "tokens": row[1] + row[2], "cost_usd": row[3]}
+        rows = conn.execute(
+            "SELECT label, COUNT(*), SUM(tokens_in + tokens_out) FROM claude_usage WHERE ts >= ? GROUP BY label ORDER BY 3 DESC",
+            ((now - timedelta(days=7)).isoformat(),),
+        ).fetchall()
+    out["by_label"] = [{"label": r[0], "calls": r[1], "tokens": r[2]} for r in rows]
+    return out
 
 
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:

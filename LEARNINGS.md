@@ -1,5 +1,261 @@
 # Spike: Learnings
 
+## 2026-10-15: Twitch finder uses Spike's Twitch app; verified live
+
+- **Decided (user):** the Twitch finder uses Spike's own `TWITCH_CLIENT_ID`
+  and `TWITCH_CLIENT_SECRET`. The separate-app requirement and the
+  `TWITCH_FINDER_*` settings are removed. Risk: if Twitch revokes the ID,
+  Spike's VOD and community-clip lookups stop too, until a new app is put in
+  `.env`. Docs updated (BLUEPRINT §12 rule 7 and Phase 8, OUTREACH §6.2 B).
+- **Learned (verified live):** Indonesian Twitch is nearly empty: 59 live
+  streams in all categories at 19:50 WIB, the biggest at 22 viewers, none in
+  Just Chatting. Indonesian leads come from YouTube.
+- **Learned (verified live):** English Just Chatting: 188 in-range channels
+  from 2 pages, 119 candidates, 77 passed, 5 added (cap), 2 with a bio
+  email; 128 s for the run. The Helix field names, the `3h2m10s` durations,
+  and the stop-paging-below-range logic all work on real data.
+
+## 2026-10-14: Outreach Twitch Helix finder, accepted risk (build order step 5)
+
+- **Decided (user):** use Twitch Helix to find leads and accept the
+  Developer Agreement Schedule 1 risk. This reverses the "Twitch is not
+  used" decisions below. Recorded in `BLUEPRINT.md` §12 rule 7 and
+  `OUTREACH.md` §6.2 B.
+- **Done:** `src/outreach/twitch.py`. It samples `GET /streams` at the listed
+  hours, averages viewers over 24 h of samples, then nightly `GET /users`
+  for bios and `GET /videos?type=archive` for activity, with the same filters,
+  scoring and dedup as YouTube. New tables `twitch_searches` and
+  `twitch_samples`, lead columns `twitch_search_id` and `clip_stream_at`.
+  Finder settings card (off by default, sample hours, its own cap, Sample
+  now). The review table shows "Audience" (subscribers or average live
+  viewers). 5 new tests (32 outreach total).
+- **Enforced:** the finder refuses to run unless `TWITCH_FINDER_CLIENT_ID`
+  is set and differs from Spike's `TWITCH_CLIENT_ID`.
+- **Learned (verified, Helix reference and API guide, 2026-10-14):**
+  - Get Streams returns live streams only, sorted by viewers (highest first),
+    up to 100 a page, with repeatable `game_id` and `language` filters.
+  - Get Users takes up to 100 logins. Get Videos returns `duration` like
+    `3m21s`, plus `view_count` and `created_at`. Get Games matches names exactly.
+  - All four accept an app token. Rate headers are `Ratelimit-Limit`,
+    `-Remaining` and `-Reset` (a Unix time). The guide page does not state
+    the bucket size.
+- **Decided:** Twitch lead data follows the 24-hour cache rule: nightly
+  refresh or purge. `clip_stream_at` keeps the clipped stream's date for
+  follow-ups, as our own record. `seen` rows (ID plus our reason) are kept
+  30 days for Twitch too, as part of the accepted risk.
+
+## 2026-10-14: Outreach sizes by views per stream (build order step 4)
+
+- **Done:** `videos.list` in the finder adds `statistics`. New lead column
+  `vod_views` = median views of streams in the window, leaving out streams
+  under a day old. Saved searches get `min_views` / `max_views`
+  (defaults by type, set in the form by `data-sets-fields`); subscribers
+  stay as a cheap pre-filter. Review table shows "Views per stream" and
+  labels Shorts "YouTube only". 2 new tests (27 outreach total).
+- **Learned (verified, Google quota calculator, 2026-10-14):** `videos.list`
+  costs 1 unit per call; the `part` list does not change it, so the
+  statistics part is free.
+- **Learned (verified live):** live searches: 222 to 15,644 views per
+  stream, 1,000 to 100,000 default kept 3 sensible leads. Re-upload
+  searches: 25 of 27 channels under 140 views per stream. YouTube data
+  (subscribers or views) cannot size a Twitch-first streamer; that needs
+  Twitch live viewers (step 5).
+- **Decided:** median, not mean (one viral VOD). Missing view data skips the
+  check instead of failing it.
+- **Next:** step 5, Twitch Helix finder on a separate client ID.
+
+## 2026-10-14: Outreach re-upload pass for Twitch/Kick streamers (build order step 3)
+
+- **Done:** saved searches have a type (`searches.kind`: `live` or
+  `reupload`). Re-upload searches drop `eventType` and count long uploads as
+  streams. Twitch/Kick links in descriptions are stored on the lead
+  (`twitch`, `kick`, `stream_source`); re-upload channels need one.
+  `db.find_streamer` stops one person becoming two leads (YouTube re-upload
+  channel + hand-added `twitch:login`, or official + fan channel).
+  `db.lead_keys` makes opt-outs cover every linked identity. Gemini scores
+  fan/compilation channels low. Real column migrations (`_MIGRATIONS`) so
+  an existing `outreach.db` upgrades. 5 new tests (25 outreach total).
+- **Learned (verified live, 1 search call):** "twitch vod" (en) gave 34
+  channels with median ~30 subscribers; 3 had 10,000+; 4 linked Twitch
+  (e.g. KotoneSoundVods -> kotonesound). With a 10,000 floor nothing passes.
+  Re-upload searches now default to a 1,000 floor in the form; queries
+  should name a game or category.
+- **Next:** step 4, average VOD views as the size measure plus the
+  "YouTube only" label on the Shorts count.
+
+## 2026-10-14: Outreach "Add lead" form (build order step 2)
+
+- **Done:** Add lead dialog on `/outreach` (`POST /outreach/leads/add`),
+  `service.add_lead` and `parse_lead_url` (YouTube, Twitch, Kick),
+  `youtube.resolve_channel`, columns `vod_url` and `vod_manual`, Spike
+  sources created with the lead's platform as `kind`. 6 new tests.
+- **Fixed (pre-existing bug, verified live):** `watcher.fetch_twitch_latest_vods`
+  built `twitch.tv/videos/v2899740602` from yt-dlp's flat-listing ids. That
+  URL is invalid (yt-dlp reads it as a channel named "videos"), so every
+  auto-processed Twitch source would have failed at stage 1. New
+  `watcher.twitch_vod_id` strips the `v`. No Twitch jobs existed yet.
+- **Learned (verified live, yt-dlp 2026.08.19):** Twitch VOD metadata gives
+  `uploader_id` = login, `timestamp`, `duration`. Kick VOD metadata gives a
+  numeric `uploader_id`, so the slug must come from the URL. A Kick VOD of a
+  stream still running reports `live_status = is_live` and no duration.
+  yt-dlp has no Kick channel-videos extractor. Kick's own
+  `/api/v2/channels/<slug>/videos` answered without auth (used only to find
+  a test VOD, not in code). Not verified: a full Spike run on a Kick VOD.
+- **Decided:** adding a lead counts as the streamer review. Non-YouTube
+  leads are keyed `twitch:<login>` / `kick:<slug>` instead of a schema
+  change, so opt-outs and dedup stay one column. A YouTube add with nothing
+  to clip is refused at the form (input kept) rather than failing later.
+- **Next:** step 3, the YouTube pass for Twitch VOD channels.
+
+## 2026-10-14: Outreach finder, seen cache and rate limiter (build order step 1)
+
+- **Done:** `seen` table in `outreach.db` (platform, channel_id, reason,
+  checked_at). The finder skips channels dropped in the last 30 days, and
+  the nightly run deletes older rows. New `src/outreach/net.py`: one
+  shared rate limiter (60 a minute, evenly spaced) and `get_json` with
+  retries on 429/5xx/network errors, obeying `Ratelimit-*` and
+  `Retry-After`. `youtube.call` uses it and charges quota per attempt. The
+  run summary now counts channels skipped as seen. 4 new tests (17 total).
+- **Decided:** no jitter (it hides nothing; the platform sees what we look
+  up, not when). Channels that pass the filters but miss the daily cap are
+  not marked seen, so they get another chance. Seen rows keep only the ID
+  and our reason, and are deleted after 30 days (YouTube III.E.4).
+- **Next (user's build order):** 2 "Add lead" form, 3 YouTube pass for
+  Twitch VOD channels, 4 average VOD views and the "YouTube only" label,
+  5 Twitch Helix finder on a separate client ID.
+
+## 2026-10-14: Outreach built (YouTube only, Phase 7c)
+
+- **Done:** `src/outreach/` (db, youtube finder, google OAuth/Gmail/Drive,
+  service lifecycle, daemon, routes), `/outreach` page with 9 tabs,
+  `spike outreach` command (started by `spike web`), stage 1/2
+  `max_process_s` cap for "first 2 hours only", `tests/test_outreach.py`
+  (13 tests). Docs: `OUTREACH.md` §6.2, §6.4, §6.8; Blueprint 7c status and
+  two Phase 8 rows; DESIGN.md status map, icon, page recipe.
+- **Learned (verified, Google quota calculator 2026-10-14):** `search.list`
+  now has its own bucket: 100 calls a day, 1 unit each. The old "100 units
+  per search" figure is wrong. Other methods share 10,000 units.
+- **Learned (verified, Gmail scopes page):** `gmail.metadata` is a
+  restricted scope (headers, no body); `gmail.send` is sensitive. OAuth apps
+  left in "Testing" get refresh tokens that expire after 7 days (several
+  sources agree).
+- **Learned (verified, live run):** 1 search found 44 channels, 10 passed
+  the filters, 8 were stored, for 1 search call and 27 units. None had a
+  public email in the description, so Needs contact will be the busy tab.
+  `relevanceLanguage=en` + `regionCode=US` still returned a Portuguese
+  channel, and corporate channels (ESPN radio) scored 55 to 65. Fixed with
+  a language-match drop, a `max_shorts_14d` filter (default 10), and a
+  corporate rule in the fit prompt.
+- **Learned (verified, test):** yt-dlp `download_ranges` cuts YouTube
+  audio-only downloads correctly (19 s video, 10 s cap, 10.0 s file).
+- **Learned (code):** `scripts/build_icons.py` dropped `fill="currentColor"`
+  that the committed sprite has. Fixed the script; the sprite was
+  appended to, not rebuilt.
+- **Decided:** Twitch is not built (Developer Agreement, Schedule 1). Added
+  statuses `clip_failed` and `bounced`. Drafts wait for sender name and
+  proof link. Google tokens are refused without `SPIKE_ENCRYPTION_KEY`.
+  Outreach POSTs check `Origin` (Tailscale headers make CSRF possible).
+- **Open:** connect a real Google account and run one lead end to end.
+  Check whether `threads.get` metadata returns `snippet`. Phase 7b still
+  gates real sends. 4 old tests (`test_phase4`, `test_phase5`) fail on
+  missing local data (`/clips/1`, `data/videos/1/sections`), not on this work.
+
+## 2026-10-14: Outreach dashboard design and lead sources
+
+- **Done:** replaced `OUTREACH.md` §6 with the Outreach dashboard design.
+  Email template now uses 1 trial clip. `BLUEPRINT.md`: §12 rule 7
+  rewritten, new Phase 7c, new Phase 8 row. No code changed.
+- **Learned (verified, Twitch Developer Agreement, read 2026-10-14):**
+  Schedule 1 bans "using data collected from the Twitch APIs to target end
+  users with marketing material or commercial offers" and "creating
+  demographic clusters for the purpose of contacting or targeting" users.
+  Marketing use needs a separate agreement and approval. Twitch content may
+  be cached 24 hours only.
+- **Learned (verified, YouTube API Developer Policies):** no rule against
+  contacting creators. Limits: no aggregation across channels (III.E.2.a),
+  non-authorized data and statistics kept 30 days at most (III.E.4),
+  no scraping (III.E.6), exactly one API project per API client
+  (III.D.1.c), no spam (III.I.11).
+- **Learned (verified, code):** per-source `target_clips` already overrides
+  the clip count (`src/pipeline/runner.py`), so 1 trial clip needs no
+  pipeline change.
+- **Decided:** Outreach is a section of the Spike web app (`/outreach`,
+  `src/outreach/`, `data/outreach.db`, own finder process), not a separate
+  app. Same login, design system, and direct links to the clip editor.
+  Supersedes "Scout, separate tool" in the entry below.
+- **Decided:** leads come from the YouTube Data API (free, within its
+  rules), plus manual URLs and Whop. Twitch Helix is not used for leads. A
+  paid database is the later path for Twitch and Kick.
+- **Decided:** three human reviews (lead, clip, email), all in bulk. Trial
+  clips are shared by a Drive link because `none` sources cannot post.
+  Limit 3 trial clips a day from the first 2 hours of a stream.
+- **Decided (user):** a good lead with no email or socials is kept with
+  blank contact fields. Approved no-contact leads wait in `needs_contact`
+  (no trial clip) until a contact is added by hand or the nightly refresh
+  finds one.
+- **Open:** read Kick's API terms. Check Gmail and Drive scope names, and
+  whether `search.list` with `eventType=completed` finds streamers well.
+
+## 2026-10-14: Pricing, email rewrite, automatic lead finding
+
+- **Done:** rewrote `OUTREACH.md` §2 (pricing), §4.2 (email), §6 (Scout
+  tool). Updated `BLUEPRINT.md` §12 rule 7. No code changed.
+- **Learned (third-party estimates, not verified):** YouTube Shorts pays
+  about $0.02 to $0.08 per 1,000 views for entertainment with a mixed
+  audience. TikTok Creator Rewards needs 10,000 followers, 100,000 views in
+  30 days, videos over 1 minute, and original content. YouTube's reused
+  content rules can block a clip channel even with permission. Platform
+  revenue is about 1/15 to 1/50 of a $1 CPM creator fee.
+- **Learned (vendor pages, not verified):** Whop holds campaign budgets in
+  escrow and pays on approved views; reported fee about 10%.
+  influencers.club sells Twitch and Kick creator data with emails (free
+  tier). Streams Charts API is about $199 a month for 500 credits, no
+  emails. Modash API starts at $16,200 a year and has no Twitch.
+- **Decided:** default offer is pay per view on team accounts: $1 per 1,000
+  views (about $0.50 for SEA creators), 10,000-view minimum per clip, $100
+  per-clip cap, $150 to $500 monthly cap, 1 free week. Rejected the user's
+  "pay per 100,000-view clip" model: most work goes unpaid and the unit is
+  unclear. The team keeps platform revenue, written into the agreement.
+- **Decided:** Scout, a separate daily tool on a licensed creator database
+  (not Twitch or YouTube APIs): pull, score with the LLM, make 3 Spike
+  samples a day as `none` sources, save Gmail drafts, a human clicks Send.
+  Own process and `data/scout.db`. Supersedes the "spreadsheet by hand"
+  decision in the entry below. (Superseded 2026-10-14: Outreach section
+  inside Spike, see above.)
+- **Open:** pick a lead vendor after a free-tier test and read its terms.
+  Set up a separate sending domain. Clip quality (Phase 7b) still gates
+  everything.
+
+## 2026-10-14: Client outreach research
+
+- **Done:** wrote `OUTREACH.md` (targets, contact order, pitch, legal,
+  automation). Added rule 7 to `BLUEPRINT.md` §12 and a pointer in §15. No
+  code changed.
+- **Learned (verified, official terms):** Twitch Developer Agreement
+  Schedule 1 bans using Twitch API data to target end users with commercial
+  offers. YouTube API Developer Policies ban aggregating API data across
+  channels (III.E.2.1), cap stored non-authorized data at 30 days
+  (III.E.4.d), and ban scraping (III.E.6). The YouTube business email sits
+  behind a login and CAPTCHA.
+- **Learned (vendor blogs, not verified):** Whop Content Rewards pays
+  clippers $0.20 to $6 per 1,000 views, average about $1. Agencies sell at
+  about $0.50 to $4 CPM with $5,000+ minimums. Direct streamer deals have no
+  public rate card. Cold email replies average 1 to 2%.
+- **Learned (secondary source):** Indonesia UU PDP treats a named person's
+  business email as personal data. Cold email relies on legitimate interest
+  (grey zone): identify yourself and give an opt-out.
+- **Decided:** no lead finder in the Spike app (terms above, and it is a
+  sales job, not a clip job). Leads go in a spreadsheet by hand
+  (superseded 2026-10-14: Scout tool, see above). Prospect
+  samples use the existing `none` permission. A separate script on a
+  licensed creator database comes only after the first paying client.
+- **Decided:** target mid-size, high-energy, talkative creators with long
+  sessions and few Shorts. Lead with 3 free clips by business email.
+  Creators who already fund Whop clipping campaigns are the warmest leads.
+- **Open:** fix clip quality (Phase 7b) and the Indonesian transcript issue
+  before any outreach. Size ranges in `OUTREACH.md` §3.1 are a guess; tune
+  them after 30 contacts.
+
 ## 2026-10-13: Clip quality review (IShowSpeed FIFA stream, video #38)
 
 - **Done:** reviewed run #38 (`MBod0tK46Js`, 2.8 h, 6 clips) against the
@@ -80,6 +336,13 @@
   default; the user can change it or build any concept by hand. POV rules
   from POV-format guides (socialk.it, meme.com, sendible): caption is the
   setup and the clip the payoff, short enough to read in 1 s, no bragging.
+- **Corrected (2026-10-14):** a POV caption is NOT about the clip. It is
+  an unrelated everyday situation; the clip is the out-of-context reaction.
+  The earlier "caption is the setup" entry above is superseded.
+- **Done (2026-10-14):** concept research in `reports/Clip concepts.md`
+  (POV, Story, Top N). Decided: Top 3 by default, Top 5 only with 5 strong
+  themed entries (no study compares them; fewer swipe points). POV
+  captions use a user-filled bank, never scraped.
 - **Open:** check why stage 3 got no YouTube chat for #38. User has not
   reviewed #38 past 44:00, so recall there is unknown.
 
@@ -406,3 +669,21 @@
   Mentions are disabled, so a stream title cannot ping @everyone.
   `tests/conftest.py` runs tests on a copy of `spike.db`.
 - **Open:** set `SPIKE_PUBLIC_URL` in `.env` once Tailscale is installed.
+
+## 2026-10-15: Quality v2 build notes (Steps 1 to 5)
+
+- **Learned (verified):** on Windows `claude` is an npm `.CMD` shim. `cmd.exe` cuts every
+  argument at its first newline, so a multi-line `--system-prompt` lost all its rules and the
+  model answered in prose. `run_claude` now calls the real `claude.exe` behind the shim.
+- **Learned (verified):** `--strict-mcp-config --disable-slash-commands` cut a call from
+  about 34k to about 4k input tokens. The 20-clip editor prompt is about 23k tokens and took
+  about 135 s on Sonnet.
+- **Learned (verified):** the Gemini free tier allows 20 requests per day on the Flash judge
+  model. The pipeline cannot judge 100+ candidates on it. Stage 7 now stops and stores nothing
+  when more than a quarter of the judge calls fail, instead of silently skipping candidates.
+- **Learned:** a stage-6 temp WAV (326 MB for 2.8 h) fails on a full disk. Audio is now decoded
+  through a pipe.
+- **Learned:** asking the chunk scanner for hubris lines in the same list as moments cut recall
+  from 7/9 to 3/9 (the model filled its slots with hubris). Keep them as two separate lists.
+- **Learned (verified, Step 7):** a re-render assumed its section file starts 5 s before the clip start. Moving the trim start therefore never changed which frames were cut, and an AI edit beyond the padding would have rendered the wrong footage. Stage 8 now writes `section_<id>.json` with the stream time of second 0, and every render reads it. Older sections fall back to the old assumption.
+- **Learned (verified):** zooms are applied per layout (`split` zooms only the facecam panel). Checked on a test render: the top panel changed, the bottom panel did not.

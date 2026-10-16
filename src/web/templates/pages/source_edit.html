@@ -82,16 +82,6 @@
         <p class="field__help" style="margin-top: calc(var(--space-2) * -1);">When this streamer finishes a stream or uploads a video, Spike starts making clips for you. You don't need to paste a link. It checks every 15 minutes and waits until a live stream has ended. Clips still show up in Review for you to approve.</p>
 
         <div class="field">
-          <label class="field__label">Default framing layout</label>
-          {{ ui.layout_picker('src-layout', source.layout if source and source.layout else 'split', source.letterbox_style if source and source.letterbox_style else 'title') }}
-          <script>
-            document.querySelectorAll('input[name="layout"]').forEach((r) => r.addEventListener('change', () => {
-              document.getElementById('src-layout-letterbox-opt').style.display = r.value === 'letterbox' ? '' : 'none';
-            }));
-          </script>
-        </div>
-
-        <div class="field">
           <label class="field__label">Default caption style</label>
           {{ ui.caption_picker('src-caption', source.caption_style if source and source.caption_style else 'bold_pop') }}
         </div>
@@ -121,15 +111,24 @@
           <label class="field__label">Effects & Pacing</label>
           <div class="stack" style="gap: var(--space-3);">
             <label class="switch-row">
-              <input type="checkbox" class="switch" role="switch" name="silence_trim" value="1" {% if source and source.silence_trim == 1 %}checked{% endif %}>
+              <input type="checkbox" class="switch" role="switch" name="silence_trim" value="1" {% if not source or source.silence_trim == 1 %}checked{% endif %}>
               <span>Silence trim (cut internal pauses > 1.2s)</span>
-            </label>
-            <label class="switch-row">
-              <input type="checkbox" class="switch" role="switch" name="punch_in_zoom" value="1" {% if not source or source.punch_in_zoom == 1 or source.punch_in_zoom is none %}checked{% endif %}>
-              <span>Punch-in zoom (1.15x zoom ramp at peak moment)</span>
             </label>
           </div>
         </div>
+
+        <fieldset class="field" style="border: 0; padding: 0; margin: 0;">
+          <legend class="field__label">Concepts</legend>
+          <p class="field__help">What the pipeline may propose for this source. A moment is used in at most one output. Top 5 is off by default: it needs five strong moments on one theme.</p>
+          <div class="stack" style="gap: var(--space-2); margin-top: var(--space-2);">
+            {% for key, label in concepts %}
+            <label class="switch-row">
+              <input type="checkbox" class="switch" role="switch" name="auto_concepts" value="{{ key }}" {% if key in auto_concepts %}checked{% endif %}{% if key == 'single' %} disabled{% endif %}>
+              <span>{{ label }}{% if key == 'single' %} (always on){% endif %}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
 
         <div class="field">
           <label class="field__label" for="field-style-notes">Style notes (optional)</label>
@@ -145,5 +144,84 @@
       </button>
     </div>
   </form>
+
+  {% if source %}
+  <form method="post" action="/sources/{{ source.id }}/profile" class="card" id="creator-profile" style="margin-top: var(--space-6);">
+    <div class="card__body stack">
+      <section class="stack stack--sm">
+        <h2 style="font-size: 16px; font-weight: 600; color: var(--color-text);">Creator profile</h2>
+        <p class="field__help">
+          Tells the clip finder what is funny for this creator and how long a moment runs. Spike builds it from
+          the first processed VOD. Anything you edit here is kept when the profile is rebuilt.
+        </p>
+        {% if profile_status == 'saved' %}<p class="small">Profile saved.</p>
+        {% elif profile_status == 'rebuilt' %}<p class="small">Profile rebuilt from the latest VOD.</p>
+        {% elif profile_status == 'failed' %}<p class="small" role="alert">Rebuild failed. The old profile is unchanged. Check the Claude CLI login and try again.</p>
+        {% elif profile_status == 'no_vod' %}<p class="small" role="alert">No processed VOD for this source yet. The profile builds itself on the first run.</p>
+        {% endif %}
+
+        <div class="field">
+          <label class="field__label" for="pf-name">Name used in titles</label>
+          <input type="text" name="display_name" id="pf-name" class="input" value="{{ profile.display_name or '' }}" maxlength="80">
+        </div>
+
+        <div class="row">
+          <div class="field" style="flex: 1;">
+            <label class="field__label" for="pf-type">Creator type</label>
+            <select name="creator_type" id="pf-type" class="select">
+              {% for t in creator_types %}<option value="{{ t }}" {% if (profile.creator_type or 'other') == t %}selected{% endif %}>{{ t | replace('_', ' ') | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field" style="flex: 1;">
+            <label class="field__label" for="pf-energy">Energy</label>
+            <select name="energy" id="pf-energy" class="select">
+              {% for e in ['loud', 'medium', 'calm'] %}<option value="{{ e }}" {% if (profile.energy or 'medium') == e %}selected{% endif %}>{{ e | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <fieldset class="field" style="border: 0; padding: 0; margin: 0;">
+          <legend class="field__label">Humor styles</legend>
+          <div class="row" style="flex-wrap: wrap; gap: var(--space-3);">
+            {% for h in humor_styles %}
+            <label class="switch-row"><input type="checkbox" name="humor_styles" value="{{ h }}" {% if h in (profile.humor_styles or []) %}checked{% endif %}><span>{{ h | capitalize }}</span></label>
+            {% endfor %}
+          </div>
+        </fieldset>
+
+        {% for key, label, help in [
+          ('aliases', 'Other names', 'One per line.'),
+          ('fans_clip', 'What fans clip', 'One per line, 3 to 6.'),
+          ('recurring_bits', 'Running bits and catchphrases', 'One per line.'),
+          ('baseline_behaviors', 'Does this all the time (not clip-worthy alone)', 'For example: rages at every conceded goal.'),
+          ('languages', 'Languages', 'One per line.'),
+          ('avoid', 'Avoid', 'Sponsor reads, sensitive topics. One per line.'),
+        ] %}
+        <div class="field">
+          <label class="field__label" for="pf-{{ key }}">{{ label }}</label>
+          <textarea name="{{ key }}" id="pf-{{ key }}" class="textarea" rows="3">{{ (profile[key] or []) | join('\n') }}</textarea>
+          <p class="field__help">{{ help }}</p>
+        </div>
+        {% endfor %}
+
+        <div class="field">
+          <label class="field__label" for="pf-notes">Notes</label>
+          <textarea name="notes" id="pf-notes" class="textarea" rows="3" maxlength="600">{{ profile.notes or '' }}</textarea>
+        </div>
+
+        {% if learned_prefs %}
+        <div class="field">
+          <span class="field__label">Learned from your reviews</span>
+          <ul class="small">{% for p in learned_prefs %}<li>{{ p }}</li>{% endfor %}</ul>
+        </div>
+        {% endif %}
+      </section>
+    </div>
+    <div class="card__footer">
+      <button type="submit" formaction="/sources/{{ source.id }}/profile/rebuild" formnovalidate class="btn btn--secondary">Rebuild profile</button>
+      <button type="submit" class="btn btn--primary">Save profile</button>
+    </div>
+  </form>
+  {% endif %}
 </div>
 {% endblock %}

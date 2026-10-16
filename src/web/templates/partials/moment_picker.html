@@ -1,0 +1,21 @@
+{# Moment picker dialog. Drive it with openMomentPicker({videoId, clipId, concept, preselect, swap}). See static/js/moments.js #}
+<dialog id="moment-picker" class="dialog dialog--wide" aria-labelledby="mp-title">
+  <div class="dialog__body">
+    <h2 class="dialog__title" id="mp-title" data-mp-title>Pick moments</h2>
+    <fieldset class="field" data-mp-concepts style="border: 0; padding: 0; margin: 0;">
+      <legend class="field__label">Make it a</legend>
+      <div class="segmented" role="radiogroup" aria-label="Concept">
+        {% for key, label in [('single', 'Single'), ('story', 'Story'), ('pov', 'POV'), ('top3', 'Top 3'), ('top5', 'Top 5')] %}
+          <input type="radio" id="mp-c-{{ key }}" name="mp-concept" value="{{ key }}"><label for="mp-c-{{ key }}">{{ label }}</label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <ul class="mp-list" data-mp-list aria-label="Moments of this video"></ul>
+    <p class="mp-hint small" data-mp-hint role="status" aria-live="polite"></p>
+  </div>
+  <div class="dialog__footer">
+    <button type="button" class="btn btn--secondary" data-mp-cancel>Cancel</button>
+    <button type="button" class="btn btn--primary" data-mp-build disabled>Build clip</button>
+  </div>
+</dialog>
+<script src="/static/js/moments.js" defer></script>

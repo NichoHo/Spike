@@ -28,6 +28,17 @@
   </span>
 {%- endmacro %}
 
+{# Stream time of a moment, linked to the source at that second when the source has a public page #}
+{% macro time_chip(url, seconds, inline=False) -%}
+  {%- set href = url | stream_link(seconds) -%}
+  {%- set cls = "time-link" if inline else "time-chip" -%}
+  {%- if href -%}
+    <a class="{{ cls }}" href="{{ href }}" target="_blank" rel="noopener" title="Open the source video at {{ seconds | stream_time }}" aria-label="Stream time {{ seconds | stream_time }}, opens the source video">{{ seconds | stream_time }}{{ _svg("arrow-up-right", 14) }}</a>
+  {%- else -%}
+    <span class="{{ cls }}" title="Position in the source video">{{ seconds | stream_time }}</span>
+  {%- endif -%}
+{%- endmacro %}
+
 {% macro score(n) -%}
   {%- set val = n | int if n is not none else 0 -%}
   {%- if val >= 80 -%}
@@ -68,6 +79,24 @@
     {%- else -%}
       <span class="badge">{{ value }}</span>
     {%- endif -%}
+  {%- elif entity == "lead" -%}
+    {#- Outreach lead (OUTREACH.md §6.4, DESIGN.md §3.3) -#}
+    {%- set lead_map = {
+      "found": ("", "To review"), "approved": ("", "Waiting for a slot"), "needs_contact": ("warning", "Needs contact"),
+      "rejected": ("", "Rejected"), "clip_queued": ("accent", "Clipping"), "clip_ready": ("warning", "Clip needs review"),
+      "clip_failed": ("danger", "Clip failed"), "clip_approved": ("accent", "Drafting email"),
+      "email_ready": ("warning", "Email needs review"), "scheduled": ("accent", "Scheduled"), "sent": ("", "Sent"),
+      "followup_1": ("", "Follow-up 1 sent"), "followup_2": ("", "Follow-up 2 sent"), "replied": ("success", "Replied"),
+      "bounced": ("danger", "Bounced"), "trial": ("success", "Trial"), "client": ("success", "Client"),
+      "opted_out": ("", "Opted out")} -%}
+    {%- set tone, label = lead_map.get(value, ("", value)) -%}
+    <span class="badge{% if tone %} badge--{{ tone }}{% endif %}">
+      {%- if tone == "accent" %}<span class="badge__spinner"></span>{% endif %}<span>{{ label }}</span></span>
+  {%- elif entity == "sentiment" -%}
+    {%- set s_map = {"positive": ("success", "Interested"), "neutral": ("", "Unclear"), "negative": ("", "Declined"),
+                     "opt_out": ("", "Opted out"), "unknown": ("", "Read in Gmail")} -%}
+    {%- set tone, label = s_map.get(value or "unknown", ("", value)) -%}
+    <span class="badge{% if tone %} badge--{{ tone }}{% endif %}"><span>{{ label }}</span></span>
   {%- elif entity == "permission" -%}
     {%- if value in ("own", "written", "program") -%}
       <span class="badge">No review needed</span>
@@ -134,8 +163,10 @@
 
 {# Radio card pickers with a visual preview. `current` is the selected value. #}
 {# letterbox_style: pass "title" or "blur" to show the letterbox style toggle under the picker. #}
-{% macro layout_picker(prefix, current, letterbox_style=none) -%}
-  {%- set layouts = [
+{# auto: true adds an Auto tile first (the AI picks the layout and mid-clip switches on render). #}
+{% macro layout_picker(prefix, current, letterbox_style=none, auto=false) -%}
+  {%- set ai_left = layout_ai_left() -%}
+  {%- set layouts = ([("auto", "Auto", "AI picks for each clip.")] if auto else []) + [
     ("split", "Split", "Streamer on top, game below."),
     ("face_track", "Face track", "Tall crop that follows the face."),
     ("center", "Center", "Tall crop from the middle."),
@@ -143,10 +174,11 @@
   ] -%}
   <div class="layout-picker">
     {%- for value, name, desc in layouts %}
-      <input type="radio" name="layout" id="{{ prefix }}-{{ value }}" value="{{ value }}" {% if current == value %}checked{% endif %}>
+      <input type="radio" name="layout" id="{{ prefix }}-{{ value }}" value="{{ value }}" {% if current == value and not (value == 'auto' and ai_left <= 0) %}checked{% endif %}{% if value == 'auto' and ai_left <= 0 %} disabled{% endif %}>
       <label for="{{ prefix }}-{{ value }}" class="layout-option">
         <span class="layout-thumb layout-thumb--{{ value }}" aria-hidden="true">
-          {%- if value == "split" %}<span class="lt-cam"></span><span class="lt-content"></span>
+          {%- if value == "auto" %}<span class="lt-cam"></span><span class="lt-content"></span><span class="lt-auto">A</span>
+          {%- elif value == "split" %}<span class="lt-cam"></span><span class="lt-content"></span>
           {%- elif value == "face_track" %}<span class="lt-cam"></span>
           {%- elif value == "center" %}<span class="lt-content"></span>
           {%- else %}<span class="lt-blur"></span><span class="lt-content"></span><span class="lt-blur"></span>{% endif -%}
@@ -154,6 +186,7 @@
         </span>
         <span class="layout-option__name">{{ name }}</span>
         <span class="layout-option__desc">{{ desc }}</span>
+        {%- if value == "auto" %}<span class="layout-option__quota{% if ai_left <= 0 %} layout-option__quota--out{% endif %}">{{ ai_left }} of {{ layout_ai_limit }} Gemini calls left today</span>{% endif %}
       </label>
     {%- endfor %}
   </div>

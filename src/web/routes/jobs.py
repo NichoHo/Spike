@@ -9,10 +9,12 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_303_SEE_OTHER
 
-from src.config import DATA_DIR
+from src.config import CLAUDE_5H_TOKEN_CAP, CLAUDE_WEEK_TOKEN_CAP, DATA_DIR, VIDEOS_DIR
 from src.db import (
+    claude_usage_summary,
     list_jobs,
-    retry_job,
+    continue_job,
+    restart_job,
     cancel_job,
     list_review_clips,
     estimate_remaining_seconds,
@@ -66,6 +68,9 @@ async def jobs_page(
             "disk_used_str": used_str,
             "disk_total_str": total_str,
             "disk_pct": pct,
+            "claude": claude_usage_summary(),
+            "claude_5h_cap": CLAUDE_5H_TOKEN_CAP,
+            "claude_week_cap": CLAUDE_WEEK_TOKEN_CAP,
             "review_count": review_count,
         },
     )
@@ -89,12 +94,24 @@ async def jobs_table_partial(
     )
 
 
+@router.post("/jobs/{job_id}/continue")
+async def continue_job_action(
+    job_id: int,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Pick the failed job up where it stopped: finished stages are skipped."""
+    continue_job(job_id)
+    return RedirectResponse(url="/jobs", status_code=HTTP_303_SEE_OTHER)
+
+
 @router.post("/jobs/{job_id}/retry")
 async def retry_job_action(
     job_id: int,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
-    retry_job(job_id)
+    """Run the failed job again from the start: its saved files and results are deleted first."""
+    if restart_job(job_id):
+        shutil.rmtree(VIDEOS_DIR / str(job_id), ignore_errors=True)
     return RedirectResponse(url="/jobs", status_code=HTTP_303_SEE_OTHER)
 
 

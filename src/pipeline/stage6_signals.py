@@ -21,10 +21,8 @@ Output: data/videos/<id>/signals.npz and data/videos/<id>/signal_peaks.json
 
 import csv
 import json
-import os
 import re
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional, Set
 import numpy as np
@@ -76,29 +74,9 @@ def compute_yamnet_series(audio_path: Path, duration_s: int) -> Tuple[np.ndarray
 
     laugh_idxs, shout_idxs = load_yamnet_classmap()
 
-    # Convert audio to 16 kHz mono WAV in temp file
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        tmp_wav = tmp.name
-
-    try:
-        cmd = [
-            "ffmpeg", "-y", "-v", "error",
-            "-i", str(audio_path),
-            "-ac", "1",
-            "-ar", "16000",
-            tmp_wav
-        ]
-        subprocess.run(cmd, check=True)
-
-        audio_raw = tf.io.read_file(tmp_wav)
-        waveform, _ = tf.audio.decode_wav(audio_raw, desired_channels=1)
-        waveform = tf.squeeze(waveform, axis=-1).numpy()
-    finally:
-        if os.path.exists(tmp_wav):
-            try:
-                os.remove(tmp_wav)
-            except Exception:
-                pass
+    # Decode to 16 kHz mono float32 straight into memory (no multi-hundred-MB temp file on disk)
+    cmd = ["ffmpeg", "-v", "error", "-i", str(audio_path), "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"]
+    waveform = np.frombuffer(subprocess.run(cmd, check=True, capture_output=True).stdout, dtype=np.float32)
 
     interpreter = tf.lite.Interpreter(model_path=str(YAMNet_MODEL_PATH))
     interpreter.allocate_tensors()
@@ -518,6 +496,7 @@ def run_stage6_signals(
     transcript: Dict[str, Any],
     crowd_data: Any,
     chat_data: Optional[Dict[str, Any]] = None,
+    weight_mult: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Run Stage 6: compute signals and candidate peaks.
@@ -647,6 +626,11 @@ def run_stage6_signals(
         if np.all(comment_heat == 0):
             weights["comment_heat"] = 0.0
 
+    # Creator preset multipliers (§6.7), bounded 0.5 to 2 so a bad preset cannot zero or flood a signal
+    for k, m in (weight_mult or {}).items():
+        if k in weights:
+            weights[k] *= min(2.0, max(0.5, float(m)))
+
     # Rescale active weights to sum to 1.0
     w_sum = sum(weights.values())
     norm_weights = {k: v / w_sum for k, v in weights.items()} if w_sum > 0 else weights
@@ -675,8 +659,8 @@ def run_stage6_signals(
     # Generate candidate peak records
     candidates_from_peaks = []
     for p, score in selected_peaks:
-        ctx_start = max(0.0, float(p - 60))
-        ctx_end = min(float(duration_s), float(p + 30))
+        ctx_start = max(0.0, float(p - 90))
+        ctx_end = min(float(duration_s), float(p + 45))
 
         is_laugh_dominant = bool(
             z_signals["laugh"][p] > z_signals.get("audio_loud", np.zeros(duration_s))[p]

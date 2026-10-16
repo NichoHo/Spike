@@ -27,7 +27,9 @@ from src.db import (
     create_account,
     delete_account,
 )
+from src.concepts import EMOTIONS
 from src.notify import get_active_webhook_url, verify_discord_webhook
+from src.pov import add_to_bank, delete_from_bank, load_bank
 from src.web.auth import get_current_user, require_admin
 
 
@@ -67,8 +69,31 @@ async def settings_page(
             "discord_webhook_url": webhook_url,
             "config_info": config_info,
             "review_count": review_count,
+            "pov_bank": load_bank(),
+            "emotions": EMOTIONS,
+            "bank_status": request.query_params.get("bank", ""),
         },
     )
+
+
+@router.post("/settings/pov-bank/add")
+async def add_pov_caption_action(
+    text: str = Form(...),
+    emotion: str = Form(...),
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    """Add a caption you saw and liked. Captions are only ever added by hand; Spike never fetches them."""
+    status = "added" if add_to_bank(text, emotion) else "rejected"
+    return RedirectResponse(url=f"/settings?bank={status}#pov-captions", status_code=HTTP_303_SEE_OTHER)
+
+
+@router.post("/settings/pov-bank/{index}/delete")
+async def delete_pov_caption_action(
+    index: int,
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    delete_from_bank(index)
+    return RedirectResponse(url="/settings#pov-captions", status_code=HTTP_303_SEE_OTHER)
 
 
 @router.post("/settings/accounts/add")

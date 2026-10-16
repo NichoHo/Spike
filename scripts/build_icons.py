@@ -14,7 +14,8 @@ ICONS = [
     "dots-three", "list", "arrow-up-right", "play", "pause",
     "upload-simple", "link-simple", "magnifying-glass", "calendar-blank",
     "info", "warning", "warning-circle", "check-circle",
-    "caret-down", "caret-right", "caret-left", "sun", "moon", "sign-out"
+    "caret-down", "caret-right", "caret-left", "sun", "moon", "sign-out",
+    "envelope-simple"
 ]
 
 OUT_FILE = Path(__file__).resolve().parent.parent / "src" / "web" / "static" / "icons" / "sprite.svg"
@@ -33,7 +34,7 @@ def build_sprite():
                 inner = re.sub(r"<\?xml.*?\?>", "", raw)
                 inner = re.sub(r"<svg[^>]*>", "", inner)
                 inner = inner.replace("</svg>", "").strip()
-                symbols.append(f'  <symbol id="{name}" viewBox="0 0 256 256">\n    {inner}\n  </symbol>')
+                symbols.append(f'  <symbol fill="currentColor" id="{name}" viewBox="0 0 256 256">\n    {inner}\n  </symbol>')
         except Exception as e:
             print(f"Warning: could not fetch {name}: {e}")
 

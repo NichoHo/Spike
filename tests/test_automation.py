@@ -35,3 +35,10 @@ def test_watcher_skips_live_vod_and_failed_jobs(tmp_path, monkeypatch):
         source_ids = {r[0] for r in conn.execute("SELECT source_id FROM videos")}
     assert rows == {"v1": "queued", "v2": "failed", "v3": "queued"}
     assert source_ids == {1}
+
+
+def test_twitch_vod_id_drops_flat_listing_prefix():
+    # yt-dlp 2026.08 flat listing: id 'v2899740602', but /videos/v2899740602 is not a valid VOD URL
+    assert watcher.twitch_vod_id("v2899740602") == "2899740602"
+    assert watcher.twitch_vod_id("2899740602") == "2899740602"
+    assert watcher.twitch_vod_id("vod") == "vod"

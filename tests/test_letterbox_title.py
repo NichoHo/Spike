@@ -5,7 +5,7 @@ from src.pipeline.title_card import _tokens, strip_emoji
 def _graph(**kw):
     return build_vertical_filtergraph(
         sec_start=0.0, keep_intervals=[(0.0, 10.0)], layout="letterbox", src_w=1920, src_h=1080,
-        peak_t_in_trimmed=5.0, effective_dur=10.0, ass_rel="x.ass", punch_in_zoom=False, **kw
+        effective_dur=10.0, ass_rel="x.ass", **kw
     )
 
 

@@ -72,15 +72,15 @@
           <fieldset class="field">
             <legend class="field__label">Layout</legend>
             {% set layouts = [
+              ("auto", "Auto", "AI picks for each clip."),
               ("split", "Split", "Streamer on top, what they’re watching below."),
-              ("auto", "Auto", "Split if there’s a facecam, otherwise Face track."),
               ("face_track", "Face track", "Tall crop that follows the face."),
               ("center", "Center", "Tall crop from the middle of the frame."),
               ("letterbox", "Letterbox", "Whole wide frame, bars above and below."),
             ] %}
             <div class="layout-picker">
               {% for value, name, desc in layouts %}
-                <input type="radio" name="layout" id="layout-{{ value }}" value="{{ value }}" {% if loop.first %}checked{% endif %}>
+                <input type="radio" name="layout" id="layout-{{ value }}" value="{{ value }}" {% if value == ('auto' if layout_ai_left() > 0 else 'split') %}checked{% endif %}{% if value == 'auto' and layout_ai_left() <= 0 %} disabled{% endif %}>
                 <label for="layout-{{ value }}" class="layout-option">
                   <span class="layout-thumb layout-thumb--{{ value }}" aria-hidden="true">
                     {% if value == "auto" %}
@@ -98,6 +98,7 @@
                   </span>
                   <span class="layout-option__name">{{ name }}</span>
                   <span class="layout-option__desc">{{ desc }}</span>
+                  {% if value == "auto" %}<span class="layout-option__quota{% if layout_ai_left() <= 0 %} layout-option__quota--out{% endif %}">{{ layout_ai_left() }} of {{ layout_ai_limit }} Gemini calls left today</span>{% endif %}
                 </label>
               {% endfor %}
             </div>
@@ -157,11 +158,35 @@
 
     <div class="card__footer">
       <span class="card__footer-note">Queued videos are processed sequentially in the background.</span>
-      <button type="submit" class="btn btn--primary btn--lg" onclick="this.classList.add('is-loading')">
+      <button type="submit" class="btn btn--primary btn--lg">
         {{ ui.icon("plus", 16) }}
         <span>Start job</span>
       </button>
     </div>
   </form>
+  <script>
+    // Send the form with fetch so a rejected job shows as a popup here instead of a blank JSON page.
+    (() => {
+      const form = document.querySelector('form[action="/new/submit"]');
+      const btn = form.querySelector('button[type="submit"]');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        btn.classList.add('is-loading');
+        try {
+          const res = await fetch(form.action, { method: 'POST', body: new FormData(form) });
+          if (res.ok) { window.location.href = res.url; return; }  // the redirect lands on /jobs
+          let msg = 'Could not start the job (error ' + res.status + ').';
+          try {
+            const d = (await res.json()).detail;
+            msg = typeof d === 'string' ? d : Array.isArray(d) ? d.map((x) => x.msg).join(' ') : msg;
+          } catch (_) { /* not JSON: keep the generic message */ }
+          showToast(msg, 'danger', null, 9000);
+        } catch (_) {
+          showToast('Could not reach the server. Check that Spike is running.', 'danger', null, 9000);
+        }
+        btn.classList.remove('is-loading');
+      });
+    })();
+  </script>
 </div>
 {% endblock %}

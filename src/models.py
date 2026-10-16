@@ -4,31 +4,46 @@ Blueprint §6.3 & §6.4.
 """
 
 from typing import List, Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from src.config import HUMOR_STYLES
 
 
 class LLMJudgeResponse(BaseModel):
-    """Schema for candidate moment evaluation by the LLM."""
-    keep: bool = Field(description="True if this is an entertaining, standalone clip worth posting")
-    start_line: int = Field(description="Line number where the setup starts")
-    end_line: int = Field(description="Line number where the reaction ends")
+    """Schema for candidate moment evaluation. Field order is the order the model writes them:
+    it explains why the moment is funny before it commits to a score (§6.7)."""
+    keep: bool = Field(description="False unless a stranger with no context would laugh")
+    why_funny: str = Field(default="", description="What happens, what the viewer feels, and why it works")
+    humor_type: str = Field(default="other", description="One of the HUMOR_STYLES, or other")
+    needs_context: bool = Field(default=False, description="True if a cold viewer would be confused")
+    contrast: bool = Field(default=False, description="Hubris before the reaction, or an outcome unusual for this creator")
+    score: int = Field(ge=0, le=100, description="30 fans smile, 50 stranger chuckles, 70 stranger shares, 90 viral")
+    topic_start_line: int = Field(default=1, description="First line of the current topic; the clip never starts before it")
+    setup_start_line: int = Field(default=1, description="First line a viewer needs to understand the payoff")
+    payoff_line: int = Field(default=1, description="The punchline or key moment")
+    reaction_end_line: int = Field(default=1, description="Last line of the reaction to the payoff")
+    cut_lines: List[int] = Field(default_factory=list, description="Lines inside the clip that are fluff and can be cut out")
     punchline: str = Field(description="Exact quote of the punchline or key moment")
-    score: int = Field(ge=0, le=100, description="Score from 0 to 100 based on the rubric")
     title: str = Field(description="Short engaging title for the clip")
     hook_text: str = Field(description="3 to 8 word funny summary of what happens in the clip, not a quote")
     post_caption: str = Field(description="Social media caption")
     hashtags: List[str] = Field(default_factory=list, description="Relevant hashtags without hash symbol")
-    reason: str = Field(description="Brief rationale for the score")
+    reason: str = Field(default="", description="Brief rationale for the score")
     mood: str = Field(
         default="laugh", description="Emotional tone of the clip"
     )
-    needs_context: bool = Field(default=False, description="True if a cold viewer would be confused")
     pace: str = Field(
         default="natural",
         description="'tight' to jump-cut every pause, 'natural' to cut only long dead air",
     )
     music: bool = Field(default=True, description="True if a quiet background music bed helps the clip")
     music_track: str = Field(default="", description="Track id from the music catalogue that best fits, or empty")
+
+    @field_validator("humor_type", mode="before")
+    @classmethod
+    def _humor_type(cls, v):
+        v = str(v or "").strip().lower()
+        return v if v in HUMOR_STYLES else "other"
 
 
 class TranscriptProposal(BaseModel):
@@ -73,4 +88,4 @@ class Candidate(BaseModel):
     reason: Optional[str] = None
     mood: Optional[str] = None
     needs_context: bool = False
-    status: Literal["proposed", "selected", "dropped"] = "proposed"
+    status: Literal["proposed", "selected", "low_score", "rejected", "hubris", "dropped"] = "proposed"

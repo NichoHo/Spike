@@ -21,6 +21,7 @@ def run_stage2_audio(video_dir: Path, meta: Dict[str, Any]) -> Path:
     is_local = meta.get("is_local", False)
     local_path = meta.get("local_path")
     url = meta.get("webpage_url")
+    limit_s = meta.get("process_limit_s")  # set by stage 1 when only the start of the video is processed
 
     print(f"  [stage 2] Extracting/Downloading audio to {audio_path.name}...")
 
@@ -29,6 +30,7 @@ def run_stage2_audio(video_dir: Path, meta: Dict[str, Any]) -> Path:
         cmd = [
             "ffmpeg", "-y", "-v", "error",
             "-i", local_path,
+            *(["-t", str(limit_s)] if limit_s else []),
             "-vn",
             "-c:a", "aac",
             "-b:a", "128k",
@@ -49,6 +51,8 @@ def run_stage2_audio(video_dir: Path, meta: Dict[str, Any]) -> Path:
             "quiet": True,
             "no_warnings": True,
         }
+        if limit_s:
+            ydl_opts["download_ranges"] = yt_dlp.utils.download_range_func(None, [(0, limit_s)])
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 

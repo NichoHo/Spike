@@ -62,6 +62,8 @@ def get_remote_video_meta(url: str) -> Dict[str, Any]:
         "title": info.get("title", ""),
         "duration": float(info.get("duration", 0.0) or 0.0),
         "uploader": info.get("uploader", "") or info.get("channel", ""),
+        "channel_id": info.get("channel_id") or info.get("uploader_id") or "",
+        "channel_url": info.get("channel_url") or info.get("uploader_url") or "",
         "webpage_url": info.get("webpage_url", url),
         "heatmap": info.get("heatmap"),  # list of 100 bins {start_time, end_time, value}
         "width": info.get("width"),
@@ -71,8 +73,10 @@ def get_remote_video_meta(url: str) -> Dict[str, Any]:
     }
 
 
-def run_stage1_meta(video_dir: Path, source_input: str) -> Dict[str, Any]:
-    """Run Stage 1: fetch_meta. Resumes if meta.json exists."""
+def run_stage1_meta(video_dir: Path, source_input: str, max_process_s: Optional[float] = None) -> Dict[str, Any]:
+    """Run Stage 1: fetch_meta. Resumes if meta.json exists.
+    max_process_s: only the first N seconds are processed (outreach trial clips). Later stages read
+    meta["duration"], so capping it here limits every stage; stage 2 downloads only that range."""
     meta_path = video_dir / "meta.json"
     if meta_path.exists():
         print(f"  [stage 1] Resuming: found {meta_path.name}")
@@ -84,6 +88,11 @@ def run_stage1_meta(video_dir: Path, source_input: str) -> Dict[str, Any]:
         meta = get_local_video_meta(source_input)
     else:
         meta = get_remote_video_meta(source_input)
+
+    if max_process_s and meta.get("duration", 0.0) > max_process_s:
+        meta["full_duration"] = meta["duration"]
+        meta["duration"] = float(max_process_s)
+        meta["process_limit_s"] = float(max_process_s)
 
     # Check duration guard
     duration = meta.get("duration", 0.0)

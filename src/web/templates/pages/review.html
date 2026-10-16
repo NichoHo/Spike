@@ -34,6 +34,7 @@
             {% if group.video.source_name %}{{ group.video.source_name }} · {% endif %}{{ group.video.title or 'Untitled Video' }}
           </h2>
           <div class="clip-group__meta">
+            <button type="button" class="btn btn--ghost btn--sm" onclick="openMomentPicker({ videoId: {{ group.video.id }}, concept: 'top3' })">Combine moments</button>
             {{ group.clips | length }} {% if group.clips | length == 1 %}clip{% else %}clips{% endif %}
             {% if group.video.duration_s %} · {{ group.video.duration_s | duration_words }} source{% endif %}
             {% if group.video.created_at %} · {{ group.video.created_at | relative_time }}{% endif %}
@@ -42,7 +43,7 @@
 
         <div class="clip-grid">
           {% for clip in group.clips %}
-            <a href="/clips/{{ clip.id }}" class="clip-card">
+            <article class="clip-card">
               <div class="clip-card__media">
                 {% if clip.thumb_path %}
                   <img src="/media/clip/{{ clip.id }}/thumb" alt="Thumbnail for {{ clip.cand_title or 'Clip' }}" loading="lazy">
@@ -50,21 +51,55 @@
                 <video preload="none" data-src="/media/clip/{{ clip.id }}/stream" muted playsinline></video>
               </div>
               <div class="clip-card__title">
-                {{ clip.cand_title or clip.cand_hook or 'Untitled Clip' }}
+                <a href="/clips/{{ clip.id }}" class="clip-card__link">{{ clip.cand_title or clip.cand_hook or 'Untitled Clip' }}</a>
               </div>
+              {% if clip.concept and clip.concept != 'single' %}
+              <div class="clip-card__concept">
+                <span class="badge badge--accent">{{ {'story': 'Story', 'pov': 'POV', 'top3': 'Top 3', 'top5': 'Top 5'}[clip.concept] }}</span>
+                {% if clip.concept == 'pov' %}{% set pov_text = (clip.overlay | from_json).get('pov_text') %}{% if pov_text %}<span class="clip-card__caption">{{ pov_text }}</span>{% endif %}{% endif %}
+              </div>
+              {% endif %}
               <div class="clip-card__meta">
-                {{ ui.score(clip.final_score) }}
+                {{ ui.score(clip.llm_score) }}
                 {% set dur = (clip.trim_end_s or clip.orig_end_s or 30) - (clip.trim_start_s or clip.orig_start_s or 0) %}
                 <span class="tabular">{{ dur | duration }}</span>
                 {% if clip.created_at %}<span style="white-space: nowrap;">· {{ clip.created_at | relative_time }}</span>{% endif %}
               </div>
-            </a>
+            </article>
           {% endfor %}
         </div>
+
+        {% if group.moments %}
+        <details class="moments">
+          <summary>
+            {{ ui.icon("caret-right", 14) }}
+            <span>Other moments ({{ group.moments | length }})</span>
+          </summary>
+          {% for m in group.moments %}
+          <div class="moment-row">
+            {{ ui.time_chip(group.video.url, m.start_s) }}
+            <div class="moment-row__title">
+              {{ m.title or 'Untitled moment' }}
+              {% if m.status_reason %}<span class="moment-row__why">{{ m.status_reason }}</span>{% endif %}
+            </div>
+            {{ ui.score(m.llm_score) }}
+            {% if m.render_status in ('queued', 'running') %}
+              <span class="badge badge--accent">{{ 'Rendering' if m.render_status == 'running' else 'Queued' }}</span>
+            {% else %}
+              <form method="post" action="/candidates/{{ m.id }}/render">
+                <button type="submit" class="btn btn--secondary btn--sm">{{ 'Try again' if m.render_status == 'failed' else 'Render' }}</button>
+              </form>
+              {% if m.render_status == 'failed' %}<span class="moment-row__why" style="grid-column: 2 / -1; color: var(--color-danger-text);">{{ m.render_error or 'The render failed.' }}</span>{% endif %}
+            {% endif %}
+          </div>
+          {% endfor %}
+        </details>
+        {% endif %}
       </section>
     {% endfor %}
   </div>
 {% endif %}
+{% include "partials/moment_picker.html" %}
 <script>
   // Reload when a finished job or rerender changes the queue.
   (function () {

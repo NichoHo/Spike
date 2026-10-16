@@ -43,12 +43,19 @@
         <td class="actions">
           <div class="row" style="justify-content: flex-end;">
             {% if j.status == 'failed' %}
-              <form method="post" action="/jobs/{{ j.id }}/retry" style="display: inline;">
-                <button type="submit" class="btn btn--secondary btn--sm">
+              <form method="post" action="/jobs/{{ j.id }}/continue" style="display: inline;">
+                <button type="submit" class="btn btn--secondary btn--sm" title="Pick up where it stopped. Finished steps are skipped.">
                   {{ ui.icon("arrow-clockwise", 14) }}
-                  <span>Retry</span>
+                  <span>Continue</span>
                 </button>
               </form>
+              {% if j.continue_count %}{# Continue already failed once, so a saved file is probably bad #}
+                <form method="post" action="/jobs/{{ j.id }}/retry" style="display: inline;" onsubmit="return confirm('Retry from the start? This deletes the downloaded files and results for this job.');">
+                  <button type="submit" class="btn btn--ghost btn--sm" title="Continue failed again. Start over from the first step.">
+                    <span>Retry</span>
+                  </button>
+                </form>
+              {% endif %}
             {% elif j.status in ('queued', 'running') %}
               <form method="post" action="/jobs/{{ j.id }}/cancel" style="display: inline;">
                 <button type="submit" class="btn btn--ghost btn--sm" style="color: var(--color-danger-text);">

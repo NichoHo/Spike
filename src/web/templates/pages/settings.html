@@ -139,6 +139,48 @@
     </div>
   </div>
 
+  <!-- POV caption bank (reports/Clip concepts.md, section 1) -->
+  <div class="card" id="pov-captions">
+    <div class="card__header">
+      <h2 class="card__title">POV captions</h2>
+      <p class="card__description">Captions you saw and liked, tagged with the emotion they fit. The caption writer adapts the closest ones. Add them by hand: Spike never fetches captions from any platform.</p>
+    </div>
+    <div class="card__body stack">
+      {% if bank_status == 'added' %}<p class="small" role="status">Caption added.</p>
+      {% elif bank_status == 'rejected' %}<p class="small" role="alert">That caption was empty, already in the bank, or had no emotion.</p>{% endif %}
+      <form method="post" action="/settings/pov-bank/add" class="stack stack--sm">
+        <div class="field">
+          <label class="field__label" for="pov-text">Caption</label>
+          <input type="text" name="text" id="pov-text" class="input" maxlength="140" required autocomplete="off" placeholder="POV: you said one more game 4 hours ago…">
+        </div>
+        <div class="row" style="align-items: flex-end; gap: var(--space-3);">
+          <div class="field" style="flex: 1;">
+            <label class="field__label" for="pov-emotion">Emotion it fits</label>
+            <select name="emotion" id="pov-emotion" class="select">
+              {% for e in emotions %}<option value="{{ e }}">{{ e | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn--primary">Add caption</button>
+        </div>
+      </form>
+      {% if pov_bank %}
+      <ul class="bank-list" aria-label="Caption bank">
+        {% for item in pov_bank %}
+        <li class="bank-list__row">
+          <span class="badge">{{ item.emotion | capitalize }}</span>
+          <span class="bank-list__text">{{ item.text }}</span>
+          <form method="post" action="/settings/pov-bank/{{ loop.index0 }}/delete">
+            <button type="submit" class="btn btn--ghost btn--sm" aria-label="Delete caption: {{ item.text }}">Delete</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted small">The bank is empty. The caption writer will write all 10 captions fresh until you add some.</p>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- System Information Card -->
   <div class="card">
     <div class="card__header">

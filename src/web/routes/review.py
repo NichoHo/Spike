@@ -6,12 +6,18 @@ Blueprint §10.1 & DESIGN.md §10.1.
 import json
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, Request, Depends, HTTPException
-from fastapi.responses import HTMLResponse
-from starlette.status import HTTP_404_NOT_FOUND
+from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.status import HTTP_303_SEE_OTHER, HTTP_404_NOT_FOUND
 
+from src.concepts import CONCEPT_LABELS, CONCEPTS
+from src.pov import load_bank
 from src.db import (
-    list_review_clips,
+    enqueue_candidate_render,
     get_clip_with_details,
+    get_job,
+    list_clip_ai_edits,
+    list_other_moments,
+    list_review_clips,
     list_sources,
 )
 from src.web.auth import get_current_user
@@ -51,10 +57,27 @@ async def review_home(
                     "title": c["video_title"],
                     "source_name": c["source_name"],
                     "created_at": c["video_created_at"],
+                    "url": c["video_url"],
                 },
                 "clips": [],
             }
         job_groups[vid]["clips"].append(dict(c))
+
+    # Candidates the pipeline found but did not pick (low_score, rejected), each renderable on demand.
+    # A finished video with such moments but no clip waiting for review still gets a group.
+    moments = list_other_moments(None)
+    for vid in moments:
+        if vid in job_groups:
+            continue
+        job = get_job(vid)
+        if job and job["status"] == "ready" and (not source_id or job["source_id"] == source_id):
+            job_groups[vid] = {
+                "video": {"id": vid, "title": job["title"], "source_name": job["source_name"],
+                          "created_at": job["created_at"], "url": job["url"], "duration_s": job["duration_s"]},
+                "clips": [],
+            }
+    for vid, group in job_groups.items():
+        group["moments"] = moments.get(vid, [])
 
     # Review count across all ready clips
     all_ready = list_review_clips(status="ready")
@@ -75,6 +98,17 @@ async def review_home(
             "review_sig": _review_signature(source_id),
         },
     )
+
+
+@router.post("/candidates/{candidate_id}/render")
+async def render_moment_action(
+    candidate_id: int,
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Queue a worker job that fetches the section and renders this moment. Nothing renders in the request."""
+    enqueue_candidate_render(candidate_id, user.get("id"))
+    return RedirectResponse(url=request.headers.get("referer") or "/", status_code=HTTP_303_SEE_OTHER)
 
 
 @router.get("/clips/{clip_id}", response_class=HTMLResponse)
@@ -114,13 +148,23 @@ async def clip_detail(
     from src.config import VIDEOS_DIR
     from src.pipeline.stage9c_render import find_silence_cut_intervals
     from src.web.routes.clips import _load_words
+    from src.pipeline.stage9c_render import default_zooms, merge_cut_intervals
     clip_start = clip.get("trim_start_s") or clip.get("orig_start_s") or 0
     clip_end = clip.get("trim_end_s") or clip.get("orig_end_s") or 0
-    cuts = []
+    silence_cuts = []
     if clip.get("silence_trim") == 1:
         words = _load_words(VIDEOS_DIR / str(clip["video_id"]), clip["candidate_id"])
-        cuts = find_silence_cut_intervals(words, clip_start, clip_end)
+        silence_cuts = find_silence_cut_intervals(words, clip_start, clip_end)
+    stored_cuts = json.loads(clip.get("cuts") or "[]")
+    # Everything cut out of the video being played now: the page maps player time to source time through these
+    cuts = merge_cut_intervals(silence_cuts, stored_cuts, clip_start=clip_start, clip_end=clip_end)
+    sec_file = VIDEOS_DIR / str(clip["video_id"]) / "sections" / f"section_{clip['candidate_id']}.mp4"
+    zooms = json.loads(clip["zooms"]) if clip.get("zooms") is not None else default_zooms(sec_file, clip_start, clip_end, clip.get("payoff_t"))
     layout_changes = json.loads(clip.get("layout_changes") or "[]")
+    # A single clip is one segment: switching it to a story or countdown starts from that segment
+    concept = clip.get("concept") or "single"
+    c_segments = json.loads(clip.get("segments") or "[]") if concept != "single" else [{
+        "candidate_id": clip["candidate_id"], "start_s": clip_start, "end_s": clip_end, "remove": stored_cuts, "rank": None, "label": ""}]
 
     return templates.TemplateResponse(
         request=request,
@@ -135,6 +179,14 @@ async def clip_detail(
             "copy_caption": f"{caption}\n\n{credit}" if credit else caption,
             "layout_changes": layout_changes,
             "cut_intervals": cuts,
+            "manual_cuts": stored_cuts,
+            "zooms": zooms,
+            "ai_edits": list_clip_ai_edits(clip_id),
+            "concept": concept,
+            "c_segments": c_segments,
+            "overlay": json.loads(clip.get("overlay") or "{}"),
+            "pov_bank": load_bank(),
+            "concepts": [(c, CONCEPT_LABELS[c]) for c in CONCEPTS],
             "prev_clip_id": prev_id,
             "next_clip_id": next_id,
             "review_count": len(all_clips),

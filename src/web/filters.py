@@ -132,6 +132,44 @@ def filter_compact_number(val: Optional[Union[int, float]]) -> str:
     return str(int(n))
 
 
+def filter_stream_time(seconds: Optional[Union[float, int]]) -> str:
+    """Position in the source stream: '15:52', or '1:15:52' past an hour. Whole seconds, rounded down so it
+    matches the &t= second in stream_link."""
+    s = int(float(seconds or 0))
+    hours, minutes, secs = s // 3600, (s % 3600) // 60, s % 60
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def filter_stream_link(url: Optional[str], seconds: Optional[Union[float, int]]) -> str:
+    """Link to the source video at a time: YouTube '&t=952s', Twitch '?t=0h15m52s'. Empty for anything else
+    (uploads have no public page)."""
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+    if not url or not url.startswith(("http://", "https://")):
+        return ""
+    s = int(float(seconds or 0))
+    parts = urlparse(url)
+    host = parts.netloc.lower()
+    query = [(k, v) for k, v in parse_qsl(parts.query) if k != "t"]
+    if "youtube.com" in host or host.endswith("youtu.be"):
+        query.append(("t", f"{s}s"))
+    elif "twitch.tv" in host:
+        query.append(("t", f"{s // 3600}h{(s % 3600) // 60}m{s % 60}s"))
+    else:
+        return ""
+    return urlunparse(parts._replace(query=urlencode(query, safe="&")))
+
+
+def filter_from_json(raw: Optional[str]) -> dict:
+    """Parse a JSON text column for a template. Anything unusable gives {}."""
+    import json
+    try:
+        value = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def filter_percent(val: Optional[float]) -> str:
     """Format float into percentage string (e.g. '47%')."""
     if val is None:
@@ -146,6 +184,9 @@ def register_filters(jinja_env):
     """Register all filters onto the Jinja2 environment."""
     jinja_env.filters["timecode"] = filter_timecode
     jinja_env.filters["duration"] = filter_duration
+    jinja_env.filters["from_json"] = filter_from_json
+    jinja_env.filters["stream_time"] = filter_stream_time
+    jinja_env.filters["stream_link"] = filter_stream_link
     jinja_env.filters["duration_words"] = filter_duration_words
     jinja_env.filters["relative_time"] = filter_relative_time
     jinja_env.filters["local_time"] = filter_local_time

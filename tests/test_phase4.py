@@ -125,7 +125,7 @@ def test_sources_crud(client):
 
     updated = get_source(src_id)
     assert updated["display_name"] == "Test Streamer Updated"
-    assert updated["layout"] == "split"
+    assert updated["layout"] == "auto"  # sources always use Auto; the form has no layout field
 
     # Delete source
     res_del = client.post(f"/sources/{src_id}/delete", follow_redirects=False)

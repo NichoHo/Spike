@@ -24,7 +24,9 @@ from src.web.routes.jobs import router as jobs_router
 from src.web.routes.settings import router as settings_router
 from contextlib import asynccontextmanager
 from src.web.routes.clips import router as clips_router
+from src.web.routes.concepts import router as concepts_router
 from src.web.routes.posts import router as posts_router
+from src.outreach.routes import router as outreach_router
 
 logger = logging.getLogger("spike.web")
 
@@ -54,6 +56,9 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 register_filters(templates.env)
 # Cache-bust static assets: the URL changes whenever the file's mtime does.
 templates.env.globals["static_v"] = lambda name: int((STATIC_DIR / name).stat().st_mtime)
+from src import config as _config, layout_ai as _layout_ai  # noqa: E402  (Auto layout daily call budget, shown on the pickers)
+templates.env.globals["layout_ai_left"] = _layout_ai.calls_left
+templates.env.globals["layout_ai_limit"] = _config.GEMINI_DAILY_LIMIT
 app.state.templates = templates
 
 # Mount static files
@@ -113,7 +118,9 @@ app.include_router(sources_router)
 app.include_router(jobs_router)
 app.include_router(settings_router)
 app.include_router(clips_router)
+app.include_router(concepts_router)
 app.include_router(posts_router)
+app.include_router(outreach_router)
 
 
 if __name__ == "__main__":

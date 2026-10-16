@@ -13,6 +13,8 @@ VIDEOS_DIR = DATA_DIR / "videos"
 UPLOADS_DIR = DATA_DIR / "uploads"
 BACKUPS_DIR = DATA_DIR / "backups"
 DB_PATH = DATA_DIR / "spike.db"
+# Outreach lead data is personal data (UU PDP), so it lives in its own file (OUTREACH.md §6.1)
+OUTREACH_DB_PATH = DATA_DIR / "outreach.db"
 
 # Ensure data directories exist
 DATA_DIR.mkdir(exist_ok=True)
@@ -29,6 +31,9 @@ YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 TWITCH_CLIENT_ID = os.environ.get("TWITCH_CLIENT_ID", "")
 TWITCH_CLIENT_SECRET = os.environ.get("TWITCH_CLIENT_SECRET", "")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+# Google OAuth client (Web application type) for Outreach Gmail + Drive. Redirect URI: <SPIKE_PUBLIC_URL>/outreach/google/callback
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 
 # Web & Security settings (Blueprint §4, §8, §13)
 WEB_HOST = os.environ.get("SPIKE_HOST", "127.0.0.1")
@@ -43,6 +48,17 @@ ALLOWED_URL_DOMAINS = {"twitch.tv", "www.twitch.tv", "youtube.com", "www.youtube
 # gemini-3.1-flash-lite is the fast default that supports YouTube URLs + VideoMetadata on free tier
 DEFAULT_GEMINI_MODEL = os.environ.get("SPIKE_GEMINI_MODEL", "gemini-3.1-flash-lite")
 FALLBACK_GEMINI_MODEL = "gemini-3.8-flash"
+# Per-candidate judge and pairwise re-rank use Flash; Flash-Lite is only for the chunk scanner and session profile (§6.7)
+JUDGE_GEMINI_MODEL = os.environ.get("SPIKE_JUDGE_MODEL", FALLBACK_GEMINI_MODEL)
+# The "auto" framing layout runs on Flash-Lite: the judge's Flash quota is tiny (it ran out after 16 requests on
+# 2026-10-15) and layout calls must not eat it. Set SPIKE_LAYOUT_MODEL=<flash model> to compare quality.
+LAYOUT_GEMINI_MODEL = os.environ.get("SPIKE_LAYOUT_MODEL", DEFAULT_GEMINI_MODEL)
+# Gemini does not report remaining quota, so Spike counts its own requests per model (src/gemini_budget.py)
+# against this hardcoded daily limit. At 0 for the layout model, "auto" falls back to the face-size heuristic
+# until the day resets. A guess: set it just under your key's real per-model daily limit.
+GEMINI_DAILY_LIMIT = int(os.environ.get("SPIKE_GEMINI_DAILY_LIMIT", "250"))
+# Per-model overrides. Flash returned 429 after 16 counted requests, so its real daily limit is at most about that.
+GEMINI_DAILY_LIMITS = {JUDGE_GEMINI_MODEL: 15}
 
 # Whisper ASR
 DEFAULT_WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
@@ -98,6 +114,31 @@ RAGE_WORDS = {
 # A second counts as laughter/shouting/voice jump when it is in the VOD's top share (§6.7)
 RELATIVE_TOP_PCT = 2.0
 
+# Creator presets (§6.7). The AI picks creator_type; it never writes these numbers.
+# weight_mult multiplies the stage 6 signal weights and stays within 0.5 to 2.
+CREATOR_TYPES = ("gaming", "irl", "just_chatting", "podcast", "comedy", "reaction", "sports", "educational", "other")
+HUMOR_STYLES = ("rage", "hubris", "roast", "banter", "storytelling", "absurd", "cringe", "wholesome", "deadpan")
+CREATOR_PRESETS = {
+    "gaming": {"min_len": 12, "max_len": 40, "setup_pad_s": 3, "end_extend_max_s": 8,
+               "weight_mult": {"voice_jump": 1.5, "rage_words": 1.5}, "zoom_scale": 1.20},
+    "irl": {"min_len": 15, "max_len": 45, "setup_pad_s": 4, "end_extend_max_s": 5,
+            "weight_mult": {"voice_jump": 1.2, "laugh": 1.2}, "zoom_scale": 1.15},
+    "just_chatting": {"min_len": 15, "max_len": 50, "setup_pad_s": 6, "end_extend_max_s": 5,
+                      "weight_mult": {"laugh": 1.3, "rage_words": 0.8}, "zoom_scale": 1.15},
+    "podcast": {"min_len": 20, "max_len": 90, "setup_pad_s": 8, "end_extend_max_s": 3,
+                "weight_mult": {"laugh": 1.5, "voice_jump": 0.7}, "zoom_scale": 1.10},
+    "comedy": {"min_len": 15, "max_len": 60, "setup_pad_s": 6, "end_extend_max_s": 4,
+               "weight_mult": {"laugh": 1.5}, "zoom_scale": 1.15},
+    "reaction": {"min_len": 12, "max_len": 45, "setup_pad_s": 4, "end_extend_max_s": 5,
+                 "weight_mult": {"laugh": 1.3, "shout": 1.2}, "zoom_scale": 1.20},
+    "sports": {"min_len": 12, "max_len": 40, "setup_pad_s": 3, "end_extend_max_s": 6,
+               "weight_mult": {"voice_jump": 1.4, "shout": 1.3}, "zoom_scale": 1.20},
+    "educational": {"min_len": 20, "max_len": 75, "setup_pad_s": 8, "end_extend_max_s": 3,
+                    "weight_mult": {"laugh": 1.2, "voice_jump": 0.7, "rage_words": 0.5}, "zoom_scale": 1.10},
+    "other": {"min_len": 12, "max_len": 60, "setup_pad_s": 5, "end_extend_max_s": 4,
+              "weight_mult": {}, "zoom_scale": 1.15},
+}
+
 # Blend weights (§6.4)
 LLM_WEIGHT_WITHOUT_CHAT = 0.70
 LLM_WEIGHT_WITH_CHAT = 0.50
@@ -135,9 +176,10 @@ SPLIT_GAMEPLAY_H = 960
 FACECAM_OVERLAY_MAX_FACE_W = 0.12
 
 # Punch-in zoom (§7.4)
-ZOOM_FACTOR = 1.15
-ZOOM_IN_DURATION = 0.3    # seconds
-ZOOM_OUT_DURATION = 1.0   # seconds
+ZOOM_FACTOR = 1.15        # strength of the default zoom when a clip has no zoom list yet
+ZOOM_IN_DURATION = 0.2    # seconds
+ZOOM_OUT_DURATION = 0.5   # seconds
+ZOOM_MAX = 1.5            # overlapping pulses never zoom past this
 
 # Hook title (§7.4): shown for first 2.5 s at top of frame
 HOOK_DURATION_S = 2.5
@@ -200,3 +242,8 @@ RAID_SILENCE_WINDOW_S = 60
 # Watcher polling interval in minutes (§5)
 WATCHER_INTERVAL_MINUTES = 15
 
+
+# Optional Claude Pro caps, in tokens, so the Jobs page can show a percentage of Spike's own usage. Anthropic does not
+# publish these. Calibrate: note Spike's token count, then check `/usage` in a claude terminal and divide.
+CLAUDE_5H_TOKEN_CAP = int(os.environ.get("SPIKE_CLAUDE_5H_TOKEN_CAP", "0"))
+CLAUDE_WEEK_TOKEN_CAP = int(os.environ.get("SPIKE_CLAUDE_WEEK_TOKEN_CAP", "0"))

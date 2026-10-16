@@ -38,6 +38,8 @@ def run_stage9_render(
 
         # The section has 5s padding on the left (pad_st = cand['start_s'] - 5.0)
         # So in the section file, the actual clip starts at t=5.0s, duration = end_s - start_s
+        if cand.get("segs"):  # concept clip: made from several segments by the concept renderer, no plain 16:9 cut
+            continue
         duration = cand["end_s"] - cand["start_s"]
         clip_offset_in_section = 5.0 if cand["start_s"] >= 5.0 else cand["start_s"]
 

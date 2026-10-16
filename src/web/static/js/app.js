@@ -479,3 +479,68 @@ document.addEventListener("DOMContentLoaded", () => {
   input.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
   if (select.value) loadVods();
 });
+
+// ── Bulk selection forms (Outreach) ──────────────────────────────────────────
+// [data-select-all] toggles every name="ids" checkbox in its form; [data-selected-count] shows the total.
+// Any submit button with data-confirm asks first.
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("form[data-bulk-form]").forEach((form) => {
+    const boxes = () => Array.from(form.querySelectorAll('input[name="ids"]'));
+    const alls = form.querySelectorAll("[data-select-all]");
+    const counter = form.querySelector("[data-selected-count]");
+    const refresh = () => {
+      const all = boxes();
+      const n = all.filter((b) => b.checked).length;
+      if (counter) counter.textContent = n ? `${n} selected` : "None selected";
+      alls.forEach((a) => {
+        a.checked = n > 0 && n === all.length;
+        a.indeterminate = n > 0 && n < all.length;
+      });
+    };
+    form.addEventListener("change", (e) => {
+      if (e.target.matches("[data-select-all]")) boxes().forEach((b) => { b.checked = e.target.checked; });
+      if (e.target.matches("[data-select-all], input[name='ids']")) refresh();
+    });
+    refresh();
+  });
+});
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-confirm]");
+  if (btn && !window.confirm(btn.dataset.confirm)) e.preventDefault();
+});
+
+// Forms with data-warn-unsaved ask before leaving with typed edits (email drafts, templates)
+document.addEventListener("DOMContentLoaded", () => {
+  const forms = document.querySelectorAll("form[data-warn-unsaved]");
+  if (!forms.length) return;
+  let dirty = false;
+  forms.forEach((f) => {
+    f.addEventListener("input", (e) => { if (e.target.matches("input:not([type=checkbox]), textarea")) dirty = true; });
+    f.addEventListener("submit", () => { dirty = false; });
+  });
+  window.addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
+});
+
+// [data-open-dialog="id"] opens that <dialog>; a dialog with data-open-on-load opens itself (form errors)
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-open-dialog]");
+  const dialog = btn && document.getElementById(btn.dataset.openDialog);
+  if (dialog) dialog.showModal();
+});
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll("dialog[data-open-on-load]").forEach((d) => d.showModal());
+});
+
+// select[data-sets-fields]: each option's data-defaults ({"field-id": "value"}) fills those fields, except
+// fields the person already changed (Outreach saved searches: live vs re-upload sizes)
+document.addEventListener("change", (e) => {
+  const sel = e.target.closest("select[data-sets-fields]");
+  if (!sel) return;
+  const all = Array.from(sel.options).map((o) => JSON.parse(o.dataset.defaults || "{}"));
+  const chosen = JSON.parse(sel.selectedOptions[0].dataset.defaults || "{}");
+  Object.entries(chosen).forEach(([id, value]) => {
+    const input = document.getElementById(id);
+    if (input && (!input.value || all.some((d) => d[id] === input.value))) input.value = value;
+  });
+});

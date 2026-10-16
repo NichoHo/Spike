@@ -4,6 +4,7 @@ Orchestrates Stages 1, 2, 4, 5, 6, 7, 8, 9, 9c with resume checkpoints.
 Blueprint §5 & §13 Phase 1 and Phase 2.
 """
 
+import json
 import os
 import sys
 import traceback
@@ -21,6 +22,7 @@ from src.db import (
 )
 from src.notify import send_job_ready_notification, send_job_failed_notification
 from src.pipeline.stage1_meta import run_stage1_meta
+from src.profile import ensure_profiles
 from src.pipeline.stage2_audio import run_stage2_audio
 from src.pipeline.stage3_chat import run_stage3_chat
 from src.pipeline.stage4_crowd import run_stage4_crowd
@@ -56,7 +58,7 @@ def run_pipeline(
     try:
         # Stage 1: fetch_meta
         update_video_stage(video_id, "fetch_meta", status="running")
-        meta = run_stage1_meta(video_dir, source_input)
+        meta = run_stage1_meta(video_dir, source_input, (source_settings or {}).get("max_process_s"))
 
         # Stage 2: fetch_audio
         update_video_stage(video_id, "fetch_audio", status="running")
@@ -75,15 +77,31 @@ def run_pipeline(
         update_video_stage(video_id, "transcribe", status="running")
         transcript = run_stage5_transcribe(video_dir, audio_path)
 
+        # Creator + session profile (needs the transcript; cached per source, so usually free)
+        try:
+            profile_ctx = ensure_profiles(
+                video_id, video_dir, meta, transcript,
+                refresh=bool(source_settings and source_settings.get("refresh_profile")),
+            )
+        except Exception as profile_err:
+            print(f"  [profile] Skipped: {profile_err}")
+            profile_ctx = None
+
         # Stage 6: signals (fused audio + crowd + chat)
         update_video_stage(video_id, "signals", status="running")
-        signals_data = run_stage6_signals(video_dir, meta, audio_path, transcript, crowd_data, chat_data=chat_data)
+        signals_data = run_stage6_signals(
+            video_dir, meta, audio_path, transcript, crowd_data, chat_data=chat_data,
+            weight_mult=(profile_ctx or {}).get("preset", {}).get("weight_mult"),
+        )
         if source_settings and source_settings.get("target_clips"):
             signals_data["target_clip_count"] = int(source_settings["target_clips"])
+            signals_data["explicit_target"] = True
 
         # Stage 7: moments (LLM judge + snapping + pairwise rerank)
         update_video_stage(video_id, "moments", status="running")
-        candidates = run_stage7_moments(video_id, video_dir, meta, transcript, signals_data, crowd_data, chat_data=chat_data)
+        candidates = run_stage7_moments(
+            video_id, video_dir, meta, transcript, signals_data, crowd_data, chat_data=chat_data, profile_ctx=profile_ctx
+        )
 
         if not candidates:
             print("  [pipeline] No candidate moments met selection criteria.")
@@ -114,9 +132,11 @@ def run_pipeline(
                     thumb_path=str(thumb_path) if thumb_path else "",
                     layout=c.get("layout", source_settings.get("layout", "split") if source_settings else "split"),
                     caption_style=c.get("caption_style", source_settings.get("caption_style", "bold_pop") if source_settings else "bold_pop"),
-                    trim_start_s=c.get("start_s"),
-                    trim_end_s=c.get("end_s"),
+                    trim_start_s=c.get("trim_start_s", c.get("start_s")),
+                    trim_end_s=c.get("trim_end_s", c.get("end_s")),
                     status="ready",
+                    cuts=json.dumps(c.get("cuts") or []),
+                    zooms=json.dumps(c.get("zooms") or []),
                 )
                 try:
                     from src.posting import evaluate_clip_autopost
@@ -138,7 +158,7 @@ def run_pipeline(
 
         for c in candidates:
             render_path = c.get("render_file", c.get("clip_file", "N/A"))
-            print(f"  * [{c.get('final_score')}/100] {c.get('title')}")
+            print(f"  * [{c.get('llm_score')}/100] {c.get('title')}")
             print(f"    Punchline: \"{c.get('punchline')}\"")
             print(f"    Vertical: {render_path}")
 

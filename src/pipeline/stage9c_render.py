@@ -63,9 +63,10 @@ from src.config import (
     SPLIT_GAMEPLAY_H,
     ZOOM_FACTOR,
     ZOOM_IN_DURATION,
+    ZOOM_MAX,
     ZOOM_OUT_DURATION,
 )
-from src.db import create_or_update_clip
+from src.db import create_or_update_clip, set_clip_layout_changes
 from src.music import (
     get_random_track_for_mood,
     resolve_music_path,
@@ -133,6 +134,35 @@ def find_silence_cut_intervals(
                     cuts.append((round(c_st, 3), round(c_et, 3)))
 
     return cuts
+
+
+def read_section_start(sec_file: Path) -> Optional[float]:
+    """Stream time at second 0 of a section file, from the sidecar stage 8 writes. None for older sections."""
+    try:
+        return float(json.loads(sec_file.with_suffix(".json").read_text(encoding="utf-8"))["start_s"])
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def merge_cut_intervals(
+    *cut_lists: Optional[List[Tuple[float, float]]],
+    clip_start: float,
+    clip_end: float,
+) -> List[Tuple[float, float]]:
+    """Union of several cut lists (silence trim, judge cut_lines, manual cuts), clamped to the clip and
+    sorted without overlaps, as compute_keep_intervals expects."""
+    spans = sorted(
+        (max(clip_start, float(s)), min(clip_end, float(e)))
+        for cuts in cut_lists for s, e in (cuts or [])
+        if min(clip_end, float(e)) - max(clip_start, float(s)) >= 0.2
+    )
+    merged: List[List[float]] = []
+    for s, e in spans:
+        if merged and s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    return [(round(s, 3), round(e, 3)) for s, e in merged]
 
 
 def compute_keep_intervals(
@@ -235,42 +265,77 @@ def _build_sendcmd_file(
 
 # ── Effect helpers ────────────────────────────────────────────────────────────
 
-def _zoom_expr(peak_t: float) -> str:
-    """
-    Build a zoompan 'z' expression that ramps up to ZOOM_FACTOR (1.15x) over 0.3s
-    at the peak second and ramps back down over 1.0s.
-    In zoompan, the input frame index variable is 'in'.
-    """
-    z_max = ZOOM_FACTOR
-    z_in_frames = max(1, int(OUTPUT_FPS * ZOOM_IN_DURATION))
-    z_out_frames = max(1, int(OUTPUT_FPS * ZOOM_OUT_DURATION))
-    peak_frame = max(1, int(peak_t * OUTPUT_FPS))
-    in_start = peak_frame
-    in_end = peak_frame + z_in_frames
-    out_end = in_end + z_out_frames
+def _smoothstep(x: str) -> str:
+    return f"(({x})*({x})*(3-2*({x})))"
 
-    expr = (
-        f"if(between(in,{in_start},{in_end}),"
-        f"1.0+(in-{in_start})*({z_max}-1.0)/{z_in_frames},"
-        f"if(between(in,{in_end},{out_end}),"
-        f"{z_max}-(in-{in_end})*({z_max}-1.0)/{z_out_frames},"
-        f"1.0))"
-    )
-    return expr
+
+def _zoom_expr(zooms: List[Dict[str, float]]) -> str:
+    """
+    zoompan 'z' expression: 1.0 plus the sum of eased pulses. Each pulse ramps up over ZOOM_IN_DURATION,
+    holds for hold_s, then ramps down over ZOOM_OUT_DURATION. `t` is on the trimmed clip timeline.
+    In zoompan, the input frame index variable is 'in'. No zooms gives "1.0".
+    """
+    f_in = max(1, round(OUTPUT_FPS * ZOOM_IN_DURATION))
+    f_out = max(1, round(OUTPUT_FPS * ZOOM_OUT_DURATION))
+    terms = []
+    for z in zooms:
+        f0 = int(z["t"] * OUTPUT_FPS)
+        f1 = f0 + f_in
+        f2 = f1 + max(0, int(z["hold_s"] * OUTPUT_FPS))
+        f3 = f2 + f_out
+        env = (
+            f"if(lt(in,{f0}),0,if(lt(in,{f1}),{_smoothstep(f'(in-{f0})/{f_in}')},"
+            f"if(lt(in,{f2}),1,if(lt(in,{f3}),{_smoothstep(f'1-(in-{f2})/{f_out}')},0))))"
+        )
+        terms.append(f"{float(z['scale']) - 1.0:.3f}*{env}")
+    return f"min({ZOOM_MAX},1.0+{'+'.join(terms)})" if terms else "1.0"
+
+
+def _zoompan(z_expr: str, w: int, h: int) -> str:
+    """Zoom about the centre of the frame. Layouts put the face there (face_track follows it, split crops
+    the facecam around it), so the zoom lands on the face."""
+    return (f"zoompan=z='{z_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:fps={OUTPUT_FPS}:s={w}x{h}")
+
+
+def default_zooms(sec_file: Path, clip_start: float, clip_end: float, payoff_t: Optional[float]) -> List[Dict[str, float]]:
+    """One zoom for clips that have no zoom list yet: at the payoff, else the loudest voice-jump second."""
+    t = payoff_t if payoff_t is not None and clip_start <= payoff_t <= clip_end else None
+    if t is None:
+        npz = sec_file.parent.parent / "signals.npz"
+        try:
+            import numpy as np
+            jump = np.load(npz)["voice_jump"]
+            a, b = int(clip_start), min(len(jump), int(clip_end) + 1)
+            if b > a and jump[a:b].max() > 0:
+                t = float(a + int(jump[a:b].argmax()))
+        except Exception:
+            t = None
+    return [{"t": round(t, 2), "scale": ZOOM_FACTOR, "hold_s": 1.5}] if t is not None else []
 
 
 def resolve_layout(
     layout: str,
     sec_file: Path,
     facecam_box: Optional[Dict[str, float]] = None,
+    ai: bool = True,
 ) -> Tuple[str, Optional[Dict[str, float]]]:
     """
     Turn "auto" into a concrete layout and find the facecam for split.
-    auto = split when a small face stays put (a facecam overlay on gameplay or a video),
-    otherwise face_track (a full-frame camera, or no face at all).
+    auto = a Gemini vision pick of any layout (src/layout_ai.py), unless ai is False. Without it, split when
+    a small face stays put (a facecam overlay on gameplay or a video), otherwise face_track.
     """
     if layout not in ("auto", "split") or facecam_box:
         return layout, facecam_box
+    if layout == "auto" and ai:
+        from src.layout_ai import choose_layout
+        picked = choose_layout(sec_file)
+        if picked and picked != "split":
+            return picked, None
+        if picked == "split":
+            cam = detect_facecam(sec_file)
+            if cam:
+                return "split", cam
+            # no facecam found to crop: fall through to the heuristic below
     cam = detect_facecam(sec_file)
     if layout == "split":
         return "split", cam
@@ -408,8 +473,13 @@ def _layout_filters(
     sc_rel: Optional[str],
     facecam_box: Optional[Dict[str, float]],
     letterbox_style: str = "blur",
+    zoom_z: str = "",
 ) -> List[str]:
-    """Filters turning [src] into a 1080x1920 [dst] for one layout."""
+    """Filters turning [src] into a 1080x1920 [dst] for one layout. zoom_z is a zoompan 'z' expression
+    ("" for none): split zooms only the facecam panel, every other layout zooms the whole frame."""
+    if zoom_z and layout != "split":
+        inner = _layout_filters(layout, src, f"{dst}_nz", src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style)
+        return inner + [f"[{dst}_nz]{_zoompan(zoom_z, OUTPUT_WIDTH, OUTPUT_HEIGHT)}[{dst}]"]
     if layout == "face_track" and sc_rel:
         first_kf = keyframes[0] if keyframes else {
             "cx_px": src_w / 2, "cy_px": src_h / 2, "crop_w_px": src_w, "crop_h_px": src_h
@@ -428,7 +498,8 @@ def _layout_filters(
         (fc_x, fc_y, fc_w, fc_h), (gp_x, gp_y, gp_w, gp_h) = split_crops(facecam_box, src_w, src_h)
         return [
             f"[{src}]split=2[fc_in][gp_in]",
-            f"[fc_in]crop={fc_w}:{fc_h}:{fc_x}:{fc_y},scale={OUTPUT_WIDTH}:{SPLIT_FACECAM_H},setsar=1[facecam]",
+            f"[fc_in]crop={fc_w}:{fc_h}:{fc_x}:{fc_y},scale={OUTPUT_WIDTH}:{SPLIT_FACECAM_H},setsar=1[facecam{'_nz' if zoom_z else ''}]",
+            *([f"[facecam_nz]{_zoompan(zoom_z, OUTPUT_WIDTH, SPLIT_FACECAM_H)}[facecam]"] if zoom_z else []),
             f"[gp_in]crop={gp_w}:{gp_h}:{gp_x}:{gp_y},scale={OUTPUT_WIDTH}:{SPLIT_GAMEPLAY_H},setsar=1[gameplay]",
             f"[facecam][gameplay]vstack=inputs=2[{dst}]",
         ]
@@ -463,13 +534,12 @@ def build_vertical_filtergraph(
     layout: str,
     src_w: int,
     src_h: int,
-    peak_t_in_trimmed: float,
     effective_dur: float,
     ass_rel: str,
     keyframes: Optional[List[Dict[str, Any]]] = None,
     sc_rel: Optional[str] = None,
     facecam_box: Optional[Dict[str, float]] = None,
-    punch_in_zoom: bool = True,
+    zooms: Optional[List[Dict[str, float]]] = None,
     has_music: bool = False,
     layout_segments: Optional[List[Tuple[float, str]]] = None,
     letterbox_style: str = "blur",
@@ -479,7 +549,7 @@ def build_vertical_filtergraph(
     Build complete native FFmpeg filtergraph:
     1. Trims and optional silence removal (via trim/atrim + concat)
     2. Layout transformation (face_track, split, center, letterbox)
-    3. Punch-in zoom (1.0x to 1.15x at peak second)
+    3. Punch-in zooms (eased pulses from the clip's zoom list, inside the layout step)
     4. ASS captions overlay (including hook title event)
     5. Speech-ducked music mix (at -22 dB baseline, ducked via sidechaincompress)
     6. EBU R128 loudness normalization (-14 LUFS, -1.5 dBTP)
@@ -514,7 +584,7 @@ def build_vertical_filtergraph(
     # 2. Layout Transformation. With layout switches, each layout used runs over the whole
     # trimmed clip, then each segment is cut from its layout's output and the pieces joined.
     segments = layout_segments or [(0.0, layout)]
-    lay_args = (src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style)
+    lay_args = (src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style, _zoom_expr(zooms) if zooms else "")
     if len(segments) == 1:
         filters += _layout_filters(segments[0][1], "v_trimmed", "v_layout", *lay_args)
     else:
@@ -529,19 +599,14 @@ def build_vertical_filtergraph(
             filters.append(f"[lseg_{i}]trim=start={t0:.3f}{end},setpts=PTS-STARTPTS,setsar=1[lp_{i}]")
         filters.append("".join(f"[lp_{i}]" for i in range(len(segments))) + f"concat=n={len(segments)}:v=1:a=0[v_layout]")
 
-    # 3. Punch-in zoom, plus a small zoom on every other segment so jump cuts read as edits
-    z_parts = []
-    if punch_in_zoom:
-        z_parts.append(_zoom_expr(peak_t_in_trimmed))
+    # 3. A small zoom on every other kept segment so jump cuts read as edits (the punch-in zooms are in the layout step)
     if k_count > 1:
-        z_parts.append(_jump_cut_zoom_expr(keep_intervals))
-    if z_parts:
-        z_expr = z_parts[0] if len(z_parts) == 1 else f"max({z_parts[0]},{z_parts[1]})"
         filters.append(
-            f"[v_layout]zoompan=z='{z_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:fps={OUTPUT_FPS}:s={OUTPUT_WIDTH}x{OUTPUT_HEIGHT}[v_zoomed]"
+            f"[v_layout]zoompan=z='{_jump_cut_zoom_expr(keep_intervals)}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d=1:fps={OUTPUT_FPS}:s={OUTPUT_WIDTH}x{OUTPUT_HEIGHT}[v_zoomed]"
         )
     else:
-        filters.append(f"[v_layout]null[v_zoomed]")
+        filters.append("[v_layout]null[v_zoomed]")
 
     # 4. Letterbox title card (after the zoom so the punch-in never crops it), then ASS captions
     if title_input is not None:
@@ -609,11 +674,46 @@ def _render_center_fallback(
 
 # ── Main Vertical Render Function ─────────────────────────────────────────────
 
+def _render_concept_candidate(cand, cand_id, video_dir, sec_file, all_words, layout, facecam_box, caption_style,
+                              profanity_mask, letterbox_style, out_file, thumb_file, rendered) -> None:
+    """Story, POV and countdown clips: the concept renderer makes the file, the clip row records the concept."""
+    from src.concepts import stored_segments
+    from src.pipeline.concept_render import render_concept_clip
+
+    meta = json.loads((video_dir / "meta.json").read_text(encoding="utf-8"))
+    clip_layout, clip_facecam = resolve_layout(layout, sec_file, facecam_box)
+    try:
+        duration = render_concept_clip(
+            concept=cand["concept"], segs=cand["segs"], overlay=cand.get("overlay") or {}, title=cand.get("title") or "",
+            hook_text=cand.get("hook_text") or "", video_dir=video_dir, meta=meta, cand_id=cand_id, all_words=all_words,
+            layout=clip_layout, caption_style=caption_style, facecam_box=clip_facecam, profanity_mask=profanity_mask,
+            letterbox_style=letterbox_style, out_file=out_file, thumb_file=thumb_file,
+        )
+    except Exception as e:
+        print(f"  [stage 9c] {cand['concept']} clip {cand_id} failed: {e}")
+        return
+    cand["trim_start_s"], cand["trim_end_s"] = 0.0, duration
+    cand["layout"], cand["caption_style"] = clip_layout, caption_style
+    cand["render_file"], cand["thumbnail_file"] = str(out_file), str(thumb_file)
+    rendered.append(out_file)
+    try:
+        create_or_update_clip(
+            candidate_id=cand_id, file_path=str(out_file), thumb_path=str(thumb_file), layout=clip_layout,
+            caption_style=caption_style, trim_start_s=0.0, trim_end_s=duration, status="ready",
+            letterbox_style=letterbox_style, cuts="[]", zooms="[]", concept=cand["concept"],
+            segments=json.dumps(stored_segments(cand["segs"])), overlay=json.dumps(cand.get("overlay") or {}),
+            theme=cand.get("theme") or "", concept_source=(cand.get("concept_source") or "ai"),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to record clip in DB: {e}")
+
+
 def run_stage9c_render(
     video_dir: Path,
     candidates: List[Dict[str, Any]],
     transcript: Dict[str, Any],
     source_settings: Optional[Dict[str, Any]] = None,
+    update_candidates_json: bool = True,
 ) -> List[Path]:
     """
     Phase 2 & Phase 5 vertical render:
@@ -647,7 +747,6 @@ def run_stage9c_render(
         cut_setting = "natural" if src_settings["silence_trim"] else "off"
     else:
         cut_setting = "auto"
-    punch_in_zoom = bool(src_settings.get("punch_in_zoom", True))
     letterbox_style = src_settings.get("letterbox_style", "title")
 
     all_words = []
@@ -675,10 +774,24 @@ def run_stage9c_render(
             continue
 
         sec_file = Path(sec_file_str)
+        if cand.get("segs") and cand.get("concept", "single") != "single":
+            _render_concept_candidate(cand, cand_id, video_dir, sec_file, all_words, layout, facecam_box, caption_style,
+                                      profanity_mask, letterbox_style, out_file, thumb_file, rendered)
+            continue
         clip_start = float(cand["start_s"])
         clip_end = float(cand["end_s"])
+        cand_words = all_words
+        cand["trim_start_s"], cand["trim_end_s"] = clip_start, clip_end
         # Per-clip choices: an explicit setting wins, "auto" follows the judge
-        clip_layout, clip_facecam = resolve_layout(layout, sec_file, facecam_box)
+        # "auto" plans the layout per moment: the opening layout plus mid-clip switches (a streamer who goes
+        # from a facecam overlay to full-screen). A failed plan falls back to the face-size heuristic.
+        base_layout, layout_changes, plan = layout, None, None
+        if layout == "auto":
+            from src.layout_ai import plan_layouts
+            plan = plan_layouts(sec_file, clip_start, clip_end, read_section_start(sec_file), cand_words)
+            if plan:
+                base_layout, layout_changes = plan[0]["layout"], plan[1:]
+        clip_layout, clip_facecam = resolve_layout(base_layout, sec_file, facecam_box, ai=layout != "auto")
         pace = (cand.get("pace") or "natural") if cut_setting == "auto" else cut_setting
         use_music = cand.get("music", True) if music_setting == "auto" else bool(music_setting)
         cand["layout"], cand["caption_style"] = clip_layout, caption_style  # runner re-registers clips from these
@@ -698,14 +811,18 @@ def run_stage9c_render(
             clip_end=clip_end,
             layout=clip_layout,
             caption_style=caption_style,
-            all_words=all_words if captions_on else [],
+            all_words=cand_words if captions_on else [],
             facecam_box=clip_facecam,
             profanity_mask=profanity_mask,
             music_track=str(chosen_track_path) if chosen_track_path else None,
             silence_trim=pace,
-            punch_in_zoom=punch_in_zoom,
             letterbox_style=letterbox_style,
             title_text=cand.get("hook_text") or cand.get("title") or "",
+            extra_cuts=cand.get("cuts"),
+            zooms=cand.get("zooms"),
+            payoff_t=cand.get("payoff_t"),
+            section_start_s=read_section_start(sec_file),
+            layout_changes=layout_changes,
         )
 
         if success and out_file.exists():
@@ -716,7 +833,7 @@ def run_stage9c_render(
             # Record into database clips table
             try:
                 music_str = _to_rel_path(chosen_track_path) if chosen_track_path else None
-                create_or_update_clip(
+                clip_id = create_or_update_clip(
                     candidate_id=cand_id,
                     file_path=str(out_file),
                     thumb_path=str(thumb_file),
@@ -726,16 +843,19 @@ def run_stage9c_render(
                     trim_end_s=clip_end,
                     music_track=music_str,
                     silence_trim=0 if pace == "off" else 1,
-                    punch_in_zoom=1 if punch_in_zoom else 0,
                     status="ready",
                     letterbox_style=letterbox_style,
+                    cuts=json.dumps(cand.get("cuts") or []),
+                    zooms=json.dumps(cand.get("zooms") or []),
                 )
+                if layout_changes:  # the review editor shows and edits these like hand-made switches
+                    set_clip_layout_changes(clip_id, json.dumps(layout_changes))
             except Exception as e:
                 logger.warning(f"Failed to record clip in DB: {e}")
 
     # Update candidates.json
     cand_file = video_dir / "candidates.json"
-    if cand_file.exists():
+    if update_candidates_json and cand_file.exists():
         try:
             cand_file.write_text(json.dumps(candidates, indent=2), encoding="utf-8")
         except Exception:
@@ -762,10 +882,15 @@ def render_single_vertical_clip(
     profanity_mask: bool = True,
     music_track: Optional[str] = None,
     silence_trim: "bool | str" = False,
-    punch_in_zoom: bool = True,
+    punch_in_zoom: Optional[bool] = None,
     layout_changes: Optional[List[Dict[str, Any]]] = None,
     letterbox_style: str = "blur",
     title_text: str = "",
+    extra_cuts: Optional[List[Tuple[float, float]]] = None,
+    zooms: Optional[List[Dict[str, float]]] = None,
+    payoff_t: Optional[float] = None,
+    section_start_s: Optional[float] = None,
+    overlay_events: Optional[List[Dict[str, Any]]] = None,
 ) -> bool:
     """
     Renders a single vertical clip from a downloaded section video file.
@@ -786,8 +911,10 @@ def render_single_vertical_clip(
 
     words = all_words or []
     clip_dur = max(1.0, clip_end - clip_start)
-    section_clip_offset = 5.0 if clip_start >= 5.0 else clip_start
-    sec_start = clip_start - section_clip_offset
+    # Stream time at second 0 of the section file. Stage 8 records it next to the section, because trims and
+    # AI edits move clip_start away from the original start. Without it, assume 5 s of padding before clip_start.
+    sec_start = section_start_s if section_start_s is not None else clip_start - (5.0 if clip_start >= 5.0 else clip_start)
+    section_clip_offset = clip_start - sec_start
 
     layout, facecam_box = resolve_layout(layout, sec_file, facecam_box)
 
@@ -801,6 +928,8 @@ def render_single_vertical_clip(
     elif pace == "natural":
         cut_intervals = find_silence_cut_intervals(words, clip_start, clip_end)
 
+    # Judge cut_lines and manual cuts join the silence cuts, then everything goes through one keep-interval path
+    cut_intervals = merge_cut_intervals(cut_intervals, extra_cuts, clip_start=clip_start, clip_end=clip_end)
     keep_intervals = compute_keep_intervals(clip_start, clip_end, cut_intervals)
     effective_dur = sum(et - st for st, et in keep_intervals)
     if effective_dur < 1.0:
@@ -831,9 +960,16 @@ def render_single_vertical_clip(
         else:
             title_png = None
 
-    # Map peak time into trimmed timeline
-    raw_peak_t = clip_start + clip_dur / 2.0
-    peak_t_in_trimmed = map_timestamp_to_trimmed(raw_peak_t, clip_start, cut_intervals)
+    # Zooms: None means this clip has no list yet (default: one at the payoff); [] means no zoom (§6.7).
+    # punch_in_zoom=False is the old on/off switch and still turns zooms off for callers that pass it.
+    if zooms is None:
+        zooms = [] if punch_in_zoom is False else default_zooms(sec_file, clip_start, clip_end, payoff_t)
+    zooms_trimmed = [
+        {"t": map_timestamp_to_trimmed(z["t"], clip_start, cut_intervals), "scale": z["scale"], "hold_s": z["hold_s"]}
+        for z in zooms
+        if clip_start <= z["t"] <= clip_end and not any(a <= z["t"] < b for a, b in cut_intervals)
+    ]
+    peak_t_in_trimmed = zooms_trimmed[0]["t"] if zooms_trimmed else effective_dur / 2.0  # thumbnail frame
 
     # Remap words for ASS captions
     retimed_words = retime_words_for_cuts(words, clip_start, clip_end, cut_intervals)
@@ -849,6 +985,7 @@ def render_single_vertical_clip(
         caption_y_fraction=caption_y,
         hook_text=strip_emoji(hook_text),  # libass can't draw colour emoji
         hook_duration_s=HOOK_DURATION_S,
+        overlay_events=overlay_events,
     )
     write_ass_file(ass_content, ass_path)
     ass_rel = _to_rel_path(ass_path)
@@ -878,13 +1015,12 @@ def render_single_vertical_clip(
         layout=layout,
         src_w=src_w,
         src_h=src_h,
-        peak_t_in_trimmed=peak_t_in_trimmed,
         effective_dur=effective_dur,
         ass_rel=ass_rel,
         keyframes=keyframes,
         sc_rel=sc_rel,
         facecam_box=facecam_box,
-        punch_in_zoom=punch_in_zoom,
+        zooms=zooms_trimmed,
         has_music=has_music,
         layout_segments=segments,
         letterbox_style=letterbox_style,
@@ -910,6 +1046,7 @@ def render_single_vertical_clip(
         "-crf", str(OUTPUT_VIDEO_CRF),
         "-c:a", OUTPUT_AUDIO_CODEC,
         "-b:a", OUTPUT_AUDIO_BITRATE,
+        "-ac", "2",  # same audio layout for every clip, so concept pieces join with the concat demuxer
         "-r", str(OUTPUT_FPS),
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",

@@ -12,7 +12,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.pipeline.stage7_moments import snap_boundaries, merge_candidate_sources
+from src.pipeline.stage7_moments import merge_candidate_sources
 from src.eval import compute_iou, evaluate_video_moments
 
 
@@ -52,26 +52,7 @@ class TestMomentSelection(unittest.TestCase):
         self.laugh_series = np.zeros(50, dtype=np.float32)
         self.laugh_series[28:35] = 0.85
 
-    def test_snap_boundaries_speech_pause_and_laugh_end(self):
-        """Test that start snaps back to pause and end snaps to end of laughter run."""
-        raw_start = 16.0  # inside setup
-        raw_end = 28.0    # end of punchline
-        punchline_end = 28.0
-
-        snapped_st, snapped_et = snap_boundaries(
-            raw_start, raw_end, self.words, self.laugh_series, punchline_end
-        )
-
-        # Start must snap back to 15.5s (word 'I' following 0.8s pause)
-        self.assertAlmostEqual(snapped_st, 15.5, places=1, msg="Start should snap back to pause")
-
-        # End must extend past the laugh run (second 35 + 0.6s = 35.6s)
-        self.assertGreaterEqual(snapped_et, 35.0, msg="End must cover the entire laugh run")
-        self.assertLessEqual(snapped_et, 37.0, msg="End should not overshoot laugh run")
-
-        # Duration must be within bounds [12s, 60s]
-        dur = snapped_et - snapped_st
-        self.assertTrue(12.0 <= dur <= 60.0, f"Duration {dur}s must be valid")
+    # Edge snapping moved to compute_edges (Quality v2); see tests/test_edges.py
 
     def test_merge_candidate_sources(self):
         """Test that signal peaks and transcript proposals merge with IoU > 0.5."""

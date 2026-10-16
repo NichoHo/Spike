@@ -56,7 +56,33 @@ _STYLE_DEFS = {
         "Style: hook,Arial,60,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
         "1,0,0,0,100,100,0,0,1,4,0,8,80,80,100,1"
     ),
+    # Concept overlays (reports/Clip concepts.md). All sit at the top centre, below the platform's top UI (about 220 px).
+    # pov: the caption for the whole clip. Large, bold, white, thick black outline.
+    "pov": (
+        "Style: pov,Arial,84,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
+        "1,0,0,0,100,100,0,0,1,7,2,8,90,90,230,1"
+    ),
+    # rank: the big "#2" of a countdown entry, with its label under it
+    "rank": (
+        "Style: rank,Impact,200,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
+        "0,0,0,0,100,100,0,0,1,9,2,8,60,60,210,1"
+    ),
+    "rank_label": (
+        "Style: rank_label,Arial,64,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
+        "1,0,0,0,100,100,0,0,1,6,2,8,90,90,470,1"
+    ),
+    # callback: the setup quote shown on the payoff
+    "callback": (
+        "Style: callback,Arial,66,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
+        "1,1,0,0,100,100,0,0,1,6,2,8,90,90,230,1"
+    ),
+    # card: plain text in the middle of a black frame (the story's skip card)
+    "card": (
+        "Style: card,Arial,96,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
+        "1,0,0,0,100,100,0,0,1,0,0,5,100,100,0,1"
+    ),
 }
+OVERLAY_STYLES = ("pov", "rank", "rank_label", "callback", "card")
 _HIGHLIGHT = "&H0000FFFF&"  # ASS colours are BGR: this is yellow
 
 _PROFANITY_LIST = [
@@ -170,6 +196,7 @@ def generate_ass(
     words_per_line: int = 3,
     hook_text: str = "",
     hook_duration_s: float = 2.5,
+    overlay_events: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """
     Generate ASS subtitle content for a clip.
@@ -185,6 +212,8 @@ def generate_ass(
         words_per_line: Max words per subtitle line
         hook_text: Optional title shown for the first hook_duration_s seconds at top (manual edits only)
         hook_duration_s: Duration in seconds for hook text overlay
+        overlay_events: Optional [{start, end, style, text}] in seconds from the clip start, drawn in one of the
+            OVERLAY_STYLES (POV caption, rank card, callback quote, skip card)
     """
     if style not in _STYLE_DEFS:
         style = "bold_pop"
@@ -192,6 +221,9 @@ def generate_ass(
     style_lines = _STYLE_DEFS[style]
     if hook_text:
         style_lines = style_lines + "\n" + _STYLE_DEFS["hook"]
+    events = [e for e in (overlay_events or []) if e.get("style") in OVERLAY_STYLES and str(e.get("text", "")).strip()]
+    for used in dict.fromkeys(e["style"] for e in events):
+        style_lines = style_lines + "\n" + _STYLE_DEFS[used]
     header = _ASS_HEADER_TEMPLATE.format(style_lines=style_lines)
 
     y_at = caption_y_fraction if callable(caption_y_fraction) else (lambda _t: caption_y_fraction)
@@ -202,6 +234,12 @@ def generate_ass(
             safe_hook = _mask_profanity(safe_hook)
         hook_end = min(hook_duration_s, max(0.5, clip_end_s - clip_start_s))
         lines.append(f"Dialogue: 1,0:00:00.00,{_ts_to_ass(hook_end)},hook,,0,0,0,,{safe_hook}")
+
+    for e in events:
+        text = _escape_ass(str(e["text"]))
+        if profanity_mask:
+            text = _mask_profanity(text)
+        lines.append(f"Dialogue: 2,{_ts_to_ass(e['start'])},{_ts_to_ass(e['end'])},{e['style']},,0,0,0,,{text}")
 
     def event(st: float, et: float, text: str) -> str:
         # Exactly 10 fields: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

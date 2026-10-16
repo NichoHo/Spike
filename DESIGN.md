@@ -173,6 +173,11 @@ Rendered by the `ui.status()` macro (9.9). Never pick a tone by hand.
 | | `posted` | success | Posted |
 | | `sent_to_inbox` | success | In TikTok inbox |
 | | `failed` | danger | Failed |
+| Outreach lead | `found`, `approved`, `rejected`, `sent`, `followup_1`, `followup_2`, `opted_out` | neutral | To review, Waiting for a slot, Rejected, Sent, Follow-up 1 sent, Follow-up 2 sent, Opted out |
+| | `clip_queued`, `clip_approved`, queued email | accent | Clipping, Drafting email, Scheduled |
+| | `needs_contact`, `clip_ready`, `email_ready` | warning | Needs contact, Clip needs review, Email needs review |
+| | `clip_failed`, `bounced` | danger | Clip failed, Bounced |
+| | `replied`, `trial`, `client` | success | Replied, Trial, Client |
 | Source permission | `own`, `written`, `program` | neutral | Own channel, Written permission, Clipping program |
 | | `none` | warning | Review only |
 | Score (0 to 100) | 80 and up | success | the number |
@@ -417,6 +422,7 @@ a raw z-index number.
 | Sources | `broadcast` |
 | Jobs | `queue` |
 | Posts | `paper-plane-tilt` |
+| Outreach | `envelope-simple` |
 | Stats | `chart-line` |
 | Settings | `gear-six` |
 | Approve | `check` |
@@ -1229,6 +1235,26 @@ j / k next and previous, space play, a approve, r reject, e edit captions, ? all
 - **Job:** see whether scoring predicts views.
 - **Primary action:** none. Stat tiles row, then charts, each in its own
   card.
+
+### 10.9b Outreach (`/outreach`, OUTREACH.md §6.5)
+
+- **Job:** move leads through three reviews: streamer, clip, email.
+- **Tabs** (`?tab=`, with counts): Streamers to review, Needs contact,
+  Clips in progress, Ready to email, Sent, Replies, Clients, Stats, Finder
+  settings.
+- **Bulk tables:** a checkbox column (`.check`), a sticky `.bulk-bar` above
+  the table with the selected count on the left and actions on the right.
+  The tab's main action is the one primary button (Approve, Send selected,
+  Mark trial). Destructive bulk actions ask first (`data-confirm`).
+- **Ready to email:** one card per draft (`.draft`): 9:16 clip preview on the
+  left, To, Subject and Message fields on the right. One column on mobile.
+- **Row forms in tables** use the `form="..."` attribute with hidden empty
+  forms outside the card body, so no form nests inside a table.
+- **Finder settings:** settings cards (9.7). Members see them read only.
+- **Add lead:** a secondary header button opens a `.dialog--md.dialog--form`
+  (`data-open-dialog`). On a form error the server re-renders the page with
+  the dialog open (`data-open-on-load`), the alert inside it, and the typed
+  values kept. Never put the values in the URL: they include an email.
 
 ### 10.10 Settings (admin, `/settings/...`)
 

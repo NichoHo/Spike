@@ -15,6 +15,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
 from src.db import (
+    get_connection,
+    get_json_column,
+    set_json_column,
     list_sources,
     get_source,
     create_source,
@@ -22,7 +25,10 @@ from src.db import (
     delete_source,
     list_review_clips,
 )
-from src.config import YOUTUBE_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
+from src.concepts import CONCEPT_LABELS, CONCEPTS, DEFAULT_AUTO_CONCEPTS
+from src.config import (
+    CREATOR_TYPES, HUMOR_STYLES, VIDEOS_DIR, YOUTUBE_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
+)
 from src.web.auth import get_current_user
 
 
@@ -193,6 +199,8 @@ async def new_source_form(
             "user": user,
             "source": None,
             "review_count": review_count,
+            "concepts": [(c, CONCEPT_LABELS[c]) for c in CONCEPTS],
+            "auto_concepts": DEFAULT_AUTO_CONCEPTS,
         },
     )
 
@@ -204,14 +212,12 @@ async def create_source_action(
     display_name: str = Form(...),
     permission: str = Form("review"),
     auto_process: bool = Form(False),
-    layout: str = Form("split"),
     caption_style: str = Form("bold_pop"),
     music: bool = Form(False),
     default_music_mood: str = Form("chill"),
     silence_trim: bool = Form(False),
-    punch_in_zoom: bool = Form(True),
-    letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     style_notes: str = Form(""),
+    auto_concepts: List[str] = Form(default_factory=list),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     data = {
@@ -220,16 +226,16 @@ async def create_source_action(
         "display_name": display_name.strip(),
         "permission": permission,
         "auto_process": auto_process,
-        "layout": layout,
+        "layout": "auto",  # the AI picks per clip; change it on the New page or in clip detail
         "caption_style": caption_style,
         "music": 1 if music else 0,
         "default_music_mood": default_music_mood,
         "silence_trim": 1 if silence_trim else 0,
-        "punch_in_zoom": 1 if punch_in_zoom else 0,
-        "letterbox_style": "title" if letterbox_style == "title" else "blur",
+        "letterbox_style": "title",
         "style_notes": style_notes.strip(),
     }
-    create_source(data)
+    source_id = create_source(data)
+    set_json_column(source_id, "auto_concepts", _chosen_concepts(auto_concepts))
     return RedirectResponse(url="/sources", status_code=HTTP_303_SEE_OTHER)
 
 
@@ -256,8 +262,86 @@ async def edit_source_form(
             "user": user,
             "source": dict(src_row),
             "review_count": review_count,
+            "profile": get_json_column(source_id, "creator_profile", None) or {},
+            "learned_prefs": get_json_column(source_id, "learned_prefs", []),
+            "creator_types": CREATOR_TYPES,
+            "humor_styles": HUMOR_STYLES,
+            "profile_status": request.query_params.get("profile", ""),
+            "concepts": [(c, CONCEPT_LABELS[c]) for c in CONCEPTS],
+            "auto_concepts": get_json_column(source_id, "auto_concepts", None) or DEFAULT_AUTO_CONCEPTS,
         },
     )
+
+
+def _chosen_concepts(values: List[str]) -> List[str]:
+    """Concepts ticked on the form, in the fixed order. Single is always on: it is what the pipeline falls back to."""
+    return [c for c in CONCEPTS if c == "single" or c in values]
+
+
+def _lines(text: str) -> List[str]:
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
+@router.post("/sources/{source_id}/profile")
+async def save_profile_action(
+    source_id: int,
+    display_name: str = Form(""),
+    creator_type: str = Form("other"),
+    energy: str = Form("medium"),
+    humor_styles: List[str] = Form([]),
+    aliases: str = Form(""),
+    fans_clip: str = Form(""),
+    recurring_bits: str = Form(""),
+    baseline_behaviors: str = Form(""),
+    languages: str = Form(""),
+    avoid: str = Form(""),
+    notes: str = Form(""),
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Save hand edits. Changed fields are marked as edited, so a rebuild never overwrites them."""
+    if not get_source(source_id):
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Source not found.")
+    from src.profile import save_user_edits
+    save_user_edits(source_id, {
+        "display_name": display_name.strip(), "creator_type": creator_type, "energy": energy,
+        "humor_styles": humor_styles, "aliases": _lines(aliases), "fans_clip": _lines(fans_clip),
+        "recurring_bits": _lines(recurring_bits), "baseline_behaviors": _lines(baseline_behaviors),
+        "languages": _lines(languages), "avoid": _lines(avoid), "notes": notes.strip(),
+    })
+    return RedirectResponse(url=f"/sources/{source_id}?profile=saved", status_code=HTTP_303_SEE_OTHER)
+
+
+@router.post("/sources/{source_id}/profile/rebuild")
+def rebuild_profile_action(
+    source_id: int,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Rebuild from the source's latest processed VOD. One Claude call, so this runs in a worker thread."""
+    src_row = get_source(source_id)
+    if not src_row:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Source not found.")
+    with get_connection() as conn:
+        vids = conn.execute(
+            "SELECT id FROM videos WHERE source_id = ? ORDER BY id DESC", (source_id,)
+        ).fetchall()
+    vid_dir = next((VIDEOS_DIR / str(v[0]) for v in vids if (VIDEOS_DIR / str(v[0]) / "transcript.json").exists()), None)
+    if not vid_dir:
+        return RedirectResponse(url=f"/sources/{source_id}?profile=no_vod", status_code=HTTP_303_SEE_OTHER)
+
+    from src.profile import build_creator_profile
+    try:
+        meta = json.loads((vid_dir / "meta.json").read_text(encoding="utf-8"))
+        transcript = json.loads((vid_dir / "transcript.json").read_text(encoding="utf-8"))
+        built = build_creator_profile(
+            meta, transcript, get_json_column(source_id, "creator_profile", None),
+            int(vid_dir.name), src_row["style_notes"] or "",
+        )
+        set_json_column(source_id, "creator_profile", built)
+        status = "rebuilt"
+    except Exception as e:
+        print(f"  [sources] Profile rebuild failed: {e}")
+        status = "failed"
+    return RedirectResponse(url=f"/sources/{source_id}?profile={status}", status_code=HTTP_303_SEE_OTHER)
 
 
 @router.post("/sources/{source_id}/edit")
@@ -266,14 +350,12 @@ async def update_source_action(
     display_name: str = Form(...),
     permission: str = Form("review"),
     auto_process: bool = Form(False),
-    layout: str = Form("split"),
     caption_style: str = Form("bold_pop"),
     music: bool = Form(False),
     default_music_mood: str = Form("chill"),
     silence_trim: bool = Form(False),
-    punch_in_zoom: bool = Form(True),
-    letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     style_notes: str = Form(""),
+    auto_concepts: List[str] = Form(default_factory=list),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     src_row = get_source(source_id)
@@ -285,16 +367,16 @@ async def update_source_action(
         "permission": permission,
         "permission_note": src_row["permission_note"],  # field removed from the form; keep any saved note
         "auto_process": auto_process,
-        "layout": layout,
+        "layout": "auto",  # the AI picks per clip; change it on the New page or in clip detail
         "caption_style": caption_style,
         "music": 1 if music else 0,
         "default_music_mood": default_music_mood,
         "silence_trim": 1 if silence_trim else 0,
-        "punch_in_zoom": 1 if punch_in_zoom else 0,
-        "letterbox_style": "title" if letterbox_style == "title" else "blur",
+        "letterbox_style": src_row["letterbox_style"] or "title",  # no longer on this form; keep the saved value
         "style_notes": style_notes.strip(),
     }
     update_source(source_id, data)
+    set_json_column(source_id, "auto_concepts", _chosen_concepts(auto_concepts))
     return RedirectResponse(url="/sources", status_code=HTTP_303_SEE_OTHER)
 
 

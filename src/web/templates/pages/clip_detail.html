@@ -13,7 +13,7 @@
       <button type="button" class="btn btn--ghost btn--sm" id="btn-edit-title" aria-label="Edit title" onclick="toggleTitleEdit(true)">
         {{ ui.icon("pencil-simple", 14) }}
       </button>
-      {{ ui.score(clip.final_score) }}
+      {{ ui.score(clip.llm_score) }}
       {{ ui.status("clip", clip.status) }}
     </div>
     <form method="post" action="/clips/{{ clip.id }}/title" id="title-form" class="row" style="display: none; gap: var(--space-2); margin-top: var(--space-1);">
@@ -21,9 +21,7 @@
       <button type="submit" class="btn btn--primary btn--sm">Save</button>
       <button type="button" class="btn btn--secondary btn--sm" onclick="toggleTitleEdit(false)">Cancel</button>
     </form>
-    <p class="page-header__description">
-      {% if clip.source_name %}{{ clip.source_name }}, {% endif %}{{ clip.video_title or 'Video' }} at {{ (clip.trim_start_s or clip.orig_start_s or 0) | timecode }}
-    </p>
+    <p class="page-header__description" style="margin-top: var(--space-2);">{% if clip.source_name %}{{ clip.source_name }}, {% endif %}{{ clip.video_title or 'Video' }} <span aria-hidden="true">·</span> at {{ ui.time_chip(clip.video_url, clip.orig_start_s or 0, inline=True) }}</p>
   </div>
 
   <div class="page-header__actions">
@@ -57,7 +55,7 @@
   <!-- Left column: 9:16 Video Player -->
   <div class="player-wrap">
     <div class="player-container">
-      <video id="main-clip-player" controls preload="auto" playsinline>
+      <video id="main-clip-player" preload="auto" playsinline aria-label="Clip preview">
         <source src="/media/clip/{{ clip.id }}/stream" type="video/mp4">
         Your browser does not support the video tag.
       </video>
@@ -69,6 +67,22 @@
         <span class="layout-timeline__playhead" id="lt-playhead"></span>
       </div>
       <div class="layout-timeline__ticks"><span>0:00.0</span><span id="lt-end"></span></div>
+    </div>
+
+    <!-- Zooms and cuts on the same clock as the player -->
+    <div class="edit-strip" id="edit-strip" role="slider" tabindex="0" aria-label="Zooms and cuts strip, click to seek" aria-valuemin="0" aria-valuenow="0">
+      <span class="edit-strip__playhead" id="es-playhead"></span>
+    </div>
+    <div class="strip-legend" aria-hidden="true"><span>Diamond: zoom</span><span>Hatched: pending cut</span><span>Dashed: applied cut</span></div>
+
+    <div class="player-bar">
+      <button type="button" class="btn btn--secondary btn--sm" id="btn-play" onclick="togglePlay()" aria-label="Play">
+        <span class="js-play">{{ ui.icon("play", 14) }}</span>
+        <span class="js-pause" hidden>{{ ui.icon("pause", 14) }}</span>
+        <span>Play</span>
+      </button>
+      <button type="button" class="btn btn--ghost btn--sm" id="btn-mute" onclick="toggleMute()" aria-pressed="false">Mute</button>
+      <span class="player-bar__time" id="player-time">0:00.0 / 0:00.0</span>
     </div>
 
     <div class="player-actions">
@@ -98,19 +112,13 @@
 
       <div class="score-row" style="margin-top: var(--space-2);">
         <div class="score-row__item">
-          <span class="score-row__label">Overall score</span>
-          <span class="score-row__value">{{ clip.final_score or 0 }} / 100</span>
+          <span class="score-row__label">Score</span>
+          <span class="score-row__value">{{ clip.llm_score or 0 }} / 100</span>
         </div>
         {% if clip.signal_score %}
         <div class="score-row__item">
           <span class="score-row__label">Signal score</span>
           <span class="score-row__value">{{ clip.signal_score }} / 100</span>
-        </div>
-        {% endif %}
-        {% if clip.llm_score %}
-        <div class="score-row__item">
-          <span class="score-row__label">LLM judge score</span>
-          <span class="score-row__value">{{ clip.llm_score }} / 100</span>
         </div>
         {% endif %}
       </div>
@@ -123,16 +131,107 @@
       {% endif %}
     </section>
 
+    <!-- Ask the editor -->
+    <form method="post" action="/clips/{{ clip.id }}/ai-edit" class="card" id="ai-edit-form">
+      <div class="card__header">
+        <h3 class="card__title">Ask the editor</h3>
+        <p class="card__description">Say what to change. The editor can move the start and end, cut parts out, add zooms, and retitle.</p>
+      </div>
+      <div class="card__body stack">
+        <div class="field">
+          <label class="field__label" for="ai-comment">What should change?</label>
+          <textarea name="comment" id="ai-comment" class="textarea" rows="3" maxlength="1000" required {% if clip.status == 'rendering' %}disabled{% endif %} autocomplete="off" placeholder="Start at the donation question and cut the part where he reads chat…"></textarea>
+        </div>
+        {% if ai_edits %}
+        <ul class="ai-history" aria-label="Earlier requests">
+          {% for e in ai_edits[:3] %}
+          <li class="ai-history__row">
+            <div class="ai-history__ask">{{ e.comment }}</div>
+            {% if e.ok %}
+              <div class="ai-history__answer">{{ e.result.explanation }}</div>
+            {% else %}
+              <div class="ai-history__answer ai-history__answer--error" role="status">Could not apply: {{ e.result.error or 'the editor did not answer.' }}</div>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      <div class="card__footer">
+        <span class="card__footer-note">Uses your Claude plan. Takes a minute or two; you can leave the page.</span>
+        <button type="submit" class="btn btn--primary" {% if clip.status == 'rendering' %}disabled{% endif %} onclick="if (this.form.checkValidity()) this.classList.add('is-loading')">Ask the editor</button>
+      </div>
+    </form>
+
     <!-- Re-render Form -->
-    <form method="post" action="/clips/{{ clip.id }}/rerender" class="card">
+    <form method="post" action="/clips/{{ clip.id }}/rerender" class="card" id="rerender-form">
       <div class="card__header">
         <h3 class="card__title">Edit & Re-render</h3>
         <p class="card__description">Adjust trim boundaries, video framing, captions, or hook text.</p>
       </div>
 
       <div class="card__body stack">
+        <input type="hidden" name="zooms" id="zooms-field">
+        <input type="hidden" name="cuts" id="cuts-field">
+        <input type="hidden" name="concept" id="f-concept">
+        <input type="hidden" name="segments" id="f-segments">
+        <input type="hidden" name="overlay" id="f-overlay">
+        <input type="hidden" name="theme" id="f-theme">
+        <input type="hidden" name="concept_source" id="f-concept-source">
+
+        <!-- Concept: a section of its own, next to Layout (not inside it) -->
+        <section class="field" id="concept-section" aria-labelledby="concept-label">
+          <div class="row" style="gap: var(--space-2);">
+            <span class="field__label" id="concept-label">Concept</span>
+            <span class="badge badge--accent" id="concept-ai-tag" hidden>AI pick</span>
+          </div>
+          <div class="segmented" role="radiogroup" aria-labelledby="concept-label" id="concept-radios">
+            {% for key, label in concepts %}<input type="radio" id="concept-{{ key }}" name="concept_choice" value="{{ key }}"><label for="concept-{{ key }}">{{ label }}</label>{% endfor %}
+          </div>
+          <p class="field__help" id="concept-help"></p>
+          <p class="small" id="concept-note" role="status" aria-live="polite"></p>
+
+          <div id="panel-pov" class="stack stack--sm" hidden>
+            <div class="chip-row" id="pov-chips" role="group" aria-label="Caption options"></div>
+            <div class="field">
+              <label class="field__label" for="pov-text">Caption</label>
+              <input type="text" id="pov-text" class="input" maxlength="140" autocomplete="off" placeholder="POV: you said one more game 4 hours ago…" aria-describedby="pov-count">
+              <p class="field__help" id="pov-count" aria-live="polite"></p>
+            </div>
+            <div class="row" style="gap: var(--space-2); flex-wrap: wrap;">
+              <button type="button" class="btn btn--secondary btn--sm" id="pov-new">New captions</button>
+              <button type="button" class="btn btn--secondary btn--sm" id="pov-bank-btn">Use from bank</button>
+              <span class="small muted" id="pov-emotion"></span>
+            </div>
+          </div>
+
+          <div id="panel-story" class="stack stack--sm" hidden>
+            <ol class="seg-list" id="story-list" aria-label="Story segments"></ol>
+            <div class="field">
+              <label class="field__label" for="story-skip">Skip card text</label>
+              <input type="text" id="story-skip" class="input" maxlength="60" autocomplete="off" placeholder="3 goals later…">
+            </div>
+            <div class="field">
+              <label class="field__label" for="story-quote">Callback quote</label>
+              <input type="text" id="story-quote" class="input" maxlength="200" autocomplete="off" placeholder="The claim from the setup, shown on the payoff…">
+            </div>
+            <label class="switch-row"><input type="checkbox" class="switch" role="switch" id="story-foreshadow"><span>Foreshadow: open with a 0.6 s flash of the payoff</span></label>
+          </div>
+
+          <div id="panel-top" class="stack stack--sm" hidden>
+            <div class="field">
+              <label class="field__label" for="top-theme">Theme</label>
+              <input type="text" id="top-theme" class="input" maxlength="100" autocomplete="off" placeholder="Every goal Kvaratskhelia scored on Speed…">
+            </div>
+            <ol class="seg-list" id="top-list" aria-label="Countdown entries, weakest first"></ol>
+          </div>
+
+          <div class="row" id="concept-pick-row" hidden>
+            <button type="button" class="btn btn--secondary btn--sm" id="concept-pick">Pick moments</button>
+          </div>
+        </section>
         <!-- Trim Section -->
-        <div class="field">
+        <div class="field" data-for="single">
           <label class="field__label">Trim boundaries (seconds)</label>
           <div class="row" style="flex-wrap: wrap; gap: var(--space-4);">
             <div class="row">
@@ -151,14 +250,29 @@
           </div>
         </div>
 
+        <!-- Cuts: stretches removed from the clip. The same list "Ask the editor" writes. -->
+        <div class="field" data-for="single">
+          <label class="field__label">Cuts</label>
+          <p class="field__help">Play the clip, mark where the part starts and ends, then cut it. Cuts skip while you preview and are applied on re-render.</p>
+          <div class="cut-marks">
+            <div class="cut-marks__readout"><span class="small muted">Start</span><span class="timecode-lg" id="mark-start-tc">-</span></div>
+            <button type="button" class="btn btn--secondary btn--sm" onclick="markCut('start')">Mark start</button>
+            <div class="cut-marks__readout"><span class="small muted">End</span><span class="timecode-lg" id="mark-end-tc">-</span></div>
+            <button type="button" class="btn btn--secondary btn--sm" onclick="markCut('end')">Mark end</button>
+            <button type="button" class="btn btn--primary btn--sm" id="btn-cut" onclick="cutThis()" disabled>Cut this part</button>
+          </div>
+          <ol class="switch-list" id="cut-list" aria-live="polite"></ol>
+        </div>
+
         <!-- Framing Layout -->
         <div class="field">
           <label class="field__label">Framing layout</label>
-          {{ ui.layout_picker('layout', clip.layout or 'split', clip.letterbox_style or 'blur') }}
+          {{ ui.layout_picker('layout', clip.layout or 'split', clip.letterbox_style or 'blur', auto=true) }}
+          <p class="field__help">Auto lets the AI pick the layout and any mid-clip switches again when you re-render. It replaces the switches below.</p>
         </div>
 
         <!-- Layout switches: change framing partway through the clip -->
-        <div class="field">
+        <div class="field" data-for="single">
           <label class="field__label" for="switch-layout">Layout switches</label>
           <p class="field__help">For streams that change mid-clip, e.g. a reaction ends and the streamer just talks. Play or scrub the clip to the moment, then add a switch. Times are positions in the clip player.</p>
           <div class="switch-add">
@@ -193,7 +307,7 @@
         </div>
 
         <!-- Hook title: AI-written summary, editable, shown on the video only when switched on -->
-        <div class="field">
+        <div class="field" data-for="single story top3 top5">
           <label class="field__label" for="field-hook-text">Hook title</label>
           <input type="text" name="hook_text" id="field-hook-text" class="input" value="{{ clip.cand_hook or '' }}" maxlength="80" placeholder="Short funny summary of the clip…">
           <label class="switch-row" style="margin-top: var(--space-2);">
@@ -204,7 +318,7 @@
         </div>
 
         <!-- Background Music (Phase 5) -->
-        <div class="field">
+        <div class="field" data-for="single">
           <label class="field__label">Background music</label>
           <div class="stack" style="gap: var(--space-2);">
             <label class="switch-row">
@@ -227,17 +341,18 @@
         </div>
 
         <!-- Effects & Pacing (Phase 5) -->
-        <div class="field">
+        <div class="field" data-for="single">
           <label class="field__label">Effects & pacing</label>
           <div class="stack" style="gap: var(--space-2);">
             <label class="switch-row">
               <input type="checkbox" name="silence_trim" class="switch" role="switch" value="1" {% if clip.silence_trim == 1 %}checked{% endif %}>
                             <span>Silence trim (cut dead air pauses > 1.2s)</span>
             </label>
-            <label class="switch-row">
-              <input type="checkbox" name="punch_in_zoom" class="switch" role="switch" value="1" {% if clip.punch_in_zoom == 1 or clip.punch_in_zoom is none %}checked{% endif %}>
-                            <span>Punch-in zoom (1.15x dramatic ramp at peak)</span>
-            </label>
+            <div class="row" style="gap: var(--space-3);">
+              <button type="button" class="btn btn--secondary btn--sm" id="btn-zoom" popovertarget="zoom-popover">Zoom</button>
+              <span class="small muted" id="zoom-count"></span>
+            </div>
+            <p class="field__help">Punch in on the face at the funny moment. No zooms means no zoom.</p>
           </div>
         </div>
       </div>
@@ -250,6 +365,21 @@
         </button>
       </div>
     </form>
+
+    <!-- Zoom editor. Manual popover: it stays open while you play and scrub the clip. -->
+    <div id="zoom-popover" class="zoom-pop" popover="manual" role="dialog" aria-label="Zooms">
+      <div class="zoom-pop__head">
+        <h3 class="zoom-pop__title">Zooms</h3>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm" popovertarget="zoom-popover" popovertargetaction="hide" aria-label="Close zoom editor">{{ ui.icon("x", 14) }}</button>
+      </div>
+      <p class="field__help">Each zoom eases in over 0.2 s, holds, and eases out over 0.5 s. It lands on the face; in Split only the facecam panel zooms. The preview shows the whole frame.</p>
+      <ul class="zoom-list" id="zoom-rows"></ul>
+      <button type="button" class="btn btn--secondary btn--sm" onclick="zoomAdd()">{{ ui.icon("plus", 14) }}<span>Add zoom at playhead</span></button>
+      <div class="zoom-pop__foot" style="margin-top: var(--space-4);">
+        <span class="small muted">Re-renders the whole clip.</span>
+        <button type="button" class="btn btn--primary" onclick="applyZooms()">Apply &amp; re-render</button>
+      </div>
+    </div>
 
     <!-- Caption text editor: hides every other inspector section while open. Save copies the text into the re-render form and submits it. -->
     <style>.inspector > [hidden] { display: none !important; } /* .inspector-section's display:flex would otherwise beat [hidden] */
@@ -292,6 +422,20 @@
   </form>
 </dialog>
 
+<!-- POV caption bank, filtered by the clip's emotion -->
+<dialog id="bank-dialog" class="dialog dialog--wide" aria-labelledby="bank-title">
+  <div class="dialog__body">
+    <h2 class="dialog__title" id="bank-title">Caption bank</h2>
+    <p class="small muted" id="bank-note"></p>
+    <ul class="bank-list" id="bank-items"></ul>
+  </div>
+  <div class="dialog__footer">
+    <label class="switch-row" style="margin-right: auto;"><input type="checkbox" class="switch" role="switch" id="bank-all"><span>Show every emotion</span></label>
+    <button type="button" class="btn btn--secondary" data-close-dialog>Close</button>
+  </div>
+</dialog>
+{% include "partials/moment_picker.html" %}
+
 <script>
 let captionsOriginal = '';
 // The caption panel takes over the whole right column; the player on the left stays playable.
@@ -328,7 +472,7 @@ function saveCaptions() {
 // CUTS are the pauses removed from the current render, so the two timelines differ.
 const CLIP_START = {{ (clip.trim_start_s or clip.orig_start_s or 0) | tojson }};
 const CUTS = {{ cut_intervals | tojson }};
-const LAYOUT_NAMES = { split: 'Split', face_track: 'Face track', center: 'Center', letterbox: 'Letterbox' };
+const LAYOUT_NAMES = { auto: 'Auto', split: 'Split', face_track: 'Face track', center: 'Center', letterbox: 'Letterbox' };
 let switches = {{ layout_changes | tojson }};
 const player = document.getElementById('main-clip-player');
 
@@ -363,7 +507,7 @@ function renderSwitches() {
     `<button type="button" class="btn btn--ghost btn--sm" onclick="removeSwitch(${i})" aria-label="Remove switch at ${tc(toClip(sw.t))}">Remove</button></li>`));
   list.innerHTML = rows.join('');
   // The letterbox style toggle shows while any part of the clip uses Letterbox
-  const lbUsed = baseLayout() === 'letterbox' || switches.some((sw) => sw.layout === 'letterbox');
+  const lbUsed = baseLayout() === 'letterbox' || baseLayout() === 'auto' || switches.some((sw) => sw.layout === 'letterbox');
   document.getElementById('layout-letterbox-opt').style.display = lbUsed ? '' : 'none';
   drawTimeline();
 }
@@ -415,6 +559,390 @@ document.getElementById('lt-bar').addEventListener('keydown', (e) => {
 });
 document.querySelectorAll('input[name="layout"]').forEach((r) => r.addEventListener('change', renderSwitches));
 renderSwitches();
+
+// ── Zooms, cuts and the live preview ─────────────────────────────────────────
+// The video being played already has the zooms and cuts from its last render baked in. The preview only
+// shows what changed since: zoom as new/baked scale, and unapplied cuts are skipped.
+const $ = (id) => document.getElementById(id);
+const BAKED_ZOOMS = {{ zooms | tojson }};
+const BAKED_CUTS = {{ manual_cuts | tojson }};
+let zooms = BAKED_ZOOMS.map((z) => ({ ...z }));
+let cuts = BAKED_CUTS.map((c) => [...c]);
+let markS = null, markE = null;
+const ZOOM_IN = 0.2, ZOOM_OUT = 0.5, ZOOM_MAX = 1.5;
+const STRENGTHS = [['Subtle', 1.10], ['Medium', 1.20], ['Strong', 1.35]];
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const r2 = (x) => Math.round(x * 100) / 100;
+const sameCut = (a, b) => a[0] === b[0] && a[1] === b[1];
+const isBaked = (c) => BAKED_CUTS.some((b) => sameCut(b, c));
+
+function smooth(x) { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); }
+function zoomAt(list, tp) {
+  let z = 1;
+  for (const k of list) {
+    const t0 = toClip(k.t), t1 = t0 + ZOOM_IN, t2 = t1 + k.hold_s, t3 = t2 + ZOOM_OUT;
+    const env = tp < t0 ? 0 : tp < t1 ? smooth((tp - t0) / ZOOM_IN) : tp < t2 ? 1 : tp < t3 ? smooth(1 - (tp - t2) / ZOOM_OUT) : 0;
+    z += (k.scale - 1) * env;
+  }
+  return Math.min(ZOOM_MAX, z);
+}
+function strengthOf(scale) {
+  return STRENGTHS.reduce((best, s) => (Math.abs(s[1] - scale) < Math.abs(best[1] - scale) ? s : best))[1];
+}
+function pendingCuts() {
+  return cuts.filter((c) => !isBaked(c)).map((c) => [toClip(c[0]), toClip(c[1])]).filter(([a, b]) => b - a > 0.05);
+}
+
+// Preview: scale the video by new zoom / baked zoom, and hop over cuts that are not rendered yet
+function preview() {
+  const tp = player.currentTime;
+  for (const [a, b] of pendingCuts()) {
+    if (tp >= a && tp < b - 0.02) { player.currentTime = b; break; }
+  }
+  const f = reduceMotion ? 1 : zoomAt(zooms, tp) / zoomAt(BAKED_ZOOMS, tp);
+  player.style.transformOrigin = baseLayout() === 'split' ? '50% 25%' : '50% 40%';
+  player.style.transform = f > 1.002 || f < 0.998 ? `scale(${f.toFixed(4)})` : '';
+  $('es-playhead').style.left = player.duration ? `${(tp / player.duration) * 100}%` : '0';
+  $('edit-strip').setAttribute('aria-valuenow', tp.toFixed(1));
+  $('player-time').textContent = `${tc(tp)} / ${tc(player.duration || 0)}`;
+}
+let raf = 0;
+function loop() { preview(); raf = requestAnimationFrame(loop); }
+function setPlayUi() {
+  const playing = !player.paused;
+  document.querySelector('.js-play').hidden = playing;
+  document.querySelector('.js-pause').hidden = !playing;
+  $('btn-play').lastElementChild.textContent = playing ? 'Pause' : 'Play';
+  $('btn-play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+}
+function togglePlay() { if (player.paused) player.play(); else player.pause(); }
+function toggleMute() { player.muted = !player.muted; $('btn-mute').setAttribute('aria-pressed', String(player.muted)); $('btn-mute').textContent = player.muted ? 'Unmute' : 'Mute'; }
+player.addEventListener('click', togglePlay);
+player.addEventListener('play', () => { cancelAnimationFrame(raf); loop(); setPlayUi(); });
+player.addEventListener('pause', () => { cancelAnimationFrame(raf); preview(); setPlayUi(); });
+player.addEventListener('ended', setPlayUi);
+['seeked', 'timeupdate', 'loadedmetadata'].forEach((ev) => player.addEventListener(ev, preview));
+
+// Strip under the player: zoom markers with their hold, cut shading, seams of cuts already in the video
+function drawStrip() {
+  const strip = $('edit-strip'), dur = player.duration;
+  strip.querySelectorAll('.js-item').forEach((el) => el.remove());
+  if (!dur || !isFinite(dur)) return;
+  strip.setAttribute('aria-valuemax', dur.toFixed(1));
+  const pct = (t) => `${Math.min(100, Math.max(0, (t / dur) * 100))}%`;
+  const add = (tag, cls) => {
+    const el = document.createElement(tag);
+    el.className = `${cls} js-item`;
+    strip.insertBefore(el, $('es-playhead'));
+    return el;
+  };
+  BAKED_CUTS.forEach((c) => { add('span', 'edit-strip__seam').style.left = pct(toClip(c[0])); });
+  pendingCuts().forEach(([a, b]) => {
+    const el = add('span', 'edit-strip__cut');
+    el.style.left = pct(a); el.style.width = `${((b - a) / dur) * 100}%`;
+  });
+  zooms.forEach((z, i) => {
+    const t = toClip(z.t);
+    const hold = add('span', 'edit-strip__hold');
+    hold.style.left = pct(t); hold.style.width = `${((ZOOM_IN + z.hold_s + ZOOM_OUT) / dur) * 100}%`;
+    const mk = add('button', 'edit-strip__zoom');
+    mk.type = 'button'; mk.style.left = pct(t);
+    mk.setAttribute('aria-label', `Zoom ${i + 1} at ${tc(t)}. Press to jump there.`);
+    mk.addEventListener('click', (e) => { e.stopPropagation(); player.currentTime = t; });
+  });
+}
+$('edit-strip').addEventListener('click', (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  if (player.duration) player.currentTime = ((e.clientX - r.left) / r.width) * player.duration;
+});
+$('edit-strip').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    e.preventDefault();
+    player.currentTime = Math.max(0, player.currentTime + (e.key === 'ArrowLeft' ? -0.5 : 0.5));
+  }
+});
+player.addEventListener('loadedmetadata', drawStrip);
+
+// Zoom editor
+function syncZooms() { $('zooms-field').value = JSON.stringify(zooms); $('zoom-count').textContent = zooms.length ? `${zooms.length} zoom${zooms.length > 1 ? 's' : ''}` : 'None'; drawStrip(); preview(); }
+function renderZoomRows() {
+  zooms.sort((a, b) => a.t - b.t);
+  $('zoom-rows').innerHTML = zooms.length ? zooms.map((z, i) => `
+    <li class="zoom-row">
+      <div class="zoom-row__top">
+        <button type="button" class="timecode-lg timecode-btn" onclick="player.currentTime=${toClip(z.t)}" aria-label="Jump to zoom ${i + 1}">${tc(toClip(z.t))}</button>
+        <button type="button" class="btn btn--secondary btn--sm" onclick="zoomUsePlayhead(${i})">Use playhead</button>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm" onclick="zoomDelete(${i})" aria-label="Delete zoom ${i + 1}">{{ ui.icon('trash', 14) }}</button>
+      </div>
+      <div class="zoom-row__ctl">
+        <div class="segmented" role="radiogroup" aria-label="Strength of zoom ${i + 1}">${STRENGTHS.map(([name, val], k) =>
+          `<input type="radio" id="zs-${i}-${k}" name="zs-${i}" value="${val}" ${strengthOf(z.scale) === val ? 'checked' : ''} onchange="zoomStrength(${i}, ${val})"><label for="zs-${i}-${k}">${name}</label>`).join('')}</div>
+        <label class="zoom-hold"><span class="small muted">Hold</span>
+          <input type="range" min="0.5" max="4" step="0.1" value="${z.hold_s}" oninput="zoomHold(${i}, this)" aria-label="Hold time of zoom ${i + 1}">
+          <output>${z.hold_s.toFixed(1)} s</output></label>
+      </div>
+    </li>`).join('') : '<li class="zoom-empty">No zooms. The clip plays at normal framing.</li>';
+  syncZooms();
+}
+function zoomAdd() {
+  const t = toSource(player.currentTime || 0);
+  zooms.push({ t, scale: 1.20, hold_s: 1.5 });
+  renderZoomRows();
+}
+function zoomUsePlayhead(i) { zooms[i].t = toSource(player.currentTime || 0); renderZoomRows(); }
+function zoomDelete(i) { zooms.splice(i, 1); renderZoomRows(); }
+function zoomStrength(i, v) { zooms[i].scale = v; syncZooms(); }
+function zoomHold(i, el) { zooms[i].hold_s = r2(parseFloat(el.value)); el.nextElementSibling.textContent = `${zooms[i].hold_s.toFixed(1)} s`; syncZooms(); }
+function applyZooms() { $('zooms-field').value = JSON.stringify(zooms); $('zoom-popover').hidePopover(); $('rerender-form').requestSubmit(); }
+const pop = $('zoom-popover');
+pop.addEventListener('beforetoggle', (e) => { if (e.newState === 'open') renderZoomRows(); });
+pop.addEventListener('toggle', (e) => {
+  if (e.newState !== 'open') return;
+  // Place it under the Zoom button, kept inside the window once its real size is known
+  const r = $('btn-zoom').getBoundingClientRect();
+  pop.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - pop.offsetWidth - 16))}px`;
+  pop.style.top = `${Math.max(16, Math.min(r.bottom + 8, window.innerHeight - pop.offsetHeight - 16))}px`;
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pop.matches(':popover-open')) pop.hidePopover(); });
+
+// Cuts
+function mergeCuts() {
+  cuts.sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const c of cuts) { if (out.length && c[0] <= out[out.length - 1][1]) out[out.length - 1][1] = Math.max(out[out.length - 1][1], c[1]); else out.push([...c]); }
+  cuts = out;
+}
+function markCut(which) {
+  const t = r2(toSource(player.currentTime || 0));
+  if (which === 'start') markS = t; else markE = t;
+  renderCuts();
+}
+function cutThis() {
+  if (markS === null || markE === null || Math.abs(markE - markS) < 0.2) { showToast('Mark a start and an end at least 0.2 s apart'); return; }
+  cuts.push([Math.min(markS, markE), Math.max(markS, markE)]);
+  markS = markE = null;
+  mergeCuts();
+  renderCuts();
+}
+function cutDelete(i) { cuts.splice(i, 1); renderCuts(); }
+function renderCuts() {
+  $('cuts-field').value = JSON.stringify(cuts);
+  $('mark-start-tc').textContent = markS === null ? '-' : tc(markS - CLIP_START);
+  $('mark-end-tc').textContent = markE === null ? '-' : tc(markE - CLIP_START);
+  $('btn-cut').disabled = markS === null || markE === null;
+  $('cut-list').innerHTML = cuts.map((c, i) => `
+    <li class="switch-list__row">
+      <button type="button" class="timecode-lg timecode-btn" onclick="player.currentTime=${toClip(c[0])}" aria-label="Jump to cut ${i + 1}">${tc(c[0] - CLIP_START)}</button>
+      <span>Cut ${(c[1] - c[0]).toFixed(1)} s, ${tc(c[0] - CLIP_START)} to ${tc(c[1] - CLIP_START)}${isBaked(c) ? '' : ' (applied on re-render)'}</span>
+      <button type="button" class="btn btn--ghost btn--sm" onclick="cutDelete(${i})" aria-label="Delete cut ${i + 1}">Delete</button>
+    </li>`).join('');
+  drawStrip();
+  preview();
+}
+renderCuts();
+renderZoomRows();
+setPlayUi();
+
+// ── Concept: single, story, POV, Top 3, Top 5 ────────────────────────────────
+const CONCEPT_HELP = {
+  single: 'One moment with a hook title.',
+  story: 'A setup, then the payoff later in the stream. The setup is 8 s or less and holds a claim the payoff contradicts.',
+  pov: 'A plain reaction with a caption about an unrelated everyday situation. 4 to 12 s, no speech captions.',
+  top3: 'Three moments on one theme, weakest first, with #1 teased at the start.',
+  top5: 'Five strong moments on one theme, weakest first.',
+};
+const NEEDS = { single: '1', story: '2 to 3', pov: '1', top3: '3', top5: '5' };
+let concept = {{ concept | tojson }};
+let segs = {{ c_segments | tojson }};
+let overlay = Object.assign({ pov_text: '', pov_options: [], emotion: '', skip_card: '', callback_quote: '', foreshadow: false }, {{ overlay | tojson }});
+let theme = {{ (clip.theme or '') | tojson }};
+let conceptSource = {{ (clip.concept_source or '') | tojson }};
+let conceptChanged = false;
+const BANK = {{ pov_bank | tojson }};
+const VIDEO_ID = {{ clip.video_id }};
+const CLIP_ID = {{ clip.id }};
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const stTime = (t) => {
+  t = Math.floor(t);
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+};
+const wordCount = (s) => (s.trim().match(/\S+/g) || []).length;
+const segLen = (s) => Math.max(0, s.end_s - s.start_s - (s.remove || []).reduce((a, [x, y]) => a + Math.max(0, Math.min(y, s.end_s) - Math.max(x, s.start_s)), 0));
+const note = (msg, wrong) => { const el = $('concept-note'); el.textContent = msg || ''; el.classList.toggle('is-wrong', Boolean(wrong)); };
+
+function syncConcept() {
+  $('f-concept').value = concept;
+  $('f-segments').value = JSON.stringify(segs);
+  $('f-overlay').value = JSON.stringify(overlay);
+  $('f-theme').value = theme;
+  $('f-concept-source').value = conceptChanged ? 'user' : '';   // any change by hand makes it the user's
+}
+function markUser() { conceptChanged = true; $('concept-ai-tag').hidden = true; syncConcept(); }
+
+function segRow(s, i, tag, isTop) {
+  return `<li class="seg-row" data-i="${i}">
+    <span class="badge ${tag === 'Payoff' || tag === '#1' ? 'badge--accent' : ''}">${tag}</span>
+    <span class="time-chip" title="Position in the source video">${stTime(s.start_s)}</span>
+    <span></span>
+    ${isTop ? `<input type="text" class="input seg-row__label" data-k="label" value="${esc(s.label || '')}" maxlength="60" autocomplete="off" aria-label="Label for ${tag}" placeholder="Why it is on the list…">` : ''}
+    <div class="seg-row__trim">
+      <label><span class="small muted">Start</span><input type="number" step="0.1" class="input input--mono input--short" data-k="start_s" value="${s.start_s}" aria-label="${tag} start in seconds"></label>
+      <label><span class="small muted">End</span><input type="number" step="0.1" class="input input--mono input--short" data-k="end_s" value="${s.end_s}" aria-label="${tag} end in seconds"></label>
+      <span class="small muted" data-len>${segLen(s).toFixed(1)} s</span>
+    </div>
+    ${isTop ? `<div class="seg-row__btns">
+      <button type="button" class="btn btn--ghost btn--sm" data-act="up" aria-label="Move ${tag} up" ${i === 0 ? 'disabled' : ''}>Up</button>
+      <button type="button" class="btn btn--ghost btn--sm" data-act="down" aria-label="Move ${tag} down" ${i === segs.length - 1 ? 'disabled' : ''}>Down</button>
+      <button type="button" class="btn btn--secondary btn--sm" data-act="swap" aria-label="Swap ${tag} for another moment">Swap</button>
+    </div>` : ''}
+  </li>`;
+}
+function renderStory() {
+  $('story-list').innerHTML = segs.map((s, i) => segRow(s, i, i === 0 ? 'Setup' : i === segs.length - 1 ? 'Payoff' : 'Step', false)).join('');
+  $('story-skip').value = overlay.skip_card || '';
+  $('story-quote').value = overlay.callback_quote || '';
+  $('story-foreshadow').checked = Boolean(overlay.foreshadow);
+}
+function renderTop() {
+  segs.forEach((s, k) => { s.rank = segs.length - k; });   // weakest first, #1 last
+  $('top-list').innerHTML = segs.map((s, i) => segRow(s, i, `#${segs.length - i}`, true)).join('');
+  $('top-theme').value = theme;
+}
+function renderChips() {
+  $('pov-chips').innerHTML = (overlay.pov_options || []).map((t, i) =>
+    `<button type="button" class="chip${t === overlay.pov_text ? ' is-on' : ''}" data-i="${i}" aria-pressed="${t === overlay.pov_text}">${esc(t)}</button>`).join('')
+    || '<span class="small muted">No captions yet. Press New captions.</span>';
+}
+function updateCount() {
+  const n = wordCount($('pov-text').value), el = $('pov-count');
+  el.textContent = `${n} of 10 words${n > 10 ? '. Too long: cut it to 10 or fewer.' : ''}`;
+  el.classList.toggle('is-wrong', n > 10);
+  $('pov-text').setAttribute('aria-invalid', String(n > 10));
+}
+function renderPov() {
+  renderChips();
+  $('pov-text').value = overlay.pov_text || '';
+  updateCount();
+  $('pov-emotion').textContent = overlay.emotion ? `The reaction reads as ${overlay.emotion}` : '';
+}
+function renderConcept() {
+  $('concept-radios').querySelectorAll('input').forEach((r) => { r.checked = r.value === concept; });
+  $('concept-ai-tag').hidden = !(conceptSource === 'ai' && !conceptChanged);
+  $('concept-help').textContent = CONCEPT_HELP[concept] + (concept === 'single' ? '' : ` Needs ${NEEDS[concept]} moment${NEEDS[concept] === '1' ? '' : 's'}.`);
+  document.querySelectorAll('[data-for]').forEach((el) => { el.hidden = !el.dataset.for.split(' ').includes(concept); });
+  $('panel-pov').hidden = concept !== 'pov';
+  $('panel-story').hidden = concept !== 'story';
+  $('panel-top').hidden = !concept.startsWith('top');
+  $('concept-pick-row').hidden = concept === 'single' || concept === 'pov';
+  if (concept === 'pov') renderPov();
+  if (concept === 'story') renderStory();
+  if (concept.startsWith('top')) renderTop();
+  syncConcept();
+}
+
+// Segment rows: trim, label, reorder, swap
+function onSegEdit(e) {
+  const li = e.target.closest('.seg-row'), k = e.target.dataset.k;
+  if (!li || !k) return;
+  const s = segs[Number(li.dataset.i)];
+  if (k === 'label') s.label = e.target.value;
+  else { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) s[k] = v; li.querySelector('[data-len]').textContent = `${segLen(s).toFixed(1)} s`; }
+  markUser();
+}
+function onSegClick(e) {
+  const btn = e.target.closest('[data-act]');
+  if (!btn) return;
+  const i = Number(btn.closest('.seg-row').dataset.i);
+  if (btn.dataset.act === 'swap') {
+    openMomentPicker({ videoId: VIDEO_ID, clipId: CLIP_ID, concept, swap: { index: i, ids: segs.map((s) => s.candidate_id) } });
+    return;
+  }
+  const j = btn.dataset.act === 'up' ? i - 1 : i + 1;
+  [segs[i], segs[j]] = [segs[j], segs[i]];
+  markUser();
+  renderTop();
+}
+['story-list', 'top-list'].forEach((id) => { $(id).addEventListener('input', onSegEdit); $(id).addEventListener('click', onSegClick); });
+$('story-skip').addEventListener('input', (e) => { overlay.skip_card = e.target.value; markUser(); });
+$('story-quote').addEventListener('input', (e) => { overlay.callback_quote = e.target.value; markUser(); });
+$('story-foreshadow').addEventListener('change', (e) => { overlay.foreshadow = e.target.checked; markUser(); });
+$('top-theme').addEventListener('input', (e) => { theme = e.target.value; markUser(); });
+$('concept-pick').addEventListener('click', () =>
+  openMomentPicker({ videoId: VIDEO_ID, clipId: CLIP_ID, concept, preselect: segs.map((s) => s.candidate_id).filter(Boolean) }));
+
+// POV: chips, free text with a live word count, new captions, the bank
+$('pov-chips').addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  overlay.pov_text = overlay.pov_options[Number(chip.dataset.i)];
+  $('pov-text').value = overlay.pov_text;
+  updateCount(); renderChips(); markUser();
+});
+$('pov-text').addEventListener('input', (e) => { overlay.pov_text = e.target.value; updateCount(); renderChips(); markUser(); });
+$('pov-new').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true; btn.textContent = 'Writing captions…';
+  try {
+    const r = await fetch(`/clips/${CLIP_ID}/pov/captions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start_s: segs[0].start_s, end_s: segs[0].end_s }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || 'No captions came back.');
+    overlay.emotion = body.emotion; overlay.pov_options = body.options; overlay.pov_text = body.text;
+    markUser(); renderPov(); note('');
+  } catch (err) { note(err.message, true); }
+  finally { btn.disabled = false; btn.textContent = 'New captions'; }
+});
+function renderBank() {
+  const all = $('bank-all').checked, emo = overlay.emotion;
+  const items = BANK.filter((b) => all || !emo || b.emotion === emo);
+  $('bank-note').textContent = !BANK.length ? 'The bank is empty. Add captions in Settings.'
+    : (all || !emo ? 'Every caption in the bank.' : `Captions that fit ${emo}.`);
+  $('bank-items').innerHTML = items.map((b) =>
+    `<li class="bank-list__row"><span class="badge">${esc(b.emotion)}</span><span class="bank-list__text">${esc(b.text)}</span>` +
+    `<button type="button" class="btn btn--secondary btn--sm" data-use="${esc(b.text)}">Use</button></li>`).join('');
+}
+$('pov-bank-btn').addEventListener('click', () => { renderBank(); $('bank-dialog').showModal(); });
+$('bank-all').addEventListener('change', renderBank);
+$('bank-items').addEventListener('click', (e) => {
+  const use = e.target.closest('[data-use]');
+  if (!use) return;
+  overlay.pov_text = use.dataset.use;
+  $('bank-dialog').close(); renderPov(); markUser();
+});
+
+// Switching concept. To Single the first segment stays. To POV the reaction peak is found and captions are written.
+// To Story or Top the moment picker opens (the radios stay where they are until the picker has built the clip).
+$('concept-radios').addEventListener('change', async (e) => {
+  const to = e.target.value;
+  if (to === concept) return;
+  if (to === 'single') {
+    segs = segs.slice(0, 1);
+    $('input-start-s').value = segs[0].start_s.toFixed(1);
+    $('input-end-s').value = segs[0].end_s.toFixed(1);
+    concept = 'single'; markUser(); renderConcept(); note('');
+    return;
+  }
+  if (to === 'pov') {
+    note('Finding the reaction and writing captions…');
+    $('concept-radios').querySelectorAll('input').forEach((r) => { r.disabled = true; });
+    try {
+      const r = await fetch(`/clips/${CLIP_ID}/concept/to-pov`, { method: 'POST' });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || 'Could not make a POV from this clip.');
+      concept = 'pov'; segs = body.segments; overlay = Object.assign(overlay, body.overlay); theme = '';
+      markUser(); renderConcept();
+      note((body.warnings || []).length ? 'Check this POV: ' + body.warnings.join('; ') : 'Pick a caption, then re-render.', (body.warnings || []).length > 0);
+    } catch (err) { renderConcept(); note(err.message, true); }
+    finally { $('concept-radios').querySelectorAll('input').forEach((r) => { r.disabled = false; }); }
+    return;
+  }
+  renderConcept();
+  openMomentPicker({ videoId: VIDEO_ID, clipId: CLIP_ID, concept: to, preselect: segs.map((s) => s.candidate_id).filter(Boolean) });
+});
+renderConcept();
 
 function toggleTitleEdit(on) {
   document.getElementById('title-form').style.display = on ? 'flex' : 'none';

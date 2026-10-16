@@ -17,11 +17,13 @@ from src.db import (
     init_db,
     get_connection,
     now_utc_iso,
-    get_source,
+    claim_candidate_render,
+    finish_candidate_render,
     log_event,
     update_video_stage,
 )
 from src.cleanup import sweep_old_sections
+from src.moment_render import render_candidate, source_settings_for
 from src.pipeline.runner import run_pipeline
 
 # ponytail: One worker, one job at a time. A second worker needs a row-level
@@ -62,6 +64,23 @@ def claim_next_job() -> Optional[Dict[str, Any]]:
         return None
 
 
+def run_render_cycle() -> bool:
+    """Run one queued "Other moments" render (fetch the section, then render). Returns True if one ran."""
+    cand_id = claim_candidate_render()
+    if cand_id is None:
+        return False
+    print(f"\n[worker] Rendering moment (candidate #{cand_id})...")
+    try:
+        render_candidate(cand_id)
+        finish_candidate_render(cand_id)
+        log_event("info", f"Rendered moment (candidate #{cand_id}) on request")
+    except Exception as e:
+        print(f"[worker] Moment render for candidate #{cand_id} failed: {e}")
+        log_event("error", f"Moment render for candidate #{cand_id} failed: {e}")
+        finish_candidate_render(cand_id, str(e)[:300])
+    return True
+
+
 def run_worker_cycle() -> bool:
     """Check for and run a single job. Returns True if a job was processed."""
     job = claim_next_job()
@@ -76,30 +95,7 @@ def run_worker_cycle() -> bool:
     print(f"\n[worker] Claimed job #{video_id}: '{title}' (origin: {job['origin']})")
     log_event("info", f"Worker started processing job #{video_id} ('{title}')", video_id=video_id)
 
-    # Load source-specific settings if available
-    source_settings = {}
-    if source_id:
-        src_row = get_source(source_id)
-        if src_row:
-            src_dict = dict(src_row)
-            source_settings = {
-                "layout": src_dict.get("layout", "split"),
-                "caption_style": src_dict.get("caption_style", "bold_pop"),
-                "caption_y": src_dict.get("caption_y", 0.85),
-                "music": bool(src_dict.get("music", False)),
-                "default_music_mood": src_dict.get("default_music_mood", "chill"),
-                "silence_trim": bool(src_dict.get("silence_trim", False)),
-                "punch_in_zoom": bool(src_dict.get("punch_in_zoom", True)),
-                "letterbox_style": src_dict.get("letterbox_style") or "title",
-                "style_notes": src_dict.get("style_notes"),
-                "language": src_dict.get("language"),
-                "chat_offset_s": src_dict.get("chat_offset_s", 12.0),
-                "facecam_box": src_dict.get("facecam_box"),
-            }
-
-    # Options picked on the New job form override the source's defaults
-    if job.get("settings"):
-        source_settings.update(json.loads(job["settings"]))
+    source_settings = source_settings_for(source_id, job.get("settings"))
 
     try:
         run_pipeline(source_input=source_input, source_settings=source_settings, video_id=video_id)
@@ -136,6 +132,7 @@ def start_worker(poll_interval_s: float = 5.0):
     # Requeue it; stages with output are skipped.
     with get_connection() as conn:
         conn.execute("UPDATE videos SET status = 'queued' WHERE status = 'running'")
+        conn.execute("UPDATE candidate_renders SET status = 'queued' WHERE status = 'running'")
     print(f"[worker] Spike background worker running (PID {os.getpid()}). Press Ctrl+C to stop.")
 
     last_scheduler_check = 0.0
@@ -157,7 +154,7 @@ def start_worker(poll_interval_s: float = 5.0):
                 sweep_old_sections()
                 last_sweep = now_ts
 
-            processed = run_worker_cycle()
+            processed = run_render_cycle() or run_worker_cycle()
             if not processed:
                 time.sleep(poll_interval_s)
         except Exception as e:

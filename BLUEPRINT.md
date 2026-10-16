@@ -687,37 +687,26 @@ is framing; concept is what the clip is): `single` (default), `story`
 picks the concept per output. The user can change it, or build any concept
 by hand from ticked candidates. The AI pick is only the default.
 
-**POV.** One short clip (5 to 15 s) with a "POV: ..." caption at the top
-for the whole clip. The caption is the setup; the clip is the payoff, shown
-out of context. Starts just before the reaction, no setup footage. Use it
-when the reaction is the joke but the real setup is long, in-jokey, or
-`needs_context` is true. This rescues moments the single-clip judge
-rejects. Caption rules (sourced from POV-format guides, see LEARNINGS):
-starts with "POV:", second person, one specific situation the viewer is
-in, readable in about 1 s (at most 10 words), no transcript quote, no
-bragging, not a description of what the clip shows.
+**Concept rules live in `reports/Clip concepts.md`** (research
+2026-10-14). Summary:
 
-**Compilations (Top 3 / Top 5).** A compilation is a multi-segment clip
-(same machinery as story combos) with rank cards. Rules, from short-form
-practice (vendor blogs, treat as hypotheses to test with post stats):
-
-- Only made when one theme holds 3 (or 5) entries. Random "best of" lists
-  are not funny. Themes: one episode ("every goal Kvaratskhelia scored on
-  Speed"), one humor type ("Speed vs chat"), one recurring bit. This is
-  where `baseline_behaviors` moments belong: repeated rage is dull alone
-  and funny as an escalating list.
-- Order is escalation: weakest first, #1 last. Open with a 1 to 2 s tease
-  of #1's peak plus hook text, then count down.
-- Each entry is cut tighter than a single clip: setup plus payoff, 6 to 25
-  s, `cut_lines` applied. Each entry gets a rank card (top, about 1.5 s):
-  `#3` plus a short funny label, written like a viewer, not a category.
-- Length caps: Top 3 at most 75 s, Top 5 at most 150 s. Shorts allows 3
-  min, but completion rate decides reach. End right after #1's reaction.
-- One layout for all entries. Loudness normalized per entry before the
-  final pass. Hard cuts, no transitions (sound effects stay skipped, §7.4).
-- The editor pass proposes 0 to 2 compilations per VOD. Entries may come
-  from `low_score` candidates when the theme makes them work. The user can
-  also tick candidates in "Other moments" and press "Make Top 3/5".
+- **POV:** the caption is an everyday situation unrelated to the clip
+  ("POV: you said 'one more game' 4 hours ago"). The clip is a 4 to 12 s
+  out-of-context reaction with one clear emotion and few context words. The
+  joke is an apt emotion match across distant domains. Captions come from
+  a user-filled caption bank (`data/pov_bank.json`, never scraped) as
+  few-shot style, 10 generated, scored, top 3 shown. Baseline-behavior
+  reactions are the best source.
+- **Story:** hubris then fall. A quotable claim (max 8 s), a time-skip
+  card ("3 goals later"), the contradicting payoff with the claim shown
+  again as an on-screen callback. Optional 0.6 s foreshadow flash. 20 to
+  45 s.
+- **Top N:** default Top 3; Top 5 only when 5 strong entries share one
+  theme. Theme in the title, tease #1 first, escalate to #1, rank card
+  with a viewer-voice label per entry. Top 3 at most 60 s, Top 5 at most
+  100 s. Repeated baseline reactions belong here.
+- The editor pass proposes concepts; the user can change any of them or
+  build one by hand from ticked candidates.
 
 **Scores.** The UI shows the calibrated raw score (0 to 100), not the
 within-VOD percentile. Percentiles only order candidates, with average rank
@@ -1168,6 +1157,27 @@ These rules protect the team's accounts. Treat them as requirements.
    near-identical posts look like spam to every platform.
 6. **No browser automation, no unofficial posting APIs, no second accounts to
    dodge limits.**
+7. **Outreach rules.** Trial clips for a prospect use a source with
+   permission `none` and are shared only with that creator by a private
+   link. The YouTube Data API is used within its policies: API data kept 30
+   days at most, no aggregation across channels, no scraping, a human
+   reviews every first email. If clients ever log in or connect their own
+   channels, re-check the security tier (T3).
+
+   **Twitch: accepted risk (decided by the user, 2026-10-14).** The Twitch
+   Developer Agreement, Schedule 1, bans using Twitch API data to target
+   users with commercial offers. The Twitch lead finder (`OUTREACH.md` §6.2
+   B) uses Helix anyway, with these limits:
+   - It uses Spike's own `TWITCH_CLIENT_ID` (user's decision, 2026-10-15).
+     If Twitch revokes it, Spike's VOD and community-clip lookups stop too,
+     until a new app is registered and put in `.env`.
+   - It is off until an admin turns it on.
+   - Emails come only from the bio. Never Whispers or the chat APIs.
+   - Twitch data is kept 24 hours: samples are deleted, lead data is
+     refreshed nightly or purged.
+   - The main danger is the finder's client ID being revoked. Twitch cannot
+     see the emails; it can see an app scanning whole categories and looking
+     up users it never processes. No source gives a probability.
 
 ---
 
@@ -1335,6 +1345,29 @@ user-marked moments appear among stored candidates, no pick starts inside
 the previous topic, and the user rates at least half the picks as
 postable.
 
+### Phase 7c: Outreach dashboard
+
+Starts only after Phase 7b is done. Full design in `OUTREACH.md` §6.
+
+1. `data/outreach.db` and the `/outreach` pages (Leads to review, Ready to
+   email, Sent, Replies, Clients, Finder settings).
+2. YouTube finder process: saved searches, enrich, filter, LLM fit score,
+   nightly 30-day refresh or delete of API data.
+3. Bulk approve makes one trial clip per lead: a `none` source with
+   `target_clips = 1`, a `prospect` flag, low priority, first 2 hours only.
+4. Clip approval in Spike moves the lead on. Drive share link, LLM email
+   draft, bulk send through Gmail, follow-ups, reply and opt-out detection.
+
+**Done when:** 20 leads go from found to sent with no manual step other
+than the three reviews (lead, clip, email), and no API data in
+`outreach.db` is older than 30 days.
+
+**Status (2026-10-14):** built, YouTube only (`src/outreach/`, setup in
+`OUTREACH.md` §6.8). Tested with faked APIs and one live finder run. Not
+yet run end to end with a real Gmail account. The "done when" check needs
+real leads and a connected Google account. Phase 7b (clip quality) still
+gates sending real emails (`OUTREACH.md` §1).
+
 ### Phase 8: Security and hardening (T2, Internal/Team)
 
 Tier T2: a small known team, reachable only through a private network, holding
@@ -1355,6 +1388,22 @@ creators get access, which would also move security to T3.
 - [ ] SQLite is a local file. It is never shared over the network.
 - [ ] Platform OAuth tokens encrypted at rest (Fernet). The key never enters
       the database or logs.
+- [ ] Outreach (Phase 7c): Gmail and Drive tokens encrypted the same way,
+      with the smallest scopes (send, reply metadata, app-created files
+      only). Lead data lives only in `data/outreach.db`. Leads with no reply
+      are deleted after 6 months; `opt_outs` is checked before every send.
+      Only admins send emails or change finder settings.
+- [ ] Outreach Twitch finder (accepted risk, §12 rule 7): it shares Spike's
+      `TWITCH_CLIENT_ID`. 2FA on the Twitch developer account; know how to
+      register a replacement app quickly if the ID is revoked.
+- [ ] Remove the fallback Fernet key in `src/security.py`: it is in the
+      repo, so tokens stored without `SPIKE_ENCRYPTION_KEY` are readable by
+      anyone with the code. Fail at startup instead. (Outreach already
+      refuses to store Google tokens without the env key.)
+- [ ] Same-site check on every form post. Tailscale adds identity headers
+      to any request the browser makes, so another site can post to Spike
+      as a team member. `/outreach` already checks `Origin`; move that
+      check into a middleware for all routes.
 - [ ] Role checks on the server for every admin action (accounts, settings,
       users, deletes). A member calling an admin route directly gets a 403.
 - [ ] Every data query uses SQLite parameters, never string-built SQL.
@@ -1451,7 +1500,7 @@ and `pip-audit` is clean.
 1. What are the small PC's real specs (CPU, RAM, disk, GPU)? This sets the
    Whisper model and the capacity estimate.
 2. Which streamers and channels first, and what permission does the team have
-   for each?
+   for each? Outside clients: see `OUTREACH.md` for targets and process.
 3. Which platform matters most? This decides the Phase 6 order.
 4. Which languages? Whisper handles many, but caption styling and the LLM
    prompt may need per-language tuning.

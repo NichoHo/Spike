@@ -56,7 +56,7 @@ def cmd_status(args):
         print(f"\nCandidates ({len(cands)} total):")
         for c in cands:
             dur = c['end_s'] - c['start_s']
-            print(f"  [{c['final_score']}/100] {c['title']} ({dur:.1f}s) -> \"{c['punchline']}\"")
+            print(f"  [{c["llm_score"]}/100] {c['title']} ({dur:.1f}s) -> \"{c['punchline']}\"")
 
 
 def cmd_watch(args):
@@ -80,6 +80,8 @@ def cmd_web(args):
         cmds.append([sys.executable, sys.argv[0], "worker"])
     if not args.no_watcher:
         cmds.append([sys.executable, sys.argv[0], "watch"])
+    if not args.no_outreach:
+        cmds.append([sys.executable, sys.argv[0], "outreach"])
     children = [subprocess.Popen(c) for c in cmds]
 
     def supervise():
@@ -103,6 +105,17 @@ def cmd_worker(args):
     """Start background worker daemon."""
     from src.worker import start_worker
     start_worker(poll_interval_s=args.interval)
+
+
+def cmd_outreach(args):
+    """Run the Outreach process: finder schedule, trial clips, drafts, sending, follow-ups (OUTREACH.md §6)."""
+    if args.find_now:
+        from src.outreach.daemon import run_finder_now
+        from src.outreach.db import get_settings
+        run_finder_now(get_settings())
+        return
+    from src.outreach.daemon import run_daemon
+    run_daemon()
 
 
 def cmd_music(args):
@@ -152,12 +165,18 @@ def main():
     web_parser.add_argument("--reload", action="store_true", help="Enable dev auto-reloading")
     web_parser.add_argument("--no-worker", action="store_true", help="Do not start the background worker")
     web_parser.add_argument("--no-watcher", action="store_true", help="Do not start the source watcher")
+    web_parser.add_argument("--no-outreach", action="store_true", help="Do not start the outreach process")
     web_parser.set_defaults(func=cmd_web)
 
     # worker command (§13 Phase 4)
     worker_parser = subparsers.add_parser("worker", help="Start background queue worker")
     worker_parser.add_argument("--interval", type=float, default=5.0, help="Poll interval in seconds")
     worker_parser.set_defaults(func=cmd_worker)
+
+    # outreach command (OUTREACH.md §6)
+    outreach_parser = subparsers.add_parser("outreach", help="Run the outreach process (lead finder, trial clips, emails)")
+    outreach_parser.add_argument("--find-now", action="store_true", help="Run the lead finder once and exit")
+    outreach_parser.set_defaults(func=cmd_outreach)
 
     # music command (§13 Phase 5)
     music_parser = subparsers.add_parser("music", help="Verify music library licenses and list tracks")

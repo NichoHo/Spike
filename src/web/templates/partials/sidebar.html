@@ -38,6 +38,11 @@
       <span>Posts</span>
     </a>
 
+    <a href="/outreach" class="nav-item {% if active_nav == 'outreach' %}is-active{% endif %}" {% if active_nav == 'outreach' %}aria-current="page"{% endif %}>
+      {{ ui.icon("envelope-simple", 16) }}
+      <span>Outreach</span>
+    </a>
+
     {% if user and user.role == 'admin' %}
       <a href="/settings" class="nav-item {% if active_nav == 'settings' %}is-active{% endif %}" {% if active_nav == 'settings' %}aria-current="page"{% endif %}>
         {{ ui.icon("gear-six", 16) }}
