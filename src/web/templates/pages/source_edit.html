@@ -14,7 +14,7 @@
     </div>
   </header>
 
-  <form method="post" action="{% if source %}/sources/{{ source.id }}/edit{% else %}/sources/new{% endif %}" class="card">
+  <form method="post" action="{% if source %}/sources/{{ source.id }}/edit{% else %}/sources/new{% endif %}" class="card"{% if not source %} data-requires="source" data-requires-fields="kind"{% endif %}>
     <div class="card__body stack">
       <!-- Section: Source Identity -->
       <section class="stack stack--sm">

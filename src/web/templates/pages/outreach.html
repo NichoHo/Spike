@@ -254,7 +254,7 @@
         {{ ui.button("Save drafts", variant="secondary", size="sm", type="submit", attrs={"name": "action", "value": "save_drafts"}) }}
         {% if is_admin %}
           {{ ui.button("Regenerate", variant="secondary", size="sm", icon="arrow-clockwise", type="submit", attrs={"name": "action", "value": "regenerate", "data-confirm": "Re-upload the clip and rewrite the selected drafts? Your edits are replaced."}) }}
-          {{ ui.button("Send selected", variant="primary", size="sm", icon="paper-plane-tilt", type="submit", disabled=blockers | length > 0, attrs={"name": "action", "value": "send", "data-confirm": "Queue the selected emails? They go out " ~ settings.send_gap_min ~ " minutes apart."}) }}
+          {{ ui.button("Send selected", variant="primary", size="sm", icon="paper-plane-tilt", type="submit", disabled=blockers | length > 0, attrs={"name": "action", "value": "send", "data-requires": "outreach_send", "data-confirm": "Queue the selected emails? They go out " ~ settings.send_gap_min ~ " minutes apart."}) }}
         {% endif %}
       {% endcall %}
       <div class="switch-row small">{{ select_all("Select all drafts") }} Select all</div>
@@ -449,7 +449,7 @@
         <p class="small">{{ settings.last_run_summary or "The finder has not run yet." }}</p>
       </div>
       {% if not ro %}
-        <form method="post" action="/outreach/run-now" class="card__footer">
+        <form method="post" action="/outreach/run-now" class="card__footer" data-requires="outreach_find">
           <span class="card__footer-note">Uses today's quota. Results land in Streamers to review.</span>
           {{ ui.button("Run finder now", variant="primary", type="submit", icon="magnifying-glass") }}
         </form>
@@ -495,7 +495,7 @@
           <p class="muted small">No searches yet. Start with 3 to 5, for example "podcast", "just chatting", or "main bareng" with language id.</p>
         {% endif %}
         {% if not ro %}
-          <form method="post" action="/outreach/searches" class="search-form">
+          <form method="post" action="/outreach/searches" class="search-form" data-requires="outreach_find">
             <div class="field"><label class="field__label" for="s-query">Query</label><input class="input" id="s-query" name="query" required maxlength="200" placeholder="valorant live"></div>
             <div class="field"><label class="field__label" for="s-kind">Finds</label>
               <select class="select" id="s-kind" name="kind" data-sets-fields>
@@ -550,12 +550,12 @@
           </div>
         {% endif %}
         {% if not ro %}
-          <form method="post" action="/outreach/twitch/searches" class="search-form">
+          <form method="post" action="/outreach/twitch/searches" class="search-form" data-requires="outreach_find" data-requires-kind="twitch">
             <div class="field"><label class="field__label" for="tw-cat">Category <span class="field__optional">(exact Twitch name)</span></label><input class="input" id="tw-cat" name="category" maxlength="100" placeholder="Just Chatting" autocomplete="off"></div>
             <div class="field"><label class="field__label" for="tw-lang">Language</label><input class="input" id="tw-lang" name="language" maxlength="5" placeholder="en" autocomplete="off"></div>
             <div class="field"><label class="field__label" for="tw-min">Min live viewers</label><input class="input input--number" id="tw-min" name="min_viewers" type="number" min="1" value="50"></div>
             <div class="field"><label class="field__label" for="tw-max">Max live viewers</label><input class="input input--number" id="tw-max" name="max_viewers" type="number" min="1" value="1000"></div>
-            <div class="search-form__submit">{{ ui.button("Add Twitch search", variant="secondary", type="submit", icon="plus", disabled=twitch_problem is not none) }}</div>
+            <div class="search-form__submit">{{ ui.button("Add Twitch search", variant="secondary", type="submit", icon="plus") }}</div>
           </form>
         {% endif %}
       </div>
@@ -568,7 +568,7 @@
           </label>
           <div class="field field--inline"><label class="field__label" for="tw-hours">Sample at (hours)</label><input class="input input--mono" id="tw-hours" name="twitch_sample_hours" value="{{ settings.twitch_sample_hours }}" autocomplete="off"></div>
           <div class="field field--inline"><label class="field__label" for="tw-cap">Leads a day</label><input class="input input--number input--short" id="tw-cap" name="twitch_new_leads_per_day" type="number" min="0" value="{{ settings.twitch_new_leads_per_day }}"></div>
-          {{ ui.button("Sample now", variant="ghost", size="sm", type="submit", disabled=twitch_problem is not none, attrs={"formaction": "/outreach/twitch/sample-now"}) }}
+          {{ ui.button("Sample now", variant="ghost", size="sm", type="submit", attrs={"formaction": "/outreach/twitch/sample-now", "data-requires": "outreach_find", "data-requires-kind": "twitch"}) }}
           {{ ui.button("Save", variant="secondary", type="submit") }}
         </form>
       {% endif %}

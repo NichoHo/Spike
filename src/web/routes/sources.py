@@ -11,6 +11,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
+
+from src import requirements
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
@@ -220,6 +222,8 @@ async def create_source_action(
     auto_concepts: List[str] = Form(default_factory=list),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
+    if (todo := requirements.missing("source", kind=kind)):
+        raise HTTPException(status_code=400, detail="Finish setup first: " + ", ".join(i["title"] for i in todo) + ".")
     data = {
         "kind": kind,
         "external_id": external_id.strip(),

@@ -30,6 +30,7 @@ from src.db import (
     list_review_clips,
     log_event,
 )
+from src import requirements
 from src.web.auth import get_current_user
 
 
@@ -123,6 +124,8 @@ async def submit_new_job(
 ):
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
+    if (todo := requirements.missing("video", source_id=source_id if tab == "streamer" else None, url=url or "" if tab == "url" else "")):
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Finish setup first: " + ", ".join(i["title"] for i in todo) + ".")
     if (
         not (target_clips.strip() == "" or target_clips.strip().isdigit())
         or layout not in VALID_LAYOUTS

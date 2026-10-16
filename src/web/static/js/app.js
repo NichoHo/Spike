@@ -544,3 +544,83 @@ document.addEventListener("change", (e) => {
     if (input && (!input.value || all.some((d) => d[id] === input.value))) input.value = value;
   });
 });
+
+// ── Setup requirements popup ─────────────────────────────────────────────────
+// A form (or submit button) with data-requires="<action>" is checked against /requirements/check first.
+// data-requires-fields="a,b" sends those form fields; data-requires-kind sends a fixed platform.
+// Anything missing opens a popup listing the steps and blocks the submit; otherwise the submit goes through.
+function showRequirements(items) {
+  document.getElementById("requirements-dialog")?.remove();
+  const dlg = document.createElement("dialog");
+  dlg.id = "requirements-dialog";
+  dlg.className = "dialog";
+  const body = document.createElement("div");
+  body.className = "dialog__body";
+  const h = document.createElement("h2");
+  h.className = "dialog__title";
+  h.textContent = "Finish setup first";
+  const p = document.createElement("p");
+  p.className = "dialog__text";
+  p.textContent = "This needs the following before it can run:";
+  const list = document.createElement("div");
+  list.className = "stack stack--sm";
+  list.style.marginTop = "var(--space-4)";
+  items.forEach((it) => {
+    const row = document.createElement("div");
+    const t = document.createElement("strong");
+    t.textContent = it.title;
+    const d = document.createElement("p");
+    d.className = "dialog__text";
+    d.textContent = it.detail;
+    row.append(t, d);
+    if (it.fix_url) {
+      const a = document.createElement("a");
+      a.className = "btn btn--primary btn--sm";
+      a.href = it.fix_url;
+      a.textContent = it.fix_label || "Fix";
+      a.style.marginTop = "var(--space-2)";
+      row.appendChild(a);
+    }
+    list.appendChild(row);
+  });
+  body.append(h, p, list);
+  const foot = document.createElement("div");
+  foot.className = "dialog__footer";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "btn btn--secondary";
+  close.textContent = "Close";
+  close.addEventListener("click", () => dlg.close());
+  foot.appendChild(close);
+  dlg.append(body, foot);
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  dlg.addEventListener("close", () => dlg.remove());
+  document.body.appendChild(dlg);
+  dlg.showModal();
+}
+
+document.addEventListener("submit", async (e) => {
+  const form = e.target;
+  const sub = e.submitter;
+  const holder = (sub && sub.dataset.requires) ? sub : (form.dataset.requires ? form : null);
+  if (!holder || form._requirementsOk) return;
+  e.preventDefault();
+  e.stopPropagation(); // the page's own submit handler runs only once the check passes
+  const q = new URLSearchParams({ action: holder.dataset.requires });
+  if (holder.dataset.requiresKind) q.set("kind", holder.dataset.requiresKind);
+  (holder.dataset.requiresFields || "").split(",").filter(Boolean).forEach((name) => {
+    const field = form.elements[name];
+    if (!field) return;
+    const key = name === "url" ? "url" : name;
+    if (field.value) q.set(key, field.value);
+  });
+  let missing = [];
+  try {
+    const res = await fetch("/requirements/check?" + q);
+    if (res.ok) missing = (await res.json()).missing || [];
+  } catch (_) { /* server unreachable: let the submit hit the server's own check */ }
+  if (missing.length) { showRequirements(missing); return; }
+  form._requirementsOk = true;
+  form.requestSubmit(sub || undefined);
+  form._requirementsOk = false;
+}, true);

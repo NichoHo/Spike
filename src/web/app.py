@@ -27,6 +27,7 @@ from src.web.routes.clips import router as clips_router
 from src.web.routes.concepts import router as concepts_router
 from src.web.routes.posts import router as posts_router
 from src.outreach.routes import router as outreach_router
+from src.requirements import router as requirements_router
 
 logger = logging.getLogger("spike.web")
 
@@ -121,6 +122,7 @@ app.include_router(clips_router)
 app.include_router(concepts_router)
 app.include_router(posts_router)
 app.include_router(outreach_router)
+app.include_router(requirements_router)
 
 
 if __name__ == "__main__":

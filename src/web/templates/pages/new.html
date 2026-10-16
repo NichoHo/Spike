@@ -11,7 +11,7 @@
     <a href="/new?tab=upload" class="tab {% if active_tab == 'upload' %}is-active{% endif %}" role="tab">Upload file</a>
   </div>
 
-  <form method="post" action="/new/submit" enctype="multipart/form-data" class="card">
+  <form method="post" action="/new/submit" enctype="multipart/form-data" class="card" data-requires="video" data-requires-fields="source_id,url">
     <input type="hidden" name="tab" value="{{ active_tab or 'streamer' }}">
 
     <div class="card__body stack">
