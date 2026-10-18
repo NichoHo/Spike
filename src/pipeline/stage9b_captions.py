@@ -62,14 +62,18 @@ _STYLE_DEFS = {
         "Style: pov,Arial,84,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
         "1,0,0,0,100,100,0,0,1,7,2,8,90,90,230,1"
     ),
-    # rank: the big "#2" of a countdown entry, with its label under it
-    "rank": (
-        "Style: rank,Impact,200,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
-        "0,0,0,0,100,100,0,0,1,9,2,8,60,60,210,1"
+    # Ranking (top3 / top5): a fixed two-line header, then a numbered list down the left whose labels fill in
+    "rank_header": (
+        "Style: rank_header,Impact,104,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
+        "0,0,0,0,100,100,0,0,1,7,2,8,50,50,150,1"
     ),
-    "rank_label": (
-        "Style: rank_label,Arial,64,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
-        "1,0,0,0,100,100,0,0,1,6,2,8,90,90,470,1"
+    "rank_num": (
+        "Style: rank_num,Impact,112,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
+        "0,0,0,0,100,100,0,0,1,7,2,4,0,0,0,1"
+    ),
+    "rank_item": (
+        "Style: rank_item,Impact,60,&H00FFFFFF,&H00000000,&H00000000,&H96000000,"
+        "0,0,0,0,100,100,0,0,1,5,2,4,0,0,0,1"
     ),
     # callback: the setup quote shown on the payoff
     "callback": (
@@ -82,7 +86,7 @@ _STYLE_DEFS = {
         "1,0,0,0,100,100,0,0,1,0,0,5,100,100,0,1"
     ),
 }
-OVERLAY_STYLES = ("pov", "rank", "rank_label", "callback", "card")
+OVERLAY_STYLES = ("pov", "rank_header", "rank_num", "rank_item", "callback", "card")
 _HIGHLIGHT = "&H0000FFFF&"  # ASS colours are BGR: this is yellow
 
 _PROFANITY_LIST = [
@@ -239,6 +243,13 @@ def generate_ass(
         text = _escape_ass(str(e["text"]))
         if profanity_mask:
             text = _mask_profanity(text)
+        hl = _escape_ass(str(e.get("highlight") or ""))
+        if hl:  # e.g. the streamer's name in the ranking header, in yellow
+            text = re.sub(re.escape(hl), lambda m: f"{{\\c{_HIGHLIGHT}}}{m.group(0)}{{\\c&H00FFFFFF&}}", text, flags=re.IGNORECASE)
+        if e.get("pos"):
+            text = f"{{\\pos({int(e['pos'][0])},{int(e['pos'][1])})}}" + text
+        if e.get("color"):
+            text = f"{{\\c{e['color']}}}" + text
         lines.append(f"Dialogue: 2,{_ts_to_ass(e['start'])},{_ts_to_ass(e['end'])},{e['style']},,0,0,0,,{text}")
 
     def event(st: float, et: float, text: str) -> str:

@@ -92,20 +92,29 @@ def test_story_has_a_skip_card_between_segments_and_the_callback_on_the_payoff(e
     assert abs(dur2 - (dur + 0.6)) < 0.5                 # the 0.6 s flash opens the clip
 
 
-def test_top3_teases_number_one_then_counts_down_with_rank_cards(env):
+def test_top3_counts_down_under_a_header_and_the_list_fills_in(env):
     segs = [seg(3.0, 10.0, rank=3, label="he blamed the controller"), seg(12.0, 20.0, rank=2, label="he blamed chat"), seg(30.0, 39.0, rank=1, label="the loss")]
     out, dur = run(env, "top3", segs[::-1])              # given best first: the renderer orders them
-    assert abs(dur - (1.5 + 7.0 + 8.0 + 9.0)) < 0.8
+    assert abs(dur - (7.0 + 8.0 + 9.0)) < 0.8           # no tease: straight into #3
     assert probe(out)[1] == (1080, 1920)
-    # the rank card shows on the first entry (which starts after the 1.5 s tease) for 1.5 s, then it is gone
-    nocard, _ = run(env, "top3", [dict(s, rank=s["rank"], label="") for s in segs], out_name="nolabel")
-    assert changed(out, nocard, 2.2) > 3 and changed(out, nocard, 4.5) < 1.5
+    # labels stay for the rest of the clip once they appear
+    nolabel, _ = run(env, "top3", [dict(s, label="") for s in segs], out_name="nolabel")
+    assert changed(out, nolabel, 10.0) > 1 and changed(out, nolabel, 20.0) > 1   # the #2 label row sits in the band
+
+
+def test_ranking_overlay_fills_labels_up_to_the_current_entry():
+    from src.pipeline.concept_render import ranking_overlay
+    segs = [dict(rank=3, label="c"), dict(rank=2, label="b"), dict(rank=1, label="a")]
+    ev = ranking_overlay("Ranking Speed's Funniest Moments", "Speed", segs, 1)
+    assert ev[0]["style"] == "rank_header" and ev[0]["highlight"] == "Speed"
+    assert [e["text"] for e in ev if e["style"] == "rank_num"] == ["1.", "2.", "3."]
+    assert [e["text"] for e in ev if e["style"] == "rank_item"] == ["b", "c"]   # #3 then #2 shown, #1 not yet
 
 
 def test_top5_and_a_removed_stretch_shorten_the_clip(env):
     segs = [seg(2.0 + 10 * i, 9.0 + 10 * i, rank=5 - i, label=f"entry {5 - i}") for i in range(4)] + [seg(44.0, 53.0, rank=1, label="the loss", remove=[[47.0, 48.0]])]
     out, dur = run(env, "top5", segs)
-    assert abs(dur - (1.5 + 4 * 7.0 + 8.0)) < 1.0        # tease, four 7 s entries, #1 minus its 1 s cut
+    assert abs(dur - (4 * 7.0 + 8.0)) < 1.0              # four 7 s entries, #1 minus its 1 s cut
     assert not any(p.name.startswith("tmp_concept") for p in (env["vdir"] / "renders").iterdir())   # work files are cleaned up
 
 

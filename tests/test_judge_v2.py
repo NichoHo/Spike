@@ -63,6 +63,7 @@ def test_stage7_stores_every_judged_candidate(tmp_path, monkeypatch):
                                 punchline="p", title="The streamer loses", hook_text="h", post_caption="c")
 
     monkeypatch.setattr(s7, "call_llm_judge", fake_judge)
+    monkeypatch.setattr(s7, "read_whole_stream", lambda *a, **k: ("", []))
     monkeypatch.setattr(s7, "propose_transcript_chunks", lambda *a, **k: [
         {"type": "hubris", "peak_t": 390.0, "clip_start": 385.0, "clip_end": 395.0, "topic": "I never lose"}])
     monkeypatch.setattr(s7, "build_episodes", lambda *a, **k: [])
@@ -109,8 +110,34 @@ def test_stage7_aborts_without_storing_when_the_judge_mostly_fails(tmp_path, mon
     peaks = [{"peak_t": float(t), "signal_score_raw": 1.0, "context_start": 0, "context_end": 1, "clip_start": t - 5.0,
               "clip_end": t + 5.0, "origin": "signal", "signals_at_peak": {}} for t in (60, 140, 220, 300)]
     monkeypatch.setattr(s7, "call_llm_judge", lambda *a, **k: None)
+    monkeypatch.setattr(s7, "read_whole_stream", lambda *a, **k: ("", []))
     monkeypatch.setattr(s7, "propose_transcript_chunks", lambda *a, **k: [])
     monkeypatch.setattr(s7, "build_episodes", lambda *a, **k: [])
     with pytest.raises(RuntimeError, match="Nothing was stored"):
         s7.run_stage7_moments(vid, tmp_path, {"duration": 400, "webpage_url": ""}, transcript, {"peaks": peaks}, [])
     assert get_candidates(vid) == [] and not (tmp_path / "candidates.json").exists()
+
+
+def test_video_gates_trim_and_line_proposals():
+    from src.models import VideoVerdict
+    v = lambda **k: VideoVerdict(**{"visible": True, "standalone": True, "reaction": "peak", "score": 85, **k})
+    base = ["rages at every loss"]
+    rec = {"humor_type": "rage"}
+    s7.apply_video_verdict(rec, v(), base, contrast=False)
+    assert rec["raw_llm_score"] == 85  # a peak meltdown passes even for a creator who rages often
+    s7.apply_video_verdict(rec, v(reaction="routine"), base, contrast=False)
+    assert rec["raw_llm_score"] == s7.BASELINE_CAP
+    for bad in ({"visible": False}, {"standalone": False}, {"reaction": "reading_chat"}, {"reaction": "none"}):
+        s7.apply_video_verdict(rec, v(**bad), [], contrast=False)
+        assert rec["raw_llm_score"] == s7.GATED_SCORE
+
+    lines = [{"start": i * 5.0, "end": i * 5.0 + 5.0} for i in range(30)]
+    edges = {"start_s": 0.0, "end_s": 120.0, "payoff_t": 100.0, "cuts": [[5.0, 10.0], [60.0, 62.0]], "net_dur": 113.0}
+    t = s7.trim_to_max(lines, edges, 40.0)
+    assert t["end_s"] == 120.0 and t["start_s"] == 80.0 and t["cuts"] == [] and t["net_dur"] == 40.0
+
+    meta = [{"start": i * 2.0, "end": i * 2.0 + 2.0} for i in range(100)]
+    p = s7.line_proposal({"start_line": 11, "end_line": 12, "topic": "x"}, meta, 200.0, "stream")
+    assert p["origin"] == "stream_read" and p["clip_end"] - p["clip_start"] == s7.MIN_CLIP_DURATION_S
+    assert s7.line_proposal({"start_line": 0, "end_line": 3}, meta, 200.0, "moment") is None
+    assert s7.line_proposal({"start_line": 5, "end_line": 500}, meta, 200.0, "moment") is None

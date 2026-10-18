@@ -31,8 +31,6 @@ TOP_RULES = {
 }
 TOP5_FLOOR = 55.0          # every top 5 entry must pass the judge's floor
 CARD_S = 1.0               # skip card length
-TEASE_S = 1.5
-RANK_CARD_S = 1.5
 CALLBACK_S = 1.5
 FORESHADOW_S = 0.6
 END_PAD_S = 0.8
@@ -259,10 +257,8 @@ def validate_concept(
                 problems.append(f"entry #{s.get('rank')} is under the judge's floor of {TOP5_FLOOR:.0f}")
         if sum(lens) > rules["total_max"]:
             problems.append(f"total {sum(lens):.0f}s is over {rules['total_max']:.0f}s")
-        if not (theme or "").strip():
-            problems.append("it has no theme")
-        if not hook_text.strip():
-            problems.append("it has no hook text for the tease")
+        if not title.strip():
+            problems.append("it has no header title")
     return problems
 
 

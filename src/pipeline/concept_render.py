@@ -9,7 +9,8 @@ final loudnorm pass. No transitions and no sound effects (§7.4).
 Order of pieces:
   pov    the reaction, with the caption at the top for the whole clip. No hook title, no speech captions.
   story  [0.6 s flash of the payoff peak] setup (hook title), skip card, [middle, skip card], payoff (callback quote)
-  top N  1.5 s tease of #1's peak with the hook text, then the entries from #N down to #1, each with a rank card
+  top N  the entries from #N down to #1 under a fixed header (the title), with a numbered list on the left whose
+         labels fill in as each entry plays
 """
 
 import shutil
@@ -24,8 +25,6 @@ from src.concepts import (
     CALLBACK_S,
     CARD_S,
     FORESHADOW_S,
-    RANK_CARD_S,
-    TEASE_S,
     TOP_RULES,
     order_entries,
     reaction_peak,
@@ -56,6 +55,26 @@ from src.pipeline.stage9c_render import (
 
 class ConceptRenderError(RuntimeError):
     pass
+
+
+RANK_COLORS = {1: "&H0000C8FF&", 2: "&H00C0C0C0&", 3: "&H002A6ACD&"}   # gold, silver, bronze (ASS colours are BGR)
+RANK_LIST_TOP_Y, RANK_ROW_H = 470, 108
+RANK_CAPTION_Y = 0.74   # speech captions sit below the list
+
+
+def ranking_overlay(title: str, highlight: str, segs: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
+    """Overlay for entry k of a ranking (segs ordered #N first): the header for the whole piece, numbers 1..N down
+    the left, and the labels of every entry shown so far, this one included. Labels stay once they appear."""
+    end, n = 3600.0, len(segs)
+    events = [{"start": 0, "end": end, "style": "rank_header", "text": title, "highlight": highlight}]
+    shown = {s.get("rank") or (n - i): s.get("label", "") for i, s in enumerate(segs[:k + 1])}
+    for r in range(1, n + 1):
+        y = RANK_LIST_TOP_Y + (r - 1) * RANK_ROW_H
+        events.append({"start": 0, "end": end, "style": "rank_num", "text": f"{r}.", "pos": (50, y),
+                       "color": RANK_COLORS.get(r, "&H00FFFFFF&")})
+        if shown.get(r):
+            events.append({"start": 0, "end": end, "style": "rank_item", "text": shown[r], "pos": (150, y)})
+    return events
 
 
 def _ffmpeg(args: List[str]) -> None:
@@ -96,14 +115,10 @@ def make_card(text: str, out: Path, work: Path, dur: float = CARD_S) -> Path:
     return out
 
 
-def cut_piece(src: Path, out: Path, start: float, dur: float, work: Path, text: str = "") -> Path:
-    """Cut dur seconds out of an already rendered piece, optionally with the hook text burned in (the tease)."""
+def cut_piece(src: Path, out: Path, start: float, dur: float) -> Path:
+    """Cut dur seconds out of an already rendered piece (the story's foreshadow flash)."""
     start = max(0.0, min(start, max(0.0, _duration(src) - dur)))
-    cmd = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src)]
-    if text:
-        ass = write_ass_file(generate_ass([], 0, dur, hook_text=text, hook_duration_s=dur), work / f"{out.stem}.ass")
-        cmd += ["-vf", f"ass={_to_rel_path(ass)}"]
-    _ffmpeg(cmd + _encode() + [str(out)])
+    _ffmpeg(["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src)] + _encode() + [str(out)])
     return out
 
 
@@ -171,7 +186,8 @@ def render_concept_clip(
         # One layout for the whole clip, decided once
         layout, facecam_box = resolve_layout(layout, sections[0], facecam_box)
 
-        def render_piece(k: int, name: str, hook: str = "", words_on: bool = True, events: Optional[List[Dict[str, Any]]] = None) -> Path:
+        def render_piece(k: int, name: str, hook: str = "", words_on: bool = True, events: Optional[List[Dict[str, Any]]] = None,
+                         caption_y: Optional[float] = None) -> Path:
             seg, out = segs[k], work / f"{name}.mp4"
             ok = render_single_vertical_clip(
                 sec_file=sections[k], out_file=out, thumb_file=work / f"{name}.jpg",
@@ -179,7 +195,7 @@ def render_concept_clip(
                 hook_text=hook, all_words=all_words if words_on else [], facecam_box=facecam_box,
                 profanity_mask=profanity_mask, silence_trim=False, letterbox_style=letterbox_style,
                 title_text=hook, extra_cuts=[tuple(c) for c in seg.get("remove") or []], zooms=seg.get("zooms"),
-                section_start_s=read_section_start(sections[k]), overlay_events=events,
+                section_start_s=read_section_start(sections[k]), overlay_events=events, caption_y=caption_y,
             )
             if not ok or not out.exists():
                 raise ConceptRenderError(f"segment {k + 1} failed to render")
@@ -213,28 +229,19 @@ def render_concept_clip(
                     events = [{"start": peak, "end": peak + CALLBACK_S, "style": "callback", "text": f"“{overlay['callback_quote']}”"}]
                 rendered[k] = render_piece(k, f"seg{k}", hook=hook_text if k == first else "", events=events)
             if overlay.get("foreshadow"):
-                add(cut_piece(rendered[last], work / "flash.mp4", peak - 0.2, FORESHADOW_S, work))
+                add(cut_piece(rendered[last], work / "flash.mp4", peak - 0.2, FORESHADOW_S))
             for k in range(len(segs)):
                 if k > 0:
                     add(make_card(overlay.get("skip_card") or "later", work / f"card{k}.mp4", work))
                 if k == last:
                     thumb_at = elapsed + peak
                 add(rendered[k])
-        else:  # top3, top5: entries from #N down to #1
-            rendered = {}
-            for k, seg in enumerate(segs):
-                rank = seg.get("rank") or (len(segs) - k)
-                rendered[k] = render_piece(k, f"entry{k}", words_on=True, events=[
-                    {"start": 0, "end": RANK_CARD_S, "style": "rank", "text": f"#{rank}"},
-                    {"start": 0, "end": RANK_CARD_S, "style": "rank_label", "text": seg.get("label", "")},
-                ])
-            best = len(segs) - 1                                   # #1 is last
-            peak = _peak_in_piece(segs[best], video_dir)
-            # Keep the tease clear of #1's own rank card when the clip is long enough for that
-            tease_start = max(peak - 0.3, RANK_CARD_S + 0.1) if _duration(rendered[best]) > RANK_CARD_S + TEASE_S + 0.2 else peak - 0.3
-            add(cut_piece(rendered[best], work / "tease.mp4", tease_start, TEASE_S, work, text=hook_text))
+        else:  # top3, top5: entries from #N down to #1, the list fills in as they play
             for k in range(len(segs)):
-                add(rendered[k])
+                if k == len(segs) - 1:
+                    thumb_at = elapsed + _peak_in_piece(segs[k], video_dir)
+                add(render_piece(k, f"entry{k}", events=ranking_overlay(title, meta.get("uploader") or "", segs, k),
+                                 caption_y=RANK_CAPTION_Y))
 
         join_pieces(pieces, out_file, work)
         _ffmpeg(["-ss", f"{max(0.0, min(thumb_at, _duration(out_file) - 0.2)):.2f}", "-i", str(out_file), "-frames:v", "1", "-q:v", "2", str(thumb_file)])

@@ -40,7 +40,8 @@ class ZoomOut(BaseModel):
 
 
 class SpanOut(BaseModel):
-    source: str = Field(description="Label from the input: C (candidate), H (hubris line), R (plain reaction)")
+    source: str = Field(pattern=r"^[CHR][0-9]+$",
+                        description="The exact label from the input, letter and number: C3 (candidate), H1 (hubris line), R2 (plain reaction)")
     start_line: int
     end_line: int
     cut_lines: List[int] = Field(default_factory=list)
@@ -76,10 +77,10 @@ Concepts you may output (allowed: {', '.join(allowed)}):
 - single: one moment, a hook title. Start where a stranger understands it, end on the reaction.
 - story: 2 segments in time order (3 only if the middle step escalates), 20 to 45 s in total. Segment 1 is the setup, 8 s or less, a clear quotable claim (a brag, prediction, promise or dare) from an H or C source. The last segment is the payoff: it must contradict the claim and show the reaction (a C source). skip_card: 1 to 6 words of real elapsed time or event count, like '3 goals later'. callback_quote: the claim, copied exactly from the setup lines. foreshadow true only when the setup is calm. hook_text frames the irony without spoiling it.
 - pov: one plain reaction (C or R source), 4 to 12 s, one universal emotion that reads from face and voice, almost no speech: nothing that names the game, a player, a team, chat, a donation or the streamer. Do not write the caption, another step does.
-- top3 / top5: one theme, stated in the title. Entries 6 to 15 s each (top5: 6 to 12 s), each with a label in a viewer's voice ('he blamed the controller'). rank 1 is the best. hook_text teases #1. Top 5 only when five strong entries share the theme (all judge score 55 or more). Every entry must be good alone; if you do not have enough, give fewer outputs instead.
+- top3 / top5: a ranking of the stream's funniest moments. Entries are different, unrelated moments from different parts of the stream (not one theme), and they may reuse candidates that are also singles. title is the on-screen header, 4 to 7 words starting with "Ranking", like "Ranking {who}'s Funniest Moments". Entries 6 to 15 s each (top5: 6 to 12 s), each cut to its funniest part, with a label of 2 to 6 words: a short quote or what happens ('he blamed the controller'). rank 1 is the funniest. Give a top3 whenever three candidates score 65 or more; top5 only when five do (all judge score 55 or more). Every entry must be good alone.
 Rules for everything:
 - At most {cap} outputs. rank 1 is the best output.
-- A label (C1, H2, R3) may appear in only one output. Repeated reactions (such as four conceded goals) suit a countdown or POV, or keep only the most extreme one as a single.
+- A label (C1, H2, R3) may appear in only one output, except that top3 / top5 entries may reuse labels. Repeated reactions (such as four conceded goals) suit a countdown or POV, or keep only the most extreme one as a single.
 - Prefer a story over a single whenever a hubris line exists in that episode. At most one single or story per episode per humor type.
 - What the creator does constantly (see the creator context) is not a single on its own.
 - start_line and end_line are inclusive and use that source's own L numbers. cut_lines are lines strictly inside the range that are fluff; never cut the first or last line. zooms: 0 to 3, at_line is where it starts, scale 1.10, 1.20 or 1.35, hold_s 1 to 3.
@@ -187,7 +188,7 @@ def apply_output(
         if not labels or any(l not in by_label for l in labels) or len(set(labels)) != len(labels):
             notes.append(f"{tag} dropped: unknown or repeated source label")
             continue
-        if used & set(labels):
+        if c not in TOP_RULES and used & set(labels):  # a ranking reuses the stream's best moments
             notes.append(f"{tag} dropped: a moment is already used by a better output")
             continue
         srcs = [by_label[l] for l in labels]
@@ -272,7 +273,8 @@ def apply_output(
             rec["_pov_lines"] = [a for l, a in zip(src["lines"], src["ann"]) if l["end"] >= seg["start_s"] and l["start"] <= seg["end_s"]]
             rec["pov_peak"] = peak
         records.append(rec)
-        used |= set(labels)
+        if c not in TOP_RULES:
+            used |= set(labels)
 
     records.sort(key=lambda r: r.get("editor_rank", 0))
     return records, notes

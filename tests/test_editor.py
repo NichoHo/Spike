@@ -180,7 +180,7 @@ def entries(n, scores=None):
     return srcs, ranked
 
 
-def test_top3_runs_weakest_first_with_labels_theme_and_the_tease():
+def test_top3_runs_weakest_first_with_labels():
     srcs, spans = entries(3)
     [rec], notes = apply(answer(out("top3", 1, spans[::-1], title="Every goal Kvaratskhelia scored on Speed", hook_text="Wait for number one", theme="goals")),
                          srcs, allowed=["top3"])
@@ -207,14 +207,15 @@ def test_a_compilation_that_loses_an_entry_is_dropped_whole_never_padded():
     assert recs == [] and "exactly 3" in notes[0]
 
 
-def test_a_moment_appears_in_at_most_one_output():
+def test_a_moment_appears_in_one_output_but_a_ranking_may_reuse_it():
     srcs, spans = entries(3)
     o = answer(
-        out("top3", 1, spans, hook_text="Wait", theme="goals"),
-        out("single", 2, [span("C1", 2, 9)]),                      # C1 is already in the countdown
+        out("top3", 1, spans, title="Ranking Speed's Funniest Moments"),
+        out("single", 2, [span("C1", 2, 9)]),                      # also in the ranking: allowed
+        out("single", 3, [span("C1", 2, 9)]),                      # C1 is already a single
     )
     recs, notes = apply(o, srcs, allowed=["single", "top3"])
-    assert [r["concept"] for r in recs] == ["top3"] and "already used" in notes[0]
+    assert [r["concept"] for r in recs] == ["top3", "single"] and "already used" in notes[0]
 
 
 # ── rules around the outputs ──────────────────────────────────────────────────
@@ -267,6 +268,7 @@ def _patch_stage7(monkeypatch, scores):
                                 title="Speed loses", hook_text="h", post_caption="c", contrast=True)
 
     monkeypatch.setattr(s7, "call_llm_judge", fake_judge)
+    monkeypatch.setattr(s7, "read_whole_stream", lambda *a, **k: ("", []))
     monkeypatch.setattr(s7, "propose_transcript_chunks", lambda *a, **k: [
         {"type": "hubris", "peak_t": 334.0, "clip_start": 330.0, "clip_end": 338.0, "topic": "I never lose"}])
     monkeypatch.setattr(s7, "build_episodes", lambda *a, **k: [

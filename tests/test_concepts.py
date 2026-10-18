@@ -81,10 +81,10 @@ def test_story_and_top_validation_need_the_report_rules():
         return {"start_s": 0.0, "end_s": length, "remove": [], "rank": rank, "label": f"entry {rank}", "score": score}
 
     good = [entry(3, 10), entry(2, 10), entry(1, 12)]
-    assert validate_concept("top3", good, None, hook_text="wait", theme="goals") == []
+    assert validate_concept("top3", good, None, title="Ranking Speed's Funniest Moments") == []
     assert any("weakest" in p for p in validate_concept("top3", good[::-1], None, hook_text="wait", theme="goals"))
     assert any("over 60" in p for p in validate_concept("top3", [entry(3, 15), entry(2, 15), entry(1, 15), ][:3] + [], None, hook_text="w", theme="t")) is False
-    assert any("theme" in p for p in validate_concept("top3", good, None, hook_text="wait", theme=""))
+    assert any("header" in p for p in validate_concept("top3", good, None))
     five = [entry(5, 8), entry(4, 8), entry(3, 8), entry(2, 8), entry(1, 11, score=54)]
     assert any("floor" in p for p in validate_concept("top5", five, None, hook_text="w", theme="t"))
     assert any("over 100" in p for p in validate_concept("top5", [entry(r, 12) for r in (5, 4, 3, 2, 1)] + [], None, hook_text="w", theme="t")) is False

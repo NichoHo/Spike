@@ -118,12 +118,12 @@ def test_picker_enforces_the_count_rule_keeps_the_order_and_queues_a_worker_job(
     with get_connection() as conn:
         assert conn.execute("SELECT status FROM candidate_renders WHERE candidate_id = ?", (body["candidate_id"],)).fetchone()[0] == "queued"
 
-    # the worker renders it for real: tease, three entries, rank cards, joined and loudness-normalised
+    # the worker renders it for real: three entries under the ranking header, joined and loudness-normalised
     assert worker.run_render_cycle() is True
     clip = get_clip(_clip_for(body["candidate_id"]))
     assert clip["concept"] == "top3" and clip["status"] == "ready" and clip["concept_source"] == "user"
     assert [s["rank"] for s in json.loads(clip["segments"])] == [3, 2, 1] and json.loads(clip["overlay"])["pov_text"] == ""
-    assert abs(probe_duration(clip["file_path"]) - (1.5 + 9.0 * 3)) < 2.0
+    assert abs(probe_duration(clip["file_path"]) - 9.0 * 3) < 2.0
     assert clip["theme"] == "goals"
     html = c.get("/").text
     assert "Top 3" in html

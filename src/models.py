@@ -46,6 +46,23 @@ class LLMJudgeResponse(BaseModel):
         return v if v in HUMOR_STYLES else "other"
 
 
+class VideoVerdict(BaseModel):
+    """Gemini's verdict after watching a shortlisted clip. Observations come before the score."""
+    what_happens: str = Field(default="", description="What is seen and heard, in order")
+    visible: bool = Field(description="The funny or key thing is seen or heard in the clip itself")
+    standalone: bool = Field(description="A stranger understands it without chat, earlier context or inside jokes")
+    reaction: str = Field(default="none", description="peak, routine, reading_chat or none")
+    ends_on_reaction: bool = Field(default=True, description="The clip ends on the reaction, not before it")
+    why: str = Field(default="", description="Why it works or does not, for a stranger")
+    score: int = Field(ge=0, le=100, description="30 fans smile, 50 stranger chuckles, 70 stranger shares, 90 viral")
+
+    @field_validator("reaction", mode="before")
+    @classmethod
+    def _reaction(cls, v):
+        v = str(v or "").strip().lower()
+        return v if v in ("peak", "routine", "reading_chat", "none") else "none"
+
+
 class TranscriptProposal(BaseModel):
     """Schema for moments proposed by reading transcript chunks."""
     start_line: int
