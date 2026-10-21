@@ -26,7 +26,14 @@ BACKUPS_DIR.mkdir(exist_ok=True)
 load_dotenv(ROOT_DIR / ".env")
 
 # API Keys & Webhooks
+# One key per Google account, comma separated (GEMINI_API_KEY=key1,key2): each account has its own free daily quota.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+
+def gemini_keys() -> list:
+    return [k.strip() for k in GEMINI_API_KEY.split(",") if k.strip()]
+
+
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 TWITCH_CLIENT_ID = os.environ.get("TWITCH_CLIENT_ID", "")
 TWITCH_CLIENT_SECRET = os.environ.get("TWITCH_CLIENT_SECRET", "")

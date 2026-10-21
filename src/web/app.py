@@ -57,9 +57,9 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 register_filters(templates.env)
 # Cache-bust static assets: the URL changes whenever the file's mtime does.
 templates.env.globals["static_v"] = lambda name: int((STATIC_DIR / name).stat().st_mtime)
-from src import config as _config, layout_ai as _layout_ai  # noqa: E402  (Auto layout daily call budget, shown on the pickers)
+from src import config as _config, gemini_budget as _gemini_budget, layout_ai as _layout_ai  # noqa: E402  (Auto layout daily call budget, shown on the pickers)
 templates.env.globals["layout_ai_left"] = _layout_ai.calls_left
-templates.env.globals["layout_ai_limit"] = _config.GEMINI_DAILY_LIMIT
+templates.env.globals["layout_ai_limit"] = lambda: _gemini_budget.limit(_config.LAYOUT_GEMINI_MODEL)
 app.state.templates = templates
 
 # Mount static files

@@ -26,7 +26,7 @@ from google.genai import types
 
 from src.config import (
     HUMOR_STYLES,
-    GEMINI_API_KEY,
+    gemini_keys,
     DEFAULT_GEMINI_MODEL,
     FALLBACK_GEMINI_MODEL,
     JUDGE_GEMINI_MODEL,
@@ -51,8 +51,33 @@ from src.music import list_all_tracks, track_catalog_for_llm
 from src.profile import build_episodes, concept_terms, episode_of, fix_streamer, get_preset, profile_block, streamer_name
 
 
-def get_gemini_client() -> genai.Client:
-    return genai.Client(api_key=GEMINI_API_KEY)
+_capped: Dict[Tuple[str, int], str] = {}  # (model, key index) -> day that key's daily quota ran out. ponytail: in memory, a restart retries each key once
+
+
+class _MultiKeyClient:
+    """genai.Client lookalike over every key in GEMINI_API_KEY. Uses the first key until its daily quota for a model
+    is gone, then the next. When every key is out, the last error is raised as before."""
+
+    def __init__(self, keys: List[str]):
+        self._clients = [genai.Client(api_key=k) for k in keys]
+        self.models = self
+
+    def generate_content(self, model: str, **kwargs: Any) -> Any:
+        day = gemini_budget._today()
+        live = [i for i in range(len(self._clients)) if _capped.get((model, i)) != day] or [0]
+        for n, i in enumerate(live):
+            try:
+                return self._clients[i].models.generate_content(model=model, **kwargs)
+            except Exception as e:
+                out = _daily_cap(e)
+                if out:
+                    _capped[(model, i)] = day
+                if not out or n == len(live) - 1:
+                    raise
+
+
+def get_gemini_client() -> _MultiKeyClient:
+    return _MultiKeyClient(gemini_keys())
 
 
 class QuotaExhausted(RuntimeError):
@@ -66,6 +91,12 @@ def _retry_delay_s(err_str: str) -> float:
         return 0.0
     h, mi, sec = m.groups()
     return int(h or 0) * 3600 + int(mi or 0) * 60 + float(sec or 0)
+
+
+def _daily_cap(err: Exception) -> bool:
+    """A 429 that says the wait is hours long: the key's daily quota, not a per-minute limit."""
+    s = str(err).lower()
+    return ("429" in s or "quota" in s or "resource_exhausted" in s) and _retry_delay_s(s) > 300
 
 
 def generate_content_with_retry(

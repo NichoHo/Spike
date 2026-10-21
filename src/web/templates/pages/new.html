@@ -98,7 +98,7 @@
                   </span>
                   <span class="layout-option__name">{{ name }}</span>
                   <span class="layout-option__desc">{{ desc }}</span>
-                  {% if value == "auto" %}<span class="layout-option__quota{% if layout_ai_left() <= 0 %} layout-option__quota--out{% endif %}">{{ layout_ai_left() }} of {{ layout_ai_limit }} Gemini calls left today</span>{% endif %}
+                  {% if value == "auto" %}<span class="layout-option__quota{% if layout_ai_left() <= 0 %} layout-option__quota--out{% endif %}">{{ layout_ai_left() }} of {{ layout_ai_limit() }} Gemini calls left today</span>{% endif %}
                 </label>
               {% endfor %}
             </div>

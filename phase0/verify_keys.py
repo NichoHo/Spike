@@ -27,7 +27,7 @@ TEST_YT_URL = f"https://www.youtube.com/watch?v={TEST_YT_VIDEO_ID}"
 
 def test_gemini():
     print("\n--- 1. Testing Gemini API Key ---", flush=True)
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY", "").split(",")[0].strip()  # first of the comma separated keys
     if not api_key:
         print("  FAIL: GEMINI_API_KEY is not set in .env", flush=True)
         return False

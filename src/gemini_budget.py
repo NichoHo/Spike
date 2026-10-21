@@ -28,7 +28,8 @@ def used(model: str) -> int:
 
 
 def limit(model: str) -> int:
-    return config.GEMINI_DAILY_LIMITS.get(model, config.GEMINI_DAILY_LIMIT)
+    """Every key has its own daily quota, so the total is the per-key limit times the number of keys."""
+    return config.GEMINI_DAILY_LIMITS.get(model, config.GEMINI_DAILY_LIMIT) * max(1, len(config.gemini_keys()))
 
 
 def left(model: str) -> int:

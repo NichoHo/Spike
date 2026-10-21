@@ -1,3 +1,4 @@
+import pytest
 import re
 from pathlib import Path
 
@@ -105,3 +106,35 @@ def test_judge_falls_back_to_flash_lite_when_flash_quota_is_gone(monkeypatch):
     assert gb.left("flash") == 0
     assert s7.judge_generate(None, "p", None) == "ok"  # budget now spent: goes straight to Flash-Lite
     assert calls == ["flash", "lite", "lite"]
+
+
+def test_second_gemini_key_takes_over_when_the_first_hits_its_daily_quota(monkeypatch):
+    from src import config, gemini_budget as gb
+    from src.pipeline import stage7_moments as s7
+    used = []
+
+    class Fake:
+        def __init__(self, api_key):
+            self.key, self.models = api_key, self
+
+        def generate_content(self, model, **kw):
+            used.append(self.key)
+            if self.key == "a":
+                raise RuntimeError("429 RESOURCE_EXHAUSTED. Please retry in 7h33m11s")
+            if self.key == "slow":
+                raise RuntimeError("429 RESOURCE_EXHAUSTED. Please retry in 20s")
+            return "ok"
+
+    monkeypatch.setattr(s7.genai, "Client", Fake)
+    monkeypatch.setattr(s7, "_capped", {})
+    monkeypatch.setattr("src.config.GEMINI_API_KEY", "a, b")
+    client = s7.get_gemini_client()
+    assert client.models.generate_content(model="m", contents="x") == "ok"
+    assert client.models.generate_content(model="m", contents="x") == "ok"
+    assert used == ["a", "b", "b"]  # key a is skipped once its daily quota is gone
+    assert gb.limit("m") == 2 * config.GEMINI_DAILY_LIMIT  # two keys, two quotas
+    used.clear(); s7._capped.clear()
+    monkeypatch.setattr("src.config.GEMINI_API_KEY", "slow, b")
+    with pytest.raises(RuntimeError):
+        s7.get_gemini_client().models.generate_content(model="m", contents="x")
+    assert used == ["slow"]  # a per-minute 429 is retried by the caller, not handed to the next key
