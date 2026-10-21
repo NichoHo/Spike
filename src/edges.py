@@ -15,7 +15,9 @@ MAX_ZOOMS = 3
 PHRASE_MAX_S = 2.5
 END_PAD_S = 0.8
 PAUSE_SNAP_S = 0.4
-MAX_CUT_SHARE = 0.5
+# A model that wants to cut more than a quarter of a clip has misread a rant or a build-up as fluff
+# (Ludwig VOD ml1-FLS-yfQ: 24 s of a 49 s rant marked as filler). Above this share no line is cut.
+MAX_CUT_SHARE = 0.25
 
 
 def split_into_phrases(segments: List[Dict[str, Any]], max_s: float = PHRASE_MAX_S) -> List[Dict[str, Any]]:
@@ -82,7 +84,7 @@ def lines_to_cuts(
     end_s: float,
 ) -> List[List[float]]:
     """Removed intervals for the given line positions, clamped to the clip. Neighbouring lines merge.
-    Returns [] when the cuts would remove more than half the clip (the model misjudged what is fluff)."""
+    Returns [] when the cuts would remove more than MAX_CUT_SHARE of the clip (the model misjudged what is fluff)."""
     cuts: List[List[float]] = []
     for i in sorted(set(positions)):
         lo, hi = max(start_s, line_meta[i]["start"]), min(end_s, line_meta[i]["end"])
@@ -106,7 +108,9 @@ def compute_edges(
     """Clip edges from the judge's structure lines (§6.7), replacing the old snap_boundaries:
     start = later of topic start and (setup start - setup pad), snapped to a pause;
     end = reaction end, extended while the audio stays high, plus 0.8 s;
-    cut_lines become removed intervals.  Returns start_s, end_s, cuts, payoff_t, net_dur."""
+    no lines are cut: the judge's cut_lines cut the build-up before the punchline in every clip of Ludwig VOD
+    ml1-FLS-yfQ (8 to 24 s per clip), which is the funny part of a rant. Pauses are still trimmed at render.
+    Returns start_s, end_s, cuts, payoff_t, net_dur."""
     n = len(line_meta)
 
     def idx(v: int) -> int:
@@ -123,14 +127,9 @@ def compute_edges(
     start = snap_start_to_pause(start, topic_t, words)
     end = extend_end(line_meta[reaction]["end"], preset["end_extend_max_s"], series)
 
-    cuts = lines_to_cuts(
-        line_meta, [i for i in (idx(c) for c in judge.cut_lines) if topic <= i <= reaction and i not in (payoff, reaction)],
-        start, end,
-    )
-
     return {
-        "start_s": start, "end_s": end, "cuts": cuts, "payoff_t": line_meta[payoff]["start"],
-        "net_dur": (end - start) - sum(h - l for l, h in cuts),
+        "start_s": start, "end_s": end, "cuts": [], "payoff_t": line_meta[payoff]["start"],
+        "net_dur": end - start,
         "payoff": payoff, "topic": topic, "reaction": reaction,
     }
 

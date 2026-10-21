@@ -144,6 +144,9 @@ def read_section_start(sec_file: Path) -> Optional[float]:
         return None
 
 
+MIN_KEEP_S = 0.75
+
+
 def merge_cut_intervals(
     *cut_lists: Optional[List[Tuple[float, float]]],
     clip_start: float,
@@ -158,7 +161,8 @@ def merge_cut_intervals(
     )
     merged: List[List[float]] = []
     for s, e in spans:
-        if merged and s <= merged[-1][1]:
+        # A keep shorter than MIN_KEEP_S between two cuts is a sliver of breath or silence, not content: cut it too
+        if merged and s - merged[-1][1] < MIN_KEEP_S:
             merged[-1][1] = max(merged[-1][1], e)
         else:
             merged.append([s, e])
@@ -569,7 +573,10 @@ def build_vertical_filtergraph(
                 f"[0:a]atrim=start={in_sec_start:.3f}:end={in_sec_start + dur:.3f},asetpts=PTS-STARTPTS[a_raw_{idx}]"
             )
         concat_inputs = "".join(f"[v_raw_{idx}][a_raw_{idx}]" for idx in range(k_count))
-        filters.append(f"{concat_inputs}concat=n={k_count}:v=1:a=1[v_trimmed][a_trimmed]")
+        filters.append(f"{concat_inputs}concat=n={k_count}:v=1:a=1[v_cat][a_trimmed]")
+        # concat leaves off-by-a-tick timestamps; without re-snapping, vstack (split) emits near-duplicate frames
+        # and the jump-cut zoompan plays them all, so the video runs longer than the audio
+        filters.append(f"[v_cat]fps={OUTPUT_FPS}[v_trimmed]")
     else:
         k_st, k_et = keep_intervals[0]
         in_sec_start = max(0.0, k_st - sec_start)
@@ -848,6 +855,7 @@ def run_stage9c_render(
                     cuts=json.dumps(cand.get("cuts") or []),
                     zooms=json.dumps(cand.get("zooms") or []),
                 )
+                cand["clip_id"] = clip_id
                 if layout_changes:  # the review editor shows and edits these like hand-made switches
                     set_clip_layout_changes(clip_id, json.dumps(layout_changes))
             except Exception as e:
@@ -928,7 +936,7 @@ def render_single_vertical_clip(
     elif pace == "natural":
         cut_intervals = find_silence_cut_intervals(words, clip_start, clip_end)
 
-    # Judge cut_lines and manual cuts join the silence cuts, then everything goes through one keep-interval path
+    # Editor cuts and manual cuts join the silence cuts, then everything goes through one keep-interval path
     cut_intervals = merge_cut_intervals(cut_intervals, extra_cuts, clip_start=clip_start, clip_end=clip_end)
     keep_intervals = compute_keep_intervals(clip_start, clip_end, cut_intervals)
     effective_dur = sum(et - st for st, et in keep_intervals)

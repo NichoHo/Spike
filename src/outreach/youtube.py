@@ -495,7 +495,7 @@ def run_finder(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 
 # ── Nightly refresh and purge (Developer Policy III.E.4: 30 days) ─────────────
 
-ACTIVITY_STATUSES = ("found", "needs_contact", "approved")
+ACTIVITY_STATUSES = ("found", "needs_contact", "approved", "replied", "clip_wanted")
 STAT_COLUMNS = ("streams_14d", "avg_stream_h", "last_stream_at", "shorts_14d", "vod_views")
 VOD_COLUMNS = ("vod_video_id", "vod_title", "vod_published_at", "vod_duration_s")
 

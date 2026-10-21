@@ -6,12 +6,12 @@ API fields (YouTube Developer Policy III.E.4) are refreshed or purged within 30 
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src import config
 
 STATUSES = (
-    "found", "approved", "needs_contact", "rejected",
+    "found", "approved", "needs_contact", "rejected", "clip_wanted",
     "clip_queued", "clip_ready", "clip_failed", "clip_approved", "email_ready",
     "sent", "followup_1", "followup_2", "replied", "bounced", "trial", "client", "opted_out",
 )
@@ -63,77 +63,92 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "rate_sea": "$0.50",
     "min_views": 10000,
     "monthly_cap": "$300",
-    # Sender (§4.2: sign with a person's name, link to proof)
+    # Sender. The first email offers the deal; a sample clip is made only after the streamer replies.
     "sender_name": "",
     "company_name": "Nexdev",
-    "proof_url": "",
-    # Templates. Placeholders: {name} {day} {date} {moment} {timestamp} {link} {rate} {min_views}
-    # {cap} {sender_name} {company} {proof_url} {subject}
-    "tpl_en_subject": "A clip from your {day} stream",
+    "proof_url": "https://www.nexdevsoftware.com/",
+    # Templates. Placeholders: {name} {day} {date} {rate} {min_views} {cap} {sender_name} {company}
+    # {proof_url} {subject}
+    "tpl_en_subject": "Clipping your streams, you only pay for views",
     "tpl_en_first": (
-        "Hi {name},\n\n"
-        "I cut a vertical clip from your stream on {date}: {moment} at {timestamp}.\n\n"
-        "{link}\n\n"
-        "We're a small team that turns streams into Shorts, TikToks and Reels. We pick the moments, edit and "
-        "caption them, and post them on our clip accounts with your channel tagged in every post. You pay only "
-        "for views we bring in: {rate} per 1,000 views on clips that pass {min_views} views, with a {cap} monthly "
-        "cap so the bill never surprises you. If a clip flops, you pay nothing for it.\n\n"
-        "If you like it, we'll clip your next week of streams for free first, so you can judge from real numbers.\n\n"
-        "Should we start with your next stream?\n\n"
-        "{sender_name}\n"
-        "{company} · {proof_url}\n"
-        "If you'd rather not hear from me, reply \"no\" and I won't email again."
+        "Hello {name},\n\n"
+        "I hope you're having a great week!\n\n"
+        "We've been watching your streams recently and genuinely find your content super entertaining.\n\n"
+        "We run a content team specializing in editing and distributing stream highlights across TikTok, "
+        "YouTube Shorts, and Instagram Reels. We want to partner with you to edit, format, and post videos "
+        "using your content.\n\n"
+        "Here is how our model works:\n\n"
+        "Zero upfront cost and zero risk: we handle all the clipping, editing, optimization, and posting.\n\n"
+        "{min_views} views first: if a video doesn't reach {min_views} views, you don't pay a single cent.\n\n"
+        "Performance-based rate: you pay {rate} per 1,000 views only on videos that pass {min_views} views, "
+        "with a {cap} monthly cap so the bill never surprises you.\n\n"
+        "This makes it a complete win-win for you: you get free exposure, brand awareness, and new live-stream "
+        "viewers across major platforms without taking any time away from streaming or risking money on "
+        "unproven content. We are only paid when we bring actual, measurable reach to your channel.\n\n"
+        "If you're open to it, reply and we'll make a free sample clip from one of your recent streams so you "
+        "can see our work first.\n\n"
+        "Best regards,\n\n"
+        "{company}\n"
+        "{proof_url}\n\n"
+        "If you'd rather not hear from us, reply \"no\" and we won't email again."
     ),
     "tpl_en_followup_1": (
-        "Hi {name},\n\n"
-        "Bumping this in case it got buried. Here is the clip from your {day} stream again: {link}\n\n"
-        "The offer stands: a free week of clips from your streams first, then you pay only per view. "
-        "Want me to start with your next stream?\n\n"
-        "{sender_name}\n"
-        "If you'd rather not hear from me, reply \"no\" and I won't email again."
+        "Hello {name},\n\n"
+        "Bumping this in case it got buried. We'd love to clip your streams, and you pay nothing unless a "
+        "video passes {min_views} views. Want a free sample clip from one of your recent streams?\n\n"
+        "{company}\n"
+        "If you'd rather not hear from us, reply \"no\" and we won't email again."
     ),
     "tpl_en_followup_2": (
-        "Hi {name},\n\n"
-        "Last note from me. If clips are not a priority right now, no problem. If that changes, the free week "
-        "is still open: {link}\n\n"
-        "{sender_name}\n"
-        "Reply \"no\" and I won't email again."
+        "Hello {name},\n\n"
+        "Last note from us. If clips are not a priority right now, no problem. If that changes, just reply "
+        "and we'll send a free sample clip.\n\n"
+        "{company}\n"
+        "Reply \"no\" and we won't email again."
     ),
-    "tpl_id_subject": "Klip dari stream kamu hari {day}",
+    "tpl_id_subject": "Klip dari stream kamu, bayar hanya per view",
     "tpl_id_first": (
         "Halo {name},\n\n"
-        "Aku bikin satu klip vertikal dari stream kamu tanggal {date}: {moment} di menit {timestamp}.\n\n"
-        "{link}\n\n"
-        "Kami tim kecil yang mengubah stream jadi Shorts, TikTok, dan Reels. Kami pilih momennya, edit, kasih "
-        "subtitle, lalu posting di akun klip kami dengan channel kamu di-tag di setiap posting. Kamu cuma bayar "
-        "untuk view yang kami datangkan: {rate} per 1.000 view untuk klip yang tembus {min_views} view, dengan "
-        "batas {cap} per bulan supaya tagihannya tidak bikin kaget. Kalau klipnya sepi, kamu tidak bayar apa-apa.\n\n"
-        "Kalau kamu suka, kami klip stream kamu selama seminggu ke depan secara gratis dulu, jadi kamu bisa "
-        "menilai dari angka yang nyata.\n\n"
-        "Mau kita mulai dari stream kamu berikutnya?\n\n"
-        "{sender_name}\n"
-        "{company} · {proof_url}\n"
-        "Kalau tidak mau dihubungi lagi, balas \"tidak\" dan aku tidak akan email lagi."
+        "Semoga minggumu menyenangkan!\n\n"
+        "Belakangan kami menonton stream kamu dan kontennya benar-benar seru.\n\n"
+        "Kami tim konten yang mengedit dan menyebarkan highlight stream di TikTok, YouTube Shorts, dan "
+        "Instagram Reels. Kami ingin bekerja sama untuk mengedit, memformat, dan memposting video dari "
+        "konten kamu.\n\n"
+        "Cara kerjanya:\n\n"
+        "Tanpa biaya di depan dan tanpa risiko: semua klip, edit, optimasi, dan posting kami yang urus.\n\n"
+        "{min_views} view dulu: kalau videonya tidak tembus {min_views} view, kamu tidak bayar sepeser pun.\n\n"
+        "Bayar sesuai hasil: {rate} per 1.000 view, hanya untuk video yang tembus {min_views} view, dengan "
+        "batas {cap} per bulan supaya tagihannya tidak bikin kaget.\n\n"
+        "Jadi kamu dapat eksposur gratis dan penonton live baru tanpa mengurangi waktu streaming atau "
+        "mempertaruhkan uang. Kami hanya dibayar kalau kami benar-benar mendatangkan jangkauan.\n\n"
+        "Kalau tertarik, balas email ini dan kami buatkan satu klip contoh gratis dari stream kamu.\n\n"
+        "Salam,\n\n"
+        "{company}\n"
+        "{proof_url}\n\n"
+        "Kalau tidak mau dihubungi lagi, balas \"tidak\" dan kami tidak akan email lagi."
     ),
     "tpl_id_followup_1": (
         "Halo {name},\n\n"
-        "Mengangkat email ini lagi, siapa tahu tertimbun. Ini klip dari stream kamu hari {day}: {link}\n\n"
-        "Tawarannya masih berlaku: seminggu klip gratis dulu, setelah itu bayar per view saja. "
-        "Mau kita mulai dari stream berikutnya?\n\n"
-        "{sender_name}\n"
-        "Kalau tidak mau dihubungi lagi, balas \"tidak\" dan aku tidak akan email lagi."
+        "Mengangkat email ini lagi, siapa tahu tertimbun. Kamu tidak bayar apa-apa kecuali videonya tembus "
+        "{min_views} view. Mau kami buatkan satu klip contoh gratis dari stream kamu?\n\n"
+        "{company}\n"
+        "Kalau tidak mau dihubungi lagi, balas \"tidak\" dan kami tidak akan email lagi."
     ),
     "tpl_id_followup_2": (
         "Halo {name},\n\n"
-        "Ini email terakhir dariku. Kalau klip belum jadi prioritas, tidak apa-apa. Kalau nanti berubah pikiran, "
-        "seminggu klip gratisnya masih berlaku: {link}\n\n"
-        "{sender_name}\n"
-        "Balas \"tidak\" dan aku tidak akan email lagi."
+        "Ini email terakhir dari kami. Kalau klip belum jadi prioritas, tidak apa-apa. Kalau nanti berubah "
+        "pikiran, balas saja dan kami kirim klip contoh gratis.\n\n"
+        "{company}\n"
+        "Balas \"tidak\" dan kami tidak akan email lagi."
     ),
     # Internal state written by the daemon and the web app
     "run_now": 0,
     "last_run_date": "",
     "last_run_summary": "",
+    "finder_status": "",  # running | done | failed, written by run_finders
+    "finder_error": "",
+    "finder_started_at": "",
+    "finder_finished_at": "",
     "last_nightly_date": "",
     "twitch_sample_now": 0,
     "twitch_last_sample_slot": "",
@@ -521,6 +536,19 @@ def status_counts() -> Dict[str, int]:
         "SELECT status, COUNT(*) FROM leads WHERE status != 'found' OR snoozed_until IS NULL OR snoozed_until <= ? "
         "GROUP BY status", (now,))
     return {r[0]: r[1] for r in rows}
+
+
+def attention() -> Tuple[int, str]:
+    """Leads waiting on a person (to review, email to send, reply, clip to review) and the newest change among
+    them. The sidebar shows the count, and a dot when the newest change is after the viewer's last visit."""
+    row = _query(
+        """SELECT COUNT(*), MAX(COALESCE(status_at, created_at)) FROM leads l
+           WHERE status IN ('replied', 'clip_ready')
+              OR (status = 'found' AND (snoozed_until IS NULL OR snoozed_until <= ?))
+              OR (status = 'email_ready' AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.lead_id = l.id
+                                                         AND m.kind = 'first' AND m.status IN ('queued', 'sending')))""",
+        (now_iso(),))[0]
+    return row[0], row[1] or ""
 
 
 def count_created_since(since_iso: str, platform: str) -> int:

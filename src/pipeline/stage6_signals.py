@@ -283,6 +283,18 @@ def clean_twitch_chat(
     return cleaned, raid_windows
 
 
+def squeeze(token: str) -> str:
+    """Collapse repeated characters: 'lmaooo' -> 'lmao', '😂😂😂' -> '😂'."""
+    return re.sub(r"(.)\1+", r"\1", token)
+
+
+def token_forms(tokens: Set[str]) -> Set[str]:
+    """Lowercased tokens plus their squeezed forms. A form that squeezes to one ASCII character is left out
+    ('www' -> 'w' would match the hype 'W', '555' -> '5' any digit)."""
+    low = {t.lower() for t in tokens}
+    return low | {q for t in low if not (len(q := squeeze(t)) == 1 and q.isascii())}
+
+
 def compute_chat_signals(
     cleaned_comments: List[Dict[str, Any]],
     raid_windows: List[Tuple[int, int]],
@@ -299,8 +311,8 @@ def compute_chat_signals(
     - clip_heat: sum of 1 + log(1 + views) over distinct clip creators covering second t
     """
     # Merge tokens from config and 3rd-party emote set
-    laugh_tokens = set(CHAT_LAUGH_TOKENS) | set(emotes_data.get("laugh", []))
-    hype_tokens = set(CHAT_HYPE_TOKENS) | set(emotes_data.get("hype", []))
+    laugh_tokens = token_forms(set(CHAT_LAUGH_TOKENS) | set(emotes_data.get("laugh", [])))
+    hype_tokens = token_forms(set(CHAT_HYPE_TOKENS) | set(emotes_data.get("hype", [])))
 
     # Bin chatters and messages by integer second
     bin_users: List[Set[str]] = [set() for _ in range(duration_s)]
@@ -317,6 +329,7 @@ def compute_chat_signals(
             bin_msgs[t].append(body)
 
             tokens = set(body.lower().split())
+            tokens |= {squeeze(t) for t in tokens}
             if tokens & laugh_tokens:
                 bin_laugh_users[t].add(user)
             if tokens & hype_tokens:

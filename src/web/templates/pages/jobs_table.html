@@ -30,7 +30,7 @@
           <span class="small" style="font-family: var(--font-mono);">{{ j.stage or 'queued' }}</span>
           {% set steps = ['fetch_meta','fetch_audio','fetch_chat','fetch_crowd','transcribe','signals','moments','fetch_sections','render','render_vertical'] %}
           {% if j.status in ('queued', 'running') and j.stage in steps %}
-            <div class="secondary-line">Step {{ steps.index(j.stage) + 1 }} of {{ steps | length }}{% if j.eta_s is not none %} · ~{% if j.eta_s < 60 %}{{ j.eta_s | round | int }}s{% else %}{{ (j.eta_s / 60) | round | int }} min{% endif %} left{% endif %}</div>
+            <div class="secondary-line">Step {{ steps.index(j.stage) + 1 }} of {{ steps | length }}{% if j.eta_s is not none %} · done ~{{ j.eta_at }} ({{ j.eta_s | duration_words }} left){% endif %}</div>
           {% endif %}
         </td>
         <td>

@@ -234,6 +234,7 @@ def init_db():
             "ALTER TABLE videos ADD COLUMN submitted_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
             "ALTER TABLE videos ADD COLUMN claimed_at TEXT",
             "ALTER TABLE videos ADD COLUMN finished_at TEXT",
+            "ALTER TABLE stage_timings ADD COLUMN progress REAL",  # 0..1 inside the running stage (transcribe reports it)
             "ALTER TABLE sources ADD COLUMN default_music_mood TEXT DEFAULT 'chill'",
             "ALTER TABLE sources ADD COLUMN silence_trim INTEGER DEFAULT 0",
             "ALTER TABLE sources ADD COLUMN punch_in_zoom INTEGER DEFAULT 1",
@@ -879,7 +880,8 @@ def list_clip_ai_edits(clip_id: int) -> List[Dict[str, Any]]:
 # ── Other moments: render a stored candidate on demand ───────────────────────
 
 def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[Dict[str, Any]]]:
-    """low_score and rejected candidates per video with their render job state, best score first.
+    """low_score and rejected candidates per video with their render job state, earliest first.
+    Moments that mostly overlap an already rendered clip of the same video are left out (same moment, other title).
     video_ids=None means every video."""
     if video_ids is not None and not video_ids:
         return {}
@@ -893,7 +895,12 @@ def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[
             FROM candidates c
             LEFT JOIN candidate_renders r ON r.candidate_id = c.id
             WHERE {where_video}c.status IN ('low_score', 'rejected')
-            ORDER BY c.video_id, c.llm_score DESC, c.start_s
+              AND NOT EXISTS (
+                  SELECT 1 FROM clips k JOIN candidates kc ON kc.id = k.candidate_id
+                  WHERE kc.video_id = c.video_id AND kc.id != c.id
+                    AND MIN(kc.end_s, c.end_s) - MAX(kc.start_s, c.start_s) > 0.5 * (c.end_s - c.start_s)
+              )
+            ORDER BY c.video_id, c.start_s
             """,
             tuple(video_ids or ()),
         ).fetchall()
@@ -1232,27 +1239,81 @@ def count_account_daily_posts(account_id: int, date_iso_prefix: str) -> int:
 PIPELINE_STAGES = ["fetch_meta", "fetch_audio", "fetch_chat", "fetch_crowd", "transcribe",
                    "signals", "moments", "fetch_sections", "render", "render_vertical"]
 
+# Stages whose run time grows with the processed stream length. Their history is kept as
+# seconds of work per stream second; the rest are kept as plain seconds.
+LENGTH_SCALED_STAGES = {"fetch_audio", "fetch_chat", "transcribe", "signals", "moments"}
+
+# Starting guesses used until a stage has history on this machine. Length-scaled stages: seconds
+# per stream second (fetch_audio and fetch_chat measured on a 3 h Twitch VOD). Others: seconds.
+# ponytail: rough guesses; the first finished job replaces each one with a measured value.
+STAGE_DEFAULTS = {"fetch_meta": 5, "fetch_audio": 0.055, "fetch_chat": 0.021, "fetch_crowd": 10,
+                  "transcribe": 0.25, "signals": 0.01, "moments": 0.02, "fetch_sections": 120,
+                  "render": 120, "render_vertical": 600}
+
+
+def set_video_duration(video_id: int, duration_s: float):
+    with get_connection() as conn:
+        conn.execute("UPDATE videos SET duration_s = ? WHERE id = ?", (duration_s, video_id))
+
+
+def set_stage_progress(video_id: int, fraction: float):
+    """Record how far the running stage is (0..1). The ETA extrapolates from it."""
+    with get_connection() as conn:
+        conn.execute("UPDATE stage_timings SET progress = ? WHERE video_id = ? AND finished_at IS NULL",
+                     (min(max(fraction, 0.0), 1.0), video_id))
+
 
 def estimate_remaining_seconds(jobs: List[Dict[str, Any]]) -> Dict[int, Optional[float]]:
-    """Seconds left per active job id, from average past stage durations. None if no history."""
+    """Seconds left per running job id.
+
+    Each stage's cost comes from past runs on this machine (so CPU speed is built in), scaled by
+    the job's stream length for length-scaled stages, with STAGE_DEFAULTS as the fallback. The
+    running stage uses its live progress when it reports one, else its expected time minus elapsed.
+    """
     with get_connection() as conn:
-        avg = {r["stage"]: r["d"] for r in conn.execute(
-            """SELECT stage, AVG((julianday(finished_at) - julianday(started_at)) * 86400) AS d
-               FROM stage_timings WHERE finished_at IS NOT NULL GROUP BY stage""")}
-        started = {r["video_id"]: r["started_at"] for r in conn.execute(
-            "SELECT video_id, started_at FROM stage_timings WHERE finished_at IS NULL")}
+        hist = {r["stage"]: (r["per_s"], r["flat"]) for r in conn.execute(
+            """SELECT t.stage,
+                      AVG(CASE WHEN v.duration_s > 0
+                               THEN (julianday(t.finished_at) - julianday(t.started_at)) * 86400 / v.duration_s END) AS per_s,
+                      AVG((julianday(t.finished_at) - julianday(t.started_at)) * 86400) AS flat
+               FROM stage_timings t JOIN videos v ON v.id = t.video_id
+               WHERE t.finished_at IS NOT NULL GROUP BY t.stage""")}
+        running = {r["video_id"]: (r["started_at"], r["progress"]) for r in conn.execute(
+            "SELECT video_id, started_at, progress FROM stage_timings WHERE finished_at IS NULL")}
+
+    def expected(stage: str, duration: Optional[float]) -> float:
+        per_s, flat = hist.get(stage, (None, None))
+        if stage in LENGTH_SCALED_STAGES and duration:
+            return (per_s if per_s is not None else STAGE_DEFAULTS[stage]) * duration
+        if flat is not None:
+            return flat
+        # A length-scaled stage with no known stream length: assume a 2 h stream.
+        return STAGE_DEFAULTS[stage] * (7200 if stage in LENGTH_SCALED_STAGES else 1)
+
     out: Dict[int, Optional[float]] = {}
     now = datetime.now(timezone.utc)
     for j in jobs:
         if j["status"] != "running" or j.get("stage") not in PIPELINE_STAGES:
             continue
+        duration = j.get("duration_s") or _meta_duration(j["id"])
         i = PIPELINE_STAGES.index(j["stage"])
-        rest = PIPELINE_STAGES[i + 1:]
-        if j["stage"] not in avg or any(st not in avg for st in rest):
-            out[j["id"]] = None
-            continue
-        elapsed = 0.0
-        if j["id"] in started:
-            elapsed = (now - datetime.fromisoformat(started[j["id"]])).total_seconds()
-        out[j["id"]] = max(avg[j["stage"]] - elapsed, 0) + sum(avg[st] for st in rest)
+        exp_now = expected(j["stage"], duration)
+        started_at, progress = running.get(j["id"], (None, None))
+        elapsed = (now - datetime.fromisoformat(started_at)).total_seconds() if started_at else 0.0
+        if progress and progress >= 0.02 and elapsed > 0:
+            left_now = elapsed * (1 - progress) / progress
+        else:
+            # Past the expected time with no progress signal: keep a small remainder, not zero.
+            left_now = max(exp_now - elapsed, 0.1 * exp_now)
+        out[j["id"]] = left_now + sum(expected(st, duration) for st in PIPELINE_STAGES[i + 1:])
     return out
+
+
+def _meta_duration(video_id: int) -> Optional[float]:
+    """Stream length from the job's meta.json, for jobs started before duration_s was saved."""
+    from src.config import VIDEOS_DIR
+    try:
+        with open(VIDEOS_DIR / str(video_id) / "meta.json", encoding="utf-8") as f:
+            return float(json.load(f).get("duration") or 0) or None
+    except (OSError, ValueError):
+        return None

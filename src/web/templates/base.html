@@ -35,6 +35,23 @@
 
   <div class="toast-region" aria-live="polite" aria-atomic="false"></div>
 
+  <!-- Claude fallback approval: shown on every page while a pipeline call waits for an OK -->
+  <dialog id="claude-approval-dialog" class="dialog dialog--md" aria-labelledby="claude-approval-title">
+    <div class="dialog__body">
+      <h2 class="dialog__title" id="claude-approval-title">Use your Claude plan for this call?</h2>
+      <p class="dialog__text">Gemini's free quota is used up for today. The job is paused until you answer.</p>
+      <p class="dialog__text"><strong data-claude-approval-label></strong></p>
+      <label class="row" style="gap: var(--space-2); margin-top: var(--space-4);">
+        <input type="checkbox" data-claude-approval-skip>
+        <span>Don't ask again today</span>
+      </label>
+    </div>
+    <div class="dialog__footer">
+      <button class="btn btn--secondary" type="button" data-claude-approval-answer="deny">Deny (stop the job)</button>
+      <button class="btn btn--primary" type="button" data-claude-approval-answer="approve">Use Claude</button>
+    </div>
+  </dialog>
+
   <!-- Global Keyboard Shortcuts Modal Dialog (?) -->
   <dialog id="shortcuts-dialog" class="dialog">
     <div class="dialog__body">

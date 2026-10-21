@@ -32,7 +32,8 @@ from src.db import (
     log_event,
 )
 from src.pipeline.stage9c_render import SWITCH_LAYOUTS, render_single_vertical_clip
-from src.web.auth import get_current_user
+from src import claude_fallback
+from src.web.auth import get_current_user, require_admin
 
 
 router = APIRouter()
@@ -55,6 +56,22 @@ async def render_events(after: Optional[int] = None, user: Dict[str, Any] = Depe
         return {"epoch": _EPOCH, "last": last, "events": []}
     events = [e for e in list(_render_events) if e["id"] > after and e["user"] == user["login"]]
     return {"epoch": _EPOCH, "last": last, "events": events}
+
+
+@router.get("/api/claude-approval")
+async def claude_approval_pending(user: Dict[str, Any] = Depends(require_admin)):
+    """The Claude fallback call waiting for the user's OK, polled by every page."""
+    return {"request": claude_fallback.pending()}
+
+
+@router.post("/api/claude-approval")
+async def claude_approval_answer(request: Request, user: Dict[str, Any] = Depends(require_admin)):
+    # JSON only: another site can POST text/plain without a CORS preflight, but not application/json
+    if not request.headers.get("content-type", "").startswith("application/json"):
+        raise HTTPException(status_code=415, detail="JSON body required")
+    body = await request.json()
+    ok = claude_fallback.answer(str(body.get("id", "")), bool(body.get("approve")), bool(body.get("skip_today")))
+    return {"ok": ok}
 
 
 @router.get("/media/clip/{clip_id}/stream")

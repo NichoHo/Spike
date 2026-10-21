@@ -33,7 +33,7 @@
 <header class="page-header">
   <div class="page-header__left">
     <h1 class="page-header__title">Outreach</h1>
-    <p class="page-header__description">Find YouTube streamers, make one trial clip each, and email it. Three reviews: streamer, clip, email.</p>
+    <p class="page-header__description">Find streamers, email them your offer, and make a free sample clip for the ones who reply.</p>
   </div>
   <div class="page-header__actions">
     {{ ui.button("Add lead", variant="secondary", icon="plus", attrs={"data-open-dialog": "add-lead-dialog"}) }}
@@ -48,7 +48,7 @@
     <div class="dialog__body stack">
       <div>
         <h2 class="dialog__title" id="add-lead-title">Add lead</h2>
-        <p class="dialog__text">For streamers found outside the finder: a Whop campaign, Kick, or a referral. Adding one approves it, so its trial clip is queued once it has an email.</p>
+        <p class="dialog__text">For streamers found outside the finder: a Whop campaign, Kick, or a referral. Adding one approves it, so its email draft is written once it has an email.</p>
       </div>
       {% if f and error %}{{ ui.alert("danger", "Not added", error) }}{% endif %}
       <div class="field">
@@ -61,7 +61,7 @@
         <input class="input input--mono" id="add-email" name="email" type="email" value="{{ f.email or '' }}" autocomplete="off" spellcheck="false" placeholder="booking@example.com">
       </div>
       <div class="field">
-        <label class="field__label" for="add-stream">Stream to clip <span class="field__optional">(optional, required for Kick)</span></label>
+        <label class="field__label" for="add-stream">Stream to clip later <span class="field__optional">(optional, required for Kick)</span></label>
         <input class="input" id="add-stream" name="stream_url" value="{{ f.stream_url or '' }}" autocomplete="off" spellcheck="false" placeholder="https://www.twitch.tv/videos/…">
         <p class="field__help">Empty: the newest finished long stream (YouTube, Twitch), or the newest long upload for podcasts.</p>
       </div>
@@ -109,7 +109,7 @@
 {# ── Streamers to review ─────────────────────────────────────────────────── #}
 {% if tab == "review" %}
   {% if not leads %}
-    {{ ui.empty_state("magnifying-glass", "No streamers to review", "The finder adds new streamers every night from your saved searches. Add searches or run it now in Finder settings.", "Open finder settings", "/outreach?tab=settings") }}
+    {{ ui.empty_state("magnifying-glass", "No streamers to review", "The finder adds new streamers every night from the topics in Settings. Add a few topics, then run it.", "Open settings", "/outreach?tab=settings") }}
   {% else %}
     <form method="post" action="/outreach/leads/bulk" class="stack" data-bulk-form>
       <input type="hidden" name="tab" value="review">
@@ -160,7 +160,7 @@
           </tbody>
         </table>
       </div>
-      <p class="small muted">Approve sends streamers with an email to the trial clip queue ({{ settings.trial_clips_per_day }} a day). Streamers without one wait in Needs contact.</p>
+      <p class="small muted">Approve writes an email draft for streamers with an email. Streamers without one wait in Needs email.</p>
     </form>
   {% endif %}
 
@@ -203,13 +203,14 @@
 {# ── Clips in progress ───────────────────────────────────────────────────── #}
 {% elif tab == "progress" %}
   {% if not leads %}
-    {{ ui.empty_state("film-strip", "No trial clips in progress", "Approved streamers get one trial clip each, made by Spike from their latest long stream.") }}
+    {{ ui.empty_state("film-strip", "No sample clips", "When a streamer replies, choose Make sample clip in Replies. Spike cuts one from their latest long stream.") }}
   {% else %}
     <form method="post" action="/outreach/leads/bulk" class="stack" data-bulk-form>
       <input type="hidden" name="tab" value="progress">
       {% call bulk_bar() %}
         {{ ui.button("Reject", variant="secondary", size="sm", icon="x", type="submit", attrs={"name": "action", "value": "reject", "data-confirm": "Reject the selected streamers?"}) }}
         {{ ui.button("Retry failed jobs", variant="secondary", size="sm", icon="arrow-clockwise", type="submit", attrs={"name": "action", "value": "retry_clip"}) }}
+        {{ ui.button("Mark trial", variant="primary", size="sm", type="submit", attrs={"name": "action", "value": "trial"}) }}
       {% endcall %}
       <div class="table-wrap">
         <table class="table">
@@ -226,18 +227,26 @@
                 </td>
                 <td class="wrap-col">
                   {% if l.clip_error %}<span class="muted">{{ l.clip_error }}</span>
-                  {% elif l.status == "approved" %}<span class="muted">Starts when a daily slot opens.</span>{% endif %}
+                  {% elif l.status == "clip_wanted" %}<span class="muted">Starts when a daily slot opens ({{ settings.trial_clips_per_day }} a day).</span>
+                  {% elif l.status == "clip_ready" %}<span class="muted">Review and approve it in the clip editor.</span>
+                  {% elif l.status == "clip_approved" and not l.drive_url %}<span class="muted">Making a share link…</span>
+                  {% elif l.drive_url %}<span class="muted">Ready. Paste the link in your Gmail reply.</span>{% endif %}
                 </td>
                 <td class="actions">
-                  {% if l.spike_clip_id %}{{ ui.button("Review clip", variant="ghost", size="sm", icon="pencil-simple", href="/clips/" ~ l.spike_clip_id) }}
-                  {% elif l.spike_video_id %}{{ ui.button("Job", variant="ghost", size="sm", icon="queue", href="/jobs") }}{% endif %}
+                  <div class="row row--end">
+                    {% if l.drive_url %}
+                      <button type="button" class="btn btn--secondary btn--sm" onclick='navigator.clipboard.writeText({{ l.drive_url | tojson }}); showToast("Link copied");'>{{ ui.icon("copy", 14) }}<span>Copy link</span></button>
+                      {% if l.msgs.first and l.msgs.first.gmail_thread_id %}{{ ui.button("Reply in Gmail", variant="ghost", size="sm", icon="arrow-up-right", href="https://mail.google.com/mail/u/0/#all/" ~ l.msgs.first.gmail_thread_id, attrs={"target": "_blank", "rel": "noopener noreferrer"}) }}{% endif %}
+                    {% elif l.spike_clip_id %}{{ ui.button("Review clip", variant="ghost", size="sm", icon="pencil-simple", href="/clips/" ~ l.spike_clip_id) }}
+                    {% elif l.spike_video_id %}{{ ui.button("Job", variant="ghost", size="sm", icon="queue", href="/jobs") }}{% endif %}
+                  </div>
                 </td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
-      <p class="small muted">Approve the clip in Spike's clip editor and the email draft is written within a minute. Rejected clips can be replaced: render another moment of the same stream and approve it.</p>
+      <p class="small muted">Approve the clip in the clip editor and a share link appears here within a minute. Rejected clips can be replaced: render another moment of the same stream and approve it.</p>
     </form>
   {% endif %}
 
@@ -245,15 +254,15 @@
 {% elif tab == "email" %}
   {% if blockers %}<div class="page-alert">{{ ui.alert("warning", "Sending is blocked", blockers | join(" ")) }}</div>{% endif %}
   {% if not leads %}
-    {{ ui.empty_state("paper-plane-tilt", "No emails to review", "A draft appears here once its trial clip is approved in the clip editor.") }}
+    {{ ui.empty_state("paper-plane-tilt", "No emails to review", "A draft appears here a minute after you approve a streamer with an email.") }}
   {% else %}
     <form method="post" action="/outreach/leads/bulk" class="stack" data-bulk-form data-warn-unsaved>
       <input type="hidden" name="tab" value="email">
       {% call bulk_bar() %}
-        {{ ui.button("Reject", variant="ghost", size="sm", icon="x", type="submit", attrs={"name": "action", "value": "reject", "data-confirm": "Reject the selected streamers? Their shared clips are deleted."}) }}
+        {{ ui.button("Reject", variant="ghost", size="sm", icon="x", type="submit", attrs={"name": "action", "value": "reject", "data-confirm": "Reject the selected streamers?"}) }}
         {{ ui.button("Save drafts", variant="secondary", size="sm", type="submit", attrs={"name": "action", "value": "save_drafts"}) }}
         {% if is_admin %}
-          {{ ui.button("Regenerate", variant="secondary", size="sm", icon="arrow-clockwise", type="submit", attrs={"name": "action", "value": "regenerate", "data-confirm": "Re-upload the clip and rewrite the selected drafts? Your edits are replaced."}) }}
+          {{ ui.button("Regenerate", variant="secondary", size="sm", icon="arrow-clockwise", type="submit", attrs={"name": "action", "value": "regenerate", "data-confirm": "Rewrite the selected drafts from the current email text? Your edits are replaced."}) }}
           {{ ui.button("Send selected", variant="primary", size="sm", icon="paper-plane-tilt", type="submit", disabled=blockers | length > 0, attrs={"name": "action", "value": "send", "data-requires": "outreach_send", "data-confirm": "Queue the selected emails? They go out " ~ settings.send_gap_min ~ " minutes apart."}) }}
         {% endif %}
       {% endcall %}
@@ -261,17 +270,10 @@
       {% for l in leads %}
         {% set m = l.msgs.first or {} %}
         <article class="card draft">
-          <div class="draft__media">
-            {% if l.spike_clip_id %}<video src="/media/clip/{{ l.spike_clip_id }}/stream" controls preload="none" playsinline poster="/media/clip/{{ l.spike_clip_id }}/thumb" aria-label="Trial clip for {{ l.name }}"></video>{% endif %}
-          </div>
           <div class="draft__body stack stack--sm">
             <div class="draft__head">
               {{ row_check(l) }}
               {{ lead_cell(l) }}
-              <span class="draft__links small">
-                {% if l.spike_clip_id %}<a href="/clips/{{ l.spike_clip_id }}">Edit clip</a>{% endif %}
-                {% if l.drive_url %}<a href="{{ l.drive_url }}" target="_blank" rel="noopener noreferrer">Shared link</a>{% endif %}
-              </span>
             </div>
             {% if l.clip_error %}{{ ui.alert("warning", "Last update failed", l.clip_error) }}{% endif %}
             {% if m.status == "failed" %}{{ ui.alert("danger", "Sending failed", m.error or "Unknown error") }}{% endif %}
@@ -346,7 +348,8 @@
       {% call bulk_bar() %}
         {{ ui.button("Opt out", variant="ghost", size="sm", type="submit", attrs={"name": "action", "value": "opt_out", "data-confirm": "Opt out the selected streamers permanently?"}) }}
         {{ ui.button("Mark client", variant="secondary", size="sm", type="submit", attrs={"name": "action", "value": "client"}) }}
-        {{ ui.button("Mark trial", variant="primary", size="sm", type="submit", attrs={"name": "action", "value": "trial"}) }}
+        {{ ui.button("Mark trial", variant="secondary", size="sm", type="submit", attrs={"name": "action", "value": "trial"}) }}
+        {{ ui.button("Make sample clip", variant="primary", size="sm", icon="film-strip", type="submit", attrs={"name": "action", "value": "make_clip"}) }}
       {% endcall %}
       <div class="table-wrap">
         <table class="table">
@@ -366,7 +369,7 @@
           </tbody>
         </table>
       </div>
-      <p class="small muted">Answer in Gmail. Get written permission before posting, and record it on the streamer's Spike source.</p>
+      <p class="small muted">Interested? Make them a free sample clip, then send its link in your Gmail reply. Get written permission before posting, and record it on the streamer's Spike source.</p>
     </form>
   {% endif %}
 
@@ -433,56 +436,54 @@
     </div>
   {% endif %}
 
-{# ── Finder settings ─────────────────────────────────────────────────────── #}
+{# ── Settings ────────────────────────────────────────────────────────────── #}
 {% elif tab == "settings" %}
   {% set ro = not is_admin %}
   <div class="stack stack--lg settings-stack">
     {% if ro %}{{ ui.alert("info", "Read only", "Only admins can change outreach settings.") }}{% endif %}
     {% if not youtube_key %}{{ ui.alert("warning", "YOUTUBE_API_KEY is not set", "The finder cannot search until it is in .env.") }}{% endif %}
 
-    <section class="card">
-      <div class="card__header">
-        <h2 class="card__title">Finder</h2>
-        <p class="card__description">Runs every night at {{ "%02d" | format(settings.run_hour) }}:00 (YouTube, then Twitch when it is on). Today's YouTube quota used by outreach: {{ quota.search }} of {{ settings.search_calls_per_day }} searches, {{ quota.units | number }} of {{ (settings.units_per_day - settings.units_reserved_for_spike) | number }} units.</p>
-      </div>
-      <div class="card__body stack stack--sm">
-        <p class="small">{{ settings.last_run_summary or "The finder has not run yet." }}</p>
-      </div>
-      {% if not ro %}
-        <form method="post" action="/outreach/run-now" class="card__footer" data-requires="outreach_find">
-          <span class="card__footer-note">Uses today's quota. Results land in Streamers to review.</span>
-          {{ ui.button("Run finder now", variant="primary", type="submit", icon="magnifying-glass") }}
-        </form>
-      {% endif %}
-    </section>
-
     {# Row forms live outside the card body: empty forms inside a flex stack would each add a gap #}
     {% for s in searches %}<form id="search-toggle-{{ s.id }}" method="post" action="/outreach/searches/{{ s.id }}/toggle" hidden></form><form id="search-delete-{{ s.id }}" method="post" action="/outreach/searches/{{ s.id }}/delete" hidden></form>{% endfor %}
     <section class="card">
       <div class="card__header">
-        <h2 class="card__title">Saved searches</h2>
-        <p class="card__description">Each search looks for videos over 20 minutes from the last {{ settings.lookback_days }} days: finished YouTube live streams, or streams first broadcast on Twitch or Kick and uploaded later. Size is the median views per stream (streams over a day old); subscribers only pre-filter, to save quota. Re-upload channels need a Twitch or Kick link in their description and get lower defaults, because their audience watches on Twitch or Kick. Name a game or category ("valorant twitch vod"): a bare "twitch vod" mostly finds tiny channels. Rotated oldest first, up to {{ settings.max_searches_per_run }} a run.</p>
+        <h2 class="card__title">Find streamers</h2>
+        <p class="card__description">The finder searches YouTube for each topic below every night at {{ "%02d" | format(settings.run_hour) }}:00. New streamers land in Review.</p>
       </div>
       <div class="card__body stack">
+        {% set fs = finder_state %}
+        <div class="stack stack--sm" role="status">
+          {% if fs == "starting" %}
+            <p class="row small">{{ ui.status("job", "queued") }} Starting within a minute. This page updates on its own.</p>
+          {% elif fs == "running" %}
+            <p class="row small">{{ ui.status("job", "running") }} Finding streamers, started <span title="{{ settings.finder_started_at | local_time }}">{{ settings.finder_started_at | relative_time | trim }}</span>. This can take a few minutes; this page updates on its own.</p>
+          {% elif fs == "stuck" %}
+            {{ ui.alert("danger", "The outreach process is not running", "The finder cannot start. Restart the web app (spike web), which starts the outreach process with it.") }}
+          {% elif fs == "failed" %}
+            <p class="row small">{{ ui.status("job", "failed") }} <span title="{{ settings.finder_finished_at | local_time }}">{{ settings.finder_finished_at | relative_time }}</span></p>
+            {{ ui.alert("danger", "The last run failed", settings.finder_error or "See Activity under Advanced.") }}
+          {% elif fs == "done" %}
+            <p class="row small">{{ ui.badge("Done", "success") }} <span title="{{ settings.finder_finished_at | local_time }}">{{ settings.finder_finished_at | relative_time }}</span></p>
+            <p class="small muted">{{ settings.last_run_summary }}. <a href="/outreach?tab=review">Open Review</a></p>
+          {% endif %}
+        </div>
+        {% if fs in ("starting", "running") %}<script>setTimeout(() => location.replace("/outreach?tab=settings"), 5000);</script>{% endif %}
+
         {% if searches %}
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>Query</th><th>Finds</th><th>Language</th><th>Region</th><th class="num">Subscribers</th><th class="num">Views per stream</th><th>Last run</th><th class="actions">Actions</th></tr></thead>
+              <thead><tr><th>Topic</th><th>Language</th><th>Last run</th><th class="actions">Actions</th></tr></thead>
               <tbody>
                 {% for s in searches %}
                   <tr>
-                    <td><span class="primary-cell">{{ s.query }}</span>{% if not s.active %}<span class="secondary-line">Paused</span>{% endif %}</td>
-                    <td>{{ "Re-uploads" if s.kind == "reupload" else "Live streams" }}</td>
+                    <td><span class="primary-cell">{{ s.query }}</span><span class="secondary-line">{{ "Twitch or Kick re-uploads" if s.kind == "reupload" else "YouTube live streams" }}{% if not s.active %}, paused{% endif %}</span></td>
                     <td>{{ (s.language or "any").upper() }}</td>
-                    <td>{{ s.region or "Any" }}</td>
-                    <td class="num">{{ s.min_size | compact_number }} to {{ s.max_size | compact_number }}</td>
-                    <td class="num">{{ (s.min_views or 0) | compact_number }} to {{ s.max_views | compact_number if s.max_views else "any" }}</td>
                     <td>{% if s.last_run_at %}<span title="{{ s.last_run_at | local_time }}">{{ s.last_run_at | relative_time }}</span>{% else %}<span class="subtle">Never</span>{% endif %}</td>
                     <td class="actions">
                       {% if not ro %}
                         <div class="row row--end">
                           {{ ui.button("Resume" if not s.active else "Pause", variant="ghost", size="sm", type="submit", attrs={"form": "search-toggle-" ~ s.id}) }}
-                          {{ ui.button("Delete search", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "search-delete-" ~ s.id, "data-confirm": "Delete this search? Leads it found stay."}) }}
+                          {{ ui.button("Delete search", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "search-delete-" ~ s.id, "data-confirm": "Delete this search? Streamers it found stay."}) }}
                         </div>
                       {% endif %}
                     </td>
@@ -492,38 +493,191 @@
             </table>
           </div>
         {% else %}
-          <p class="muted small">No searches yet. Start with 3 to 5, for example "podcast", "just chatting", or "main bareng" with language id.</p>
+          {{ ui.alert("info", "Add a topic to start", "Add 3 to 5 games or topics your streamers play, like \"valorant\", \"just chatting\", or \"main bareng\" with language id. Not sure what to type? Tap an idea below the form. The finder only looks for what you add here.") }}
         {% endif %}
+
         {% if not ro %}
           <form method="post" action="/outreach/searches" class="search-form" data-requires="outreach_find">
-            <div class="field"><label class="field__label" for="s-query">Query</label><input class="input" id="s-query" name="query" required maxlength="200" placeholder="valorant live"></div>
-            <div class="field"><label class="field__label" for="s-kind">Finds</label>
-              <select class="select" id="s-kind" name="kind" data-sets-fields>
-                <option value="live" data-defaults='{"s-min": "10000", "s-vmin": "1000", "s-vmax": "100000"}'>YouTube live streams</option>
-                <option value="reupload" data-defaults='{"s-min": "0", "s-vmin": "100", "s-vmax": "20000"}'>Twitch or Kick re-uploads</option>
-              </select></div>
-            <div class="field"><label class="field__label" for="s-lang">Language <span class="field__optional">(optional)</span></label><input class="input" id="s-lang" name="language" maxlength="8" placeholder="id"></div>
-            <div class="field"><label class="field__label" for="s-region">Region <span class="field__optional">(optional)</span></label><input class="input" id="s-region" name="region" maxlength="2" placeholder="ID"></div>
-            <div class="field"><label class="field__label" for="s-min">Min subscribers</label><input class="input input--number" id="s-min" name="min_size" type="number" min="0" value="10000"></div>
-            <div class="field"><label class="field__label" for="s-max">Max subscribers</label><input class="input input--number" id="s-max" name="max_size" type="number" min="0" value="300000"></div>
-            <div class="field"><label class="field__label" for="s-vmin">Min views per stream</label><input class="input input--number" id="s-vmin" name="min_views" type="number" min="0" value="1000"></div>
-            <div class="field"><label class="field__label" for="s-vmax">Max views per stream</label><input class="input input--number" id="s-vmax" name="max_views" type="number" min="0" value="100000"></div>
-            <div class="search-form__submit">{{ ui.button("Add search", variant="secondary", type="submit", icon="plus") }}</div>
+            <div class="field"><label class="field__label" for="s-query">Topic</label><input class="input" id="s-query" name="query" required maxlength="200" placeholder="valorant…" autocomplete="off"></div>
+            <div class="field"><label class="field__label" for="s-lang">Language <span class="field__optional">(optional)</span></label><input class="input" id="s-lang" name="language" maxlength="8" placeholder="en" autocomplete="off" spellcheck="false"></div>
+            <div class="search-form__submit">{{ ui.button("Add topic", variant="secondary", type="submit", icon="plus") }}</div>
+            <div class="chip-row" style="grid-column: 1 / -1" role="group" aria-label="Topic ideas">
+              <span class="small muted">Not sure? Tap an idea:</span>
+              {% for q, lang in [("valorant", "en"), ("mobile legends", "id"), ("just chatting", "en"), ("main bareng", "id"), ("free fire", "id"), ("minecraft", "en"), ("gta roleplay", "id"), ("pubg mobile", "id"), ("fortnite", "en"), ("mabar", "id")] %}
+                <button type="button" class="chip" data-topic="{{ q }}" data-lang="{{ lang }}">{{ q }}</button>
+              {% endfor %}
+              <button type="button" class="chip" id="trending-load">Show trending on Twitch</button>
+              <span class="small muted" id="trending-note" role="status"></span>
+            </div>
+            <script>
+              const pickTopic = b => b.addEventListener("click", () => {
+                document.getElementById("s-query").value = b.dataset.topic;
+                document.getElementById("s-lang").value = b.dataset.lang || "";
+                document.getElementById("s-query").focus();
+              });
+              document.querySelectorAll("[data-topic]").forEach(pickTopic);
+              document.getElementById("trending-load").addEventListener("click", async e => {
+                const btn = e.currentTarget, note = document.getElementById("trending-note");
+                btn.disabled = true; note.textContent = "Loading…";
+                try {
+                  const r = await (await fetch("/outreach/trending")).json();
+                  note.textContent = r.error || (r.topics.length ? "Trending now (language is left blank):" : "Nothing found.");
+                  r.topics.forEach(t => {
+                    const b = document.createElement("button");
+                    b.type = "button"; b.className = "chip"; b.dataset.topic = t; b.textContent = t;
+                    pickTopic(b); btn.before(b);
+                  });
+                  if (r.topics.length) btn.remove(); else btn.disabled = false;
+                } catch { note.textContent = "Could not load trending topics."; btn.disabled = false; }
+              });
+            </script>
+            <details class="disclosure search-form__more">
+              <summary>{{ ui.icon("caret-right", 14) }} More options</summary>
+              <div class="search-form disclosure__body">
+                <div class="field"><label class="field__label" for="s-kind">Finds</label>
+                  <select class="select" id="s-kind" name="kind" data-sets-fields>
+                    <option value="live" data-defaults='{"s-min": "10000", "s-vmin": "1000", "s-vmax": "100000"}'>YouTube live streams</option>
+                    <option value="reupload" data-defaults='{"s-min": "0", "s-vmin": "100", "s-vmax": "20000"}'>Twitch or Kick re-uploads</option>
+                  </select></div>
+                <div class="field"><label class="field__label" for="s-region">Region</label><input class="input" id="s-region" name="region" maxlength="2" placeholder="ID" autocomplete="off"></div>
+                <div class="field"><label class="field__label" for="s-min">Min subscribers</label><input class="input input--number" id="s-min" name="min_size" type="number" min="0" value="10000"></div>
+                <div class="field"><label class="field__label" for="s-max">Max subscribers</label><input class="input input--number" id="s-max" name="max_size" type="number" min="0" value="300000"></div>
+                <div class="field"><label class="field__label" for="s-vmin">Min views per stream</label><input class="input input--number" id="s-vmin" name="min_views" type="number" min="0" value="1000"></div>
+                <div class="field"><label class="field__label" for="s-vmax">Max views per stream</label><input class="input input--number" id="s-vmax" name="max_views" type="number" min="0" value="100000"></div>
+              </div>
+            </details>
           </form>
         {% endif %}
       </div>
+      {% if not ro %}
+        <form method="post" action="/outreach/run-now" class="card__footer" data-requires="outreach_find">
+          <span class="card__footer-note">Today: {{ quota.search }} of {{ settings.search_calls_per_day }} YouTube searches used.</span>
+          {% set busy = finder_state in ("starting", "running") %}
+          {{ ui.button("Finding…" if busy else "Run finder now", variant="primary", type="submit", icon="magnifying-glass", disabled=busy or not (searches or twitch_searches)) }}
+        </form>
+      {% endif %}
     </section>
+
+    <section class="card">
+      <div class="card__header">
+        <h2 class="card__title">Email</h2>
+        <p class="card__description">First emails offer the deal with no clip. When a streamer replies, make them a free sample clip from Replies.</p>
+      </div>
+      <div class="card__body stack stack--sm">
+        {% if google_account %}
+          <p>Sending from <span class="mono">{{ google_account.email }}</span>.</p>
+          {% if google_account.error %}{{ ui.alert("danger", "Reconnect needed", google_account.error) }}{% endif %}
+        {% else %}
+          <p class="muted">No Google account connected yet. Emails are sent from it.</p>
+        {% endif %}
+        {% if not oauth_configured %}{{ ui.alert("warning", "OAuth client missing", "Add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET to .env, and restart.") }}{% endif %}
+        {% if not key_set %}{{ ui.alert("warning", "SPIKE_ENCRYPTION_KEY missing", "Set it in .env. The Gmail token is never stored under the built-in key.") }}{% endif %}
+      </div>
+      {% if not ro %}
+        <div class="card__footer">
+          {% if google_account %}
+            <form method="post" action="/outreach/google/disconnect">{{ ui.button("Disconnect", variant="ghost", size="sm", type="submit", attrs={"data-confirm": "Disconnect Google? Queued emails wait until you reconnect."}) }}</form>
+          {% else %}<span></span>{% endif %}
+          {{ ui.button("Reconnect Google" if google_account else "Connect Google", variant="secondary", href="/outreach/google/connect", disabled=not (oauth_configured and key_set)) }}
+        </div>
+      {% endif %}
+    </section>
+
+    <form method="post" action="/outreach/settings" class="card">
+      <input type="hidden" name="form" value="sender">
+      <div class="card__header">
+        <h2 class="card__title">Your offer</h2>
+        <p class="card__description">These fill in every new email draft.</p>
+      </div>
+      <div class="card__body settings-grid">
+        <div class="field"><label class="field__label" for="f-company">Signed as</label><input class="input" id="f-company" name="company_name" value="{{ settings.company_name }}" {% if ro %}disabled{% endif %}></div>
+        <div class="field"><label class="field__label" for="f-proof">Website</label><input class="input" id="f-proof" name="proof_url" type="url" value="{{ settings.proof_url }}" placeholder="https://…" required {% if ro %}disabled{% endif %}></div>
+        <div class="field"><label class="field__label" for="f-rate">Rate per 1,000 views</label><input class="input" id="f-rate" name="rate_default" value="{{ settings.rate_default }}" {% if ro %}disabled{% endif %}></div>
+        <div class="field"><label class="field__label" for="f-rate-sea">Rate, Southeast Asia</label><input class="input" id="f-rate-sea" name="rate_sea" value="{{ settings.rate_sea }}" {% if ro %}disabled{% endif %}></div>
+        <div class="field"><label class="field__label" for="f-min-views">Free until a video reaches (views)</label><input class="input input--number" id="f-min-views" name="min_views" type="number" min="0" value="{{ settings.min_views }}" {% if ro %}disabled{% endif %}></div>
+        <div class="field"><label class="field__label" for="f-cap">Monthly cap</label><input class="input" id="f-cap" name="monthly_cap" value="{{ settings.monthly_cap }}" {% if ro %}disabled{% endif %}></div>
+      </div>
+      {% if not ro %}<div class="card__footer"><span class="card__footer-note">Existing drafts keep their text. Use Regenerate to refresh them.</span>{{ ui.button("Save", variant="secondary", type="submit") }}</div>{% endif %}
+    </form>
+
+    <details class="disclosure">
+      <summary>{{ ui.icon("caret-right", 14) }} Advanced: email text, limits, Twitch, activity</summary>
+      <div class="disclosure__body stack stack--lg">
+
+    <form method="post" action="/outreach/settings" class="card" data-warn-unsaved>
+      <input type="hidden" name="form" value="templates">
+      <div class="card__header">
+        <h2 class="card__title">Email text</h2>
+        <p class="card__description">English for most streamers, Indonesian for streamers whose language is id. Placeholders: {name} {rate} {min_views} {cap} {company} {proof_url}. A draft with an unfilled placeholder is never sent.</p>
+      </div>
+      <div class="card__body stack">
+        {% for key in template_keys %}
+          {% set parts = key.split("_") %}
+          <div class="field">
+            <label class="field__label" for="f-{{ key }}">{{ "English" if parts[1] == "en" else "Indonesian" }}: {{ parts[2:] | join(" ") | replace("followup", "follow-up") | replace("first", "first email") }}</label>
+            {% if key.endswith("subject") %}
+              <input class="input" id="f-{{ key }}" name="{{ key }}" value="{{ settings[key] }}" {% if ro %}disabled{% endif %}>
+            {% else %}
+              <textarea class="textarea draft__text" id="f-{{ key }}" name="{{ key }}" rows="{{ 14 if key.endswith('first') else 7 }}" {% if ro %}disabled{% endif %}>{{ settings[key] }}</textarea>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+      {% if not ro %}<div class="card__footer"><span class="card__footer-note">Follow-ups reply in the first email's thread.</span>{{ ui.button("Save email text", variant="secondary", type="submit") }}</div>{% endif %}
+    </form>
+
+    <form method="post" action="/outreach/settings" class="card">
+      <input type="hidden" name="form" value="limits">
+      <div class="card__header">
+        <h2 class="card__title">Limits and schedule</h2>
+        <p class="card__description">Daily caps keep the YouTube quota and your sending reputation safe. The defaults are fine to start.</p>
+      </div>
+      <div class="card__body settings-grid">
+        {% for key, label, help in (
+          ("run_hour", "Nightly run hour", "0 to 23, this PC's time"),
+          ("new_leads_per_day", "New streamers a day", ""),
+          ("max_searches_per_run", "Topics a run", ""),
+          ("lookback_days", "Look back (days)", "Streams and Shorts are counted in this window"),
+          ("min_long_streams_14d", "Min long streams", "In the look-back window"),
+          ("min_stream_hours", "Long stream (hours)", ""),
+          ("min_fit_score", "Min fit score", "0 keeps every scored streamer"),
+          ("max_shorts_14d", "Max Shorts in the window", "YouTube only"),
+          ("emails_per_day", "Emails a day", "First emails and follow-ups together"),
+          ("send_gap_min", "Minutes between emails", ""),
+          ("followup_1_days", "Follow-up 1 after (days)", ""),
+          ("followup_2_days", "Follow-up 2 after (days)", "Counted from the first email"),
+          ("trial_clips_per_day", "Sample clips a day", "Each takes 1 to 2 hours of PC time"),
+          ("trial_max_vod_s", "Clip from the first (seconds)", "7200 is 2 hours"),
+          ("search_calls_per_day", "YouTube searches a day", "Of 100; Spike's source lookup uses the rest"),
+          ("units_per_day", "YouTube units a day", ""),
+          ("units_reserved_for_spike", "Units kept for Spike", ""),
+          ("drive_retention_days", "Delete shared clip after (days)", "For streamers who dropped off"),
+          ("lead_retention_days", "Delete silent leads after (days)", "Opt-outs are kept forever"),
+        ) %}
+          <div class="field">
+            <label class="field__label" for="f-{{ key }}">{{ label }}</label>
+            <input class="input input--number" id="f-{{ key }}" name="{{ key }}" type="number" step="{{ '0.5' if key == 'min_stream_hours' else '1' }}" value="{{ settings[key] }}" {% if ro %}disabled{% endif %}>
+            {% if help %}<p class="field__help">{{ help }}</p>{% endif %}
+          </div>
+        {% endfor %}
+        <label class="switch-row settings-grid__wide">
+          <input type="checkbox" class="switch" role="switch" name="followups_enabled" value="1" {% if settings.followups_enabled %}checked{% endif %} {% if ro %}disabled{% endif %}>
+          Send follow-ups automatically when nobody replies
+        </label>
+      </div>
+      {% if not ro %}<div class="card__footer"><span class="card__footer-note">Applies from the next minute.</span>{{ ui.button("Save", variant="secondary", type="submit") }}</div>{% endif %}
+    </form>
 
     {# Twitch finder (OUTREACH.md §6.2 B): accepted terms risk, Spike's Twitch app, off by default #}
     {% for s in twitch_searches %}<form id="tw-toggle-{{ s.id }}" method="post" action="/outreach/twitch/searches/{{ s.id }}/toggle" hidden></form><form id="tw-delete-{{ s.id }}" method="post" action="/outreach/twitch/searches/{{ s.id }}/delete" hidden></form>{% endfor %}
     <section class="card">
       <div class="card__header">
         <h2 class="card__title">Twitch finder</h2>
-        <p class="card__description">Samples live channels by category and language at your targets' prime time, averages their viewers, and adds the ones in range each night. Accepted risk: Twitch's Developer Agreement bans using its API data for commercial offers. This uses Spike's Twitch app, so if Twitch revokes it, VOD and clip lookups for clip scoring stop too. Off until you turn it on. Emails come only from bios; no Whispers or chat.</p>
+        <p class="card__description">Off by default. Samples live Twitch channels at prime time and adds the ones in your viewer range each night. Risk: Twitch's Developer Agreement bans using its API for commercial offers, and if Twitch revokes Spike's app, Twitch clip lookups stop too.</p>
       </div>
       <div class="card__body stack">
         {% if twitch_problem %}{{ ui.alert("warning", "Twitch app not set", twitch_problem) }}{% endif %}
-        <p class="small">{{ settings.twitch_last_summary or "The Twitch finder has not run yet." }}</p>
+        {% if settings.twitch_last_summary %}<p class="small muted">Last run {{ settings.twitch_last_summary }}</p>{% endif %}
         {% if twitch_searches %}
           <div class="table-wrap">
             <table class="table">
@@ -539,7 +693,7 @@
                       {% if not ro %}
                         <div class="row row--end">
                           {{ ui.button("Resume" if not s.active else "Pause", variant="ghost", size="sm", type="submit", attrs={"form": "tw-toggle-" ~ s.id}) }}
-                          {{ ui.button("Delete Twitch search", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "tw-delete-" ~ s.id, "data-confirm": "Delete this Twitch search and its samples? Leads it found stay."}) }}
+                          {{ ui.button("Delete Twitch search", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "tw-delete-" ~ s.id, "data-confirm": "Delete this Twitch search and its samples? Streamers it found stay."}) }}
                         </div>
                       {% endif %}
                     </td>
@@ -567,7 +721,7 @@
             On
           </label>
           <div class="field field--inline"><label class="field__label" for="tw-hours">Sample at (hours)</label><input class="input input--mono" id="tw-hours" name="twitch_sample_hours" value="{{ settings.twitch_sample_hours }}" autocomplete="off"></div>
-          <div class="field field--inline"><label class="field__label" for="tw-cap">Leads a day</label><input class="input input--number input--short" id="tw-cap" name="twitch_new_leads_per_day" type="number" min="0" value="{{ settings.twitch_new_leads_per_day }}"></div>
+          <div class="field field--inline"><label class="field__label" for="tw-cap">Streamers a day</label><input class="input input--number input--short" id="tw-cap" name="twitch_new_leads_per_day" type="number" min="0" value="{{ settings.twitch_new_leads_per_day }}"></div>
           {{ ui.button("Sample now", variant="ghost", size="sm", type="submit", attrs={"formaction": "/outreach/twitch/sample-now", "data-requires": "outreach_find", "data-requires-kind": "twitch"}) }}
           {{ ui.button("Save", variant="secondary", type="submit") }}
         </form>
@@ -576,118 +730,8 @@
 
     <section class="card">
       <div class="card__header">
-        <h2 class="card__title">Google account</h2>
-        <p class="card__description">Sends email through Gmail and shares trial clips through Drive. Scopes: send email, read message headers (for replies), and files this app creates.</p>
-      </div>
-      <div class="card__body stack stack--sm">
-        {% if google_account %}
-          <p>Connected as <span class="mono">{{ google_account.email }}</span>{% if google_account.connected_at %}, <span class="muted" title="{{ google_account.connected_at | local_time }}">{{ google_account.connected_at | relative_time }}</span>{% endif %}.</p>
-          {% if google_account.error %}{{ ui.alert("danger", "Reconnect needed", google_account.error) }}{% endif %}
-        {% else %}
-          <p class="muted">No account connected.</p>
-        {% endif %}
-        {% if not oauth_configured %}
-          {{ ui.alert("warning", "OAuth client missing", "Create a Web application OAuth client in Google Cloud, add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET to .env, and restart.") }}
-        {% endif %}
-        {% if not key_set %}{{ ui.alert("warning", "SPIKE_ENCRYPTION_KEY missing", "Set it in .env. The Gmail token is never stored under the built-in key.") }}{% endif %}
-        <p class="small muted">Authorized redirect URI: <span class="mono">{{ redirect_uri }}</span>. Publish the OAuth app (not Testing), or Google expires the sign-in after 7 days.</p>
-      </div>
-      {% if not ro %}
-        <div class="card__footer">
-          {% if google_account %}
-            <form method="post" action="/outreach/google/disconnect">{{ ui.button("Disconnect", variant="ghost", size="sm", type="submit", attrs={"data-confirm": "Disconnect Google? Queued emails wait until you reconnect."}) }}</form>
-          {% else %}<span></span>{% endif %}
-          {{ ui.button("Reconnect Google" if google_account else "Connect Google", variant="secondary", href="/outreach/google/connect", disabled=not (oauth_configured and key_set)) }}
-        </div>
-      {% endif %}
-    </section>
-
-    <form method="post" action="/outreach/settings" class="card">
-      <input type="hidden" name="form" value="sender">
-      <div class="card__header">
-        <h2 class="card__title">Sender and offer</h2>
-        <p class="card__description">Emails are signed by a person and link to proof of your clips (OUTREACH.md §4.2).</p>
-      </div>
-      <div class="card__body settings-grid">
-        <div class="field"><label class="field__label" for="f-sender">Sender first name</label><input class="input" id="f-sender" name="sender_name" value="{{ settings.sender_name }}" required {% if ro %}disabled{% endif %}></div>
-        <div class="field"><label class="field__label" for="f-company">Company</label><input class="input" id="f-company" name="company_name" value="{{ settings.company_name }}" {% if ro %}disabled{% endif %}></div>
-        <div class="field settings-grid__wide"><label class="field__label" for="f-proof">Proof link</label><input class="input" id="f-proof" name="proof_url" type="url" value="{{ settings.proof_url }}" placeholder="https://youtube.com/@yourclips" required {% if ro %}disabled{% endif %}><p class="field__help">Your clip accounts or a results page. A company website does not prove you can clip.</p></div>
-        <div class="field"><label class="field__label" for="f-rate">Rate per 1,000 views</label><input class="input" id="f-rate" name="rate_default" value="{{ settings.rate_default }}" {% if ro %}disabled{% endif %}></div>
-        <div class="field"><label class="field__label" for="f-rate-sea">Rate, Southeast Asia</label><input class="input" id="f-rate-sea" name="rate_sea" value="{{ settings.rate_sea }}" {% if ro %}disabled{% endif %}></div>
-        <div class="field"><label class="field__label" for="f-min-views">Views before a clip counts</label><input class="input input--number" id="f-min-views" name="min_views" type="number" min="0" value="{{ settings.min_views }}" {% if ro %}disabled{% endif %}></div>
-        <div class="field"><label class="field__label" for="f-cap">Monthly cap</label><input class="input" id="f-cap" name="monthly_cap" value="{{ settings.monthly_cap }}" {% if ro %}disabled{% endif %}></div>
-      </div>
-      {% if not ro %}<div class="card__footer"><span class="card__footer-note">Applies to new drafts.</span>{{ ui.button("Save", variant="secondary", type="submit") }}</div>{% endif %}
-    </form>
-
-    <form method="post" action="/outreach/settings" class="card">
-      <input type="hidden" name="form" value="limits">
-      <div class="card__header">
-        <h2 class="card__title">Limits and schedule</h2>
-        <p class="card__description">Daily caps keep the pipeline, the YouTube quota, and your sending reputation safe.</p>
-      </div>
-      <div class="card__body settings-grid">
-        {% for key, label, help in (
-          ("run_hour", "Nightly run hour", "0 to 23, this PC's time"),
-          ("new_leads_per_day", "New leads a day", ""),
-          ("max_searches_per_run", "Searches a run", ""),
-          ("lookback_days", "Look back (days)", "Streams and Shorts are counted in this window"),
-          ("min_long_streams_14d", "Min long streams", "In the look-back window"),
-          ("min_stream_hours", "Long stream (hours)", ""),
-          ("min_fit_score", "Min fit score", "0 keeps every scored streamer"),
-          ("max_shorts_14d", "Max Shorts in the window", "YouTube only; TikTok and Reels are not checked"),
-          ("trial_clips_per_day", "Trial clips a day", "Each takes 1 to 2 hours of PC time"),
-          ("trial_max_vod_s", "Clip from the first (seconds)", "7200 is 2 hours"),
-          ("emails_per_day", "Emails a day", "First emails and follow-ups together"),
-          ("send_gap_min", "Minutes between emails", ""),
-          ("followup_1_days", "Follow-up 1 after (days)", ""),
-          ("followup_2_days", "Follow-up 2 after (days)", "Counted from the first email"),
-          ("search_calls_per_day", "YouTube searches a day", "Of 100; Spike's source lookup uses the rest"),
-          ("units_per_day", "YouTube units a day", ""),
-          ("units_reserved_for_spike", "Units kept for Spike", ""),
-          ("drive_retention_days", "Delete shared clip after (days)", "When nobody replied"),
-          ("lead_retention_days", "Delete silent leads after (days)", "Opt-outs are kept forever"),
-        ) %}
-          <div class="field">
-            <label class="field__label" for="f-{{ key }}">{{ label }}</label>
-            <input class="input input--number" id="f-{{ key }}" name="{{ key }}" type="number" step="{{ '0.5' if key == 'min_stream_hours' else '1' }}" value="{{ settings[key] }}" {% if ro %}disabled{% endif %}>
-            {% if help %}<p class="field__help">{{ help }}</p>{% endif %}
-          </div>
-        {% endfor %}
-        <label class="switch-row settings-grid__wide">
-          <input type="checkbox" class="switch" role="switch" name="followups_enabled" value="1" {% if settings.followups_enabled %}checked{% endif %} {% if ro %}disabled{% endif %}>
-          Send follow-ups automatically when nobody replies
-        </label>
-      </div>
-      {% if not ro %}<div class="card__footer"><span class="card__footer-note">Applies from the next minute.</span>{{ ui.button("Save", variant="secondary", type="submit") }}</div>{% endif %}
-    </form>
-
-    <form method="post" action="/outreach/settings" class="card" data-warn-unsaved>
-      <input type="hidden" name="form" value="templates">
-      <div class="card__header">
-        <h2 class="card__title">Email templates</h2>
-        <p class="card__description">English for most streamers, Indonesian for streamers whose language is id. Placeholders: {name} {day} {date} {moment} {timestamp} {link} {rate} {min_views} {cap} {sender_name} {company} {proof_url}. A draft with an unfilled placeholder is never sent.</p>
-      </div>
-      <div class="card__body stack">
-        {% for key in template_keys %}
-          {% set parts = key.split("_") %}
-          <div class="field">
-            <label class="field__label" for="f-{{ key }}">{{ "English" if parts[1] == "en" else "Indonesian" }}: {{ parts[2:] | join(" ") | replace("followup", "follow-up") }}</label>
-            {% if key.endswith("subject") %}
-              <input class="input" id="f-{{ key }}" name="{{ key }}" value="{{ settings[key] }}" {% if ro %}disabled{% endif %}>
-            {% else %}
-              <textarea class="textarea draft__text" id="f-{{ key }}" name="{{ key }}" rows="{{ 14 if key.endswith('first') else 8 }}" {% if ro %}disabled{% endif %}>{{ settings[key] }}</textarea>
-            {% endif %}
-          </div>
-        {% endfor %}
-      </div>
-      {% if not ro %}<div class="card__footer"><span class="card__footer-note">Follow-ups reply in the first email's thread.</span>{{ ui.button("Save templates", variant="secondary", type="submit") }}</div>{% endif %}
-    </form>
-
-    <section class="card">
-      <div class="card__header">
         <h2 class="card__title">Activity</h2>
-        <p class="card__description">What the outreach process did recently. Kept 30 days.</p>
+        <p class="card__description">What the outreach process did recently. Google redirect URI: <span class="mono">{{ redirect_uri }}</span> (publish the OAuth app, or Google expires the sign-in after 7 days).</p>
       </div>
       <div class="card__body">
         {% if log %}
@@ -697,6 +741,9 @@
         {% else %}<p class="muted small">Nothing yet. The outreach process starts with the web app (spike web).</p>{% endif %}
       </div>
     </section>
+
+      </div>
+    </details>
   </div>
 {% endif %}
 {% endblock %}

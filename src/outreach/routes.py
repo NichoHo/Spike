@@ -4,32 +4,34 @@ Members review leads and clips. Only admins send email, connect Google, or chang
 """
 
 import re
+import time
 import urllib.parse
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_303_SEE_OTHER, HTTP_403_FORBIDDEN
 
 from src import config
 from src.db import list_review_clips
-from src.outreach import db, google, service, twitch
+from src.outreach import daemon, db, google, service, twitch
 from src.web.auth import get_current_user, require_admin
 
 router = APIRouter()
 
+# In the order a lead moves through them
 TABS = {
-    "review": ("Streamers to review", ["found"]),
-    "contact": ("Needs contact", ["needs_contact"]),
-    "progress": ("Clips in progress", ["approved", "clip_queued", "clip_ready", "clip_failed", "clip_approved"]),
-    "email": ("Ready to email", ["email_ready"]),
+    "review": ("Review", ["found"]),
+    "contact": ("Needs email", ["needs_contact"]),
+    "email": ("Ready to send", ["email_ready"]),
     "sent": ("Sent", ["email_ready", "sent", "followup_1", "followup_2", "bounced"]),
     "replies": ("Replies", ["replied"]),
+    "progress": ("Sample clips", ["clip_wanted", "clip_queued", "clip_ready", "clip_failed", "clip_approved"]),
     "clients": ("Clients", ["trial", "client"]),
     "stats": ("Stats", []),
-    "settings": ("Finder settings", []),
+    "settings": ("Settings", []),
 }
 ADMIN_ACTIONS = {"send", "cancel_send", "regenerate"}
 INT_SETTINGS = {  # name: (min, max)
@@ -94,6 +96,16 @@ def _tab_leads(tab: str, settings: Dict[str, Any]) -> List[Dict[str, Any]]:
     return leads
 
 
+def _finder_state(settings: Dict[str, Any]) -> str:
+    """starting | running | done | failed | stuck | '' (never run). stuck: asked or running, but no outreach process."""
+    status = settings["finder_status"]
+    if settings["run_now"] or status == "running":
+        if not daemon.is_running():
+            return "stuck"
+        return "running" if status == "running" else "starting"
+    return status
+
+
 @router.get("/outreach", response_class=HTMLResponse)
 async def outreach_page(request: Request, tab: str = "review", notice: str = "", error: str = "",
                         user: Dict[str, Any] = Depends(get_current_user)):
@@ -118,6 +130,7 @@ def _render(request: Request, user: Dict[str, Any], tab: str, notice: str = "", 
         "blockers": service.sending_blockers(settings) if tab in ("email", "sent", "settings") else [],
         "google_account": db.get_google_account(),
         "add_form": add_form or {},
+        "finder_state": _finder_state(settings),
     }
     if tab == "stats":
         ctx["stats"] = service.stats()
@@ -148,12 +161,12 @@ async def add_lead(request: Request, user: Dict[str, Any] = Depends(get_current_
     except service.OutreachError as e:
         return _render(request, user, data["tab"], error=str(e), add_form=data, status_code=400)
     if lead["status"] == "approved":
-        return _back("progress", notice=f"Added {lead['name']}. Its trial clip is queued with the others.")
+        return _back("email", notice=f"Added {lead['name']}. Its email draft appears here within a minute.")
     return _back("contact", notice=f"Added {lead['name']}. Add an email to queue its trial clip.")
 
 
 @router.post("/outreach/leads/bulk", dependencies=[Depends(same_origin)])
-async def bulk_action(request: Request, background: BackgroundTasks, user: Dict[str, Any] = Depends(get_current_user)):
+async def bulk_action(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     form = await request.form()
     action, tab, ids = form.get("action", ""), form.get("tab", "review"), _ids(form)
     if action in ADMIN_ACTIONS and user.get("role") != "admin":
@@ -173,12 +186,16 @@ async def bulk_action(request: Request, background: BackgroundTasks, user: Dict[
     try:
         if action == "approve":
             r = service.approve(ids)
-            return _back(tab, notice=f"{r['approved']} approved for a trial clip, {r['needs_contact']} need an email first"
+            return _back(tab, notice=f"{r['approved']} approved, drafts appear in Ready to send within a minute. "
+                         f"{r['needs_contact']} need an email first"
                          + (f", {r['opted_out']} had opted out" if r["opted_out"] else "") + ".")
         if action == "reject":
             return _back(tab, notice=f"{service.reject(ids, form.get('reason', ''))} rejected.")
         if action == "snooze":
             return _back(tab, notice=f"{service.snooze(ids)} snoozed for 30 days.")
+        if action == "make_clip":
+            return _back("progress", notice=f"{service.request_clips(ids)} sample clip(s) queued. "
+                         "Approve each one in the clip editor, then send the link in your Gmail reply.")
         if action == "retry_clip":
             return _back(tab, notice=f"{service.retry_clip(ids)} Spike job(s) queued again.")
         if action == "send":
@@ -188,8 +205,8 @@ async def bulk_action(request: Request, background: BackgroundTasks, user: Dict[
         if action == "cancel_send":
             return _back(tab, notice=f"{service.cancel_send(ids)} send(s) cancelled. Back in Ready to email.")
         if action == "regenerate":
-            background.add_task(service.draft_emails, None, ids, True)
-            return _back(tab, notice="Regenerating drafts. Refresh in a minute.")
+            r = service.draft_emails(None, ids)
+            return _back(tab, notice=f"{r['drafted']} draft(s) rewritten from the template.")
         if action == "stop_followups":
             return _back(tab, notice=f"Follow-ups stopped for {service.stop_followups(ids)} lead(s).")
         if action in ("trial", "client"):
@@ -210,7 +227,7 @@ async def save_contact(lead_id: int, request: Request, user: Dict[str, Any] = De
     except service.OutreachError as e:
         return _back("contact", error=str(e))
     moved = lead["status"] == "approved"
-    return _back("contact", notice=f"Saved {lead['name']}." + (" Moved to the trial clip queue." if moved else ""))
+    return _back("contact", notice=f"Saved {lead['name']}." + (" Its email draft appears in Ready to send." if moved else ""))
 
 
 @router.post("/outreach/leads/{lead_id}/client", dependencies=[Depends(same_origin)])
@@ -227,8 +244,12 @@ async def save_client(lead_id: int, request: Request, user: Dict[str, Any] = Dep
 
 @router.post("/outreach/run-now", dependencies=[Depends(same_origin)])
 async def run_now(user: Dict[str, Any] = Depends(require_admin)):
+    settings = db.get_settings()
+    has_twitch = settings["twitch_enabled"] and any(s["active"] for s in db.list_twitch_searches())
+    if not db.list_searches(active_only=True) and not has_twitch:
+        return _back("settings", error="Add a topic first: the finder only looks for the topics you add.")
     db.set_settings({"run_now": 1})
-    return _back("settings", notice="The finder starts within a minute. Results appear in Streamers to review.")
+    return _back("settings")
 
 
 @router.post("/outreach/settings", dependencies=[Depends(same_origin)])
@@ -265,6 +286,21 @@ async def save_settings(request: Request, user: Dict[str, Any] = Depends(require
     return _back("settings", notice="Settings saved.")
 
 
+_trending: Dict[str, Any] = {"at": 0.0, "names": []}
+
+
+@router.get("/outreach/trending")
+async def trending_topics(user: Dict[str, Any] = Depends(get_current_user)):
+    """Top Twitch categories right now, as topic ideas. YouTube has no trending-games endpoint, so Twitch only."""
+    if time.time() - _trending["at"] > 3600:
+        try:
+            data = await run_in_threadpool(twitch.helix, "games/top", [("first", 20)])
+        except Exception as e:  # missing credentials or an API failure: the page keeps its fixed ideas
+            return {"topics": [], "error": str(e)}
+        _trending.update(at=time.time(), names=[g["name"] for g in data.get("data", []) if g["name"].lower() != "just chatting"])
+    return {"topics": _trending["names"], "error": ""}
+
+
 @router.post("/outreach/searches", dependencies=[Depends(same_origin)])
 async def add_search(request: Request, user: Dict[str, Any] = Depends(require_admin)):
     form = await request.form()
@@ -272,7 +308,7 @@ async def add_search(request: Request, user: Dict[str, Any] = Depends(require_ad
     lang = (form.get("language") or "").strip().lower()[:8]
     region = (form.get("region") or "").strip().upper()[:2]
     if not query:
-        return _back("settings", error="A search needs a query.")
+        return _back("settings", error="Type a topic first.")
     if lang and not re.match(r"^[a-z]{2}(-[A-Za-z]{2,4})?$", lang):
         return _back("settings", error="Language must be a 2-letter code like en or id.")
     if region and not re.match(r"^[A-Z]{2}$", region):
@@ -287,7 +323,7 @@ async def add_search(request: Request, user: Dict[str, Any] = Depends(require_ad
     if lo > hi or (vhi is not None and vlo > vhi):
         return _back("settings", error="A minimum is above its maximum.")
     db.add_search(query, lang, region, lo, hi, kind, vlo, vhi)
-    return _back("settings", notice=f"Saved search '{query}'.")
+    return _back("settings", notice=f"Added '{query}'. Run the finder now, or wait for tonight's run.")
 
 
 @router.post("/outreach/searches/{search_id}/toggle", dependencies=[Depends(same_origin)])
@@ -353,7 +389,7 @@ async def twitch_sample_now(user: Dict[str, Any] = Depends(require_admin)):
 @router.post("/outreach/searches/{search_id}/delete", dependencies=[Depends(same_origin)])
 async def delete_search(search_id: int, user: Dict[str, Any] = Depends(require_admin)):
     db.delete_search(search_id)
-    return _back("settings", notice="Search deleted. Leads it found are kept.")
+    return _back("settings", notice="Topic deleted. Streamers it found are kept.")
 
 
 # ── Google account (admin) ────────────────────────────────────────────────────

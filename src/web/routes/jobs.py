@@ -4,6 +4,7 @@ Blueprint §10.4, §10.7 & DESIGN.md §10.7.
 """
 
 import shutil
+from datetime import datetime, timedelta
 from typing import Dict, Any
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -41,8 +42,12 @@ def _get_disk_stats():
 
 def _with_eta(jobs):
     eta = estimate_remaining_seconds(jobs)
+    now = datetime.now().astimezone()
     for j in jobs:
         j["eta_s"] = eta.get(j["id"])
+        if j["eta_s"] is not None:
+            done = now + timedelta(seconds=j["eta_s"])
+            j["eta_at"] = done.strftime("%H:%M" if done.date() == now.date() else "%a %H:%M")
     return jobs
 
 

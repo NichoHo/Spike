@@ -4,7 +4,6 @@ Orchestrates Stages 1, 2, 4, 5, 6, 7, 8, 9, 9c with resume checkpoints.
 Blueprint §5 & §13 Phase 1 and Phase 2.
 """
 
-import json
 import os
 import sys
 import traceback
@@ -17,8 +16,9 @@ from src.db import (
     init_db,
     register_video,
     update_video_stage,
+    set_video_duration,
+    set_stage_progress,
     finish_video,
-    create_or_update_clip,
 )
 from src.notify import send_job_ready_notification, send_job_failed_notification
 from src.pipeline.stage1_meta import run_stage1_meta
@@ -59,6 +59,8 @@ def run_pipeline(
         # Stage 1: fetch_meta
         update_video_stage(video_id, "fetch_meta", status="running")
         meta = run_stage1_meta(video_dir, source_input, (source_settings or {}).get("max_process_s"))
+        if meta.get("duration"):
+            set_video_duration(video_id, meta["duration"])
 
         # Stage 2: fetch_audio
         update_video_stage(video_id, "fetch_audio", status="running")
@@ -72,10 +74,14 @@ def run_pipeline(
         # Stage 4: fetch_crowd (YouTube comments or Twitch emotes/clips)
         update_video_stage(video_id, "fetch_crowd", status="running")
         crowd_data = run_stage4_crowd(video_dir, meta)
+        if source_settings and source_settings.get("holdout_clips") and isinstance(crowd_data, dict):
+            crowd_data["clips"] = []  # eval runs: community clips are the answer key, so Spike must not see them
 
         # Stage 5: transcribe
         update_video_stage(video_id, "transcribe", status="running")
-        transcript = run_stage5_transcribe(video_dir, audio_path)
+        transcript = run_stage5_transcribe(
+            video_dir, audio_path, on_progress=lambda f: set_stage_progress(video_id, f)
+        )
 
         # Creator + session profile (needs the transcript; cached per source, so usually free)
         try:
@@ -121,23 +127,11 @@ def run_pipeline(
         update_video_stage(video_id, "render_vertical", status="running")
         vertical_clips = run_stage9c_render(video_dir, candidates, transcript, source_settings)
 
-        # Register clips into clips table for UI
+        # Stage 9c registered each clip with its full render settings. Registering again here wrote defaults
+        # over them (pause trimming off, no music, blur letterbox), so later re-renders lost the pause cuts.
         for c in candidates:
-            render_path = c.get("render_file")
-            thumb_path = c.get("thumbnail_file")
-            if render_path and os.path.exists(render_path):
-                clip_id = create_or_update_clip(
-                    candidate_id=c["id"],
-                    file_path=str(render_path),
-                    thumb_path=str(thumb_path) if thumb_path else "",
-                    layout=c.get("layout", source_settings.get("layout", "split") if source_settings else "split"),
-                    caption_style=c.get("caption_style", source_settings.get("caption_style", "bold_pop") if source_settings else "bold_pop"),
-                    trim_start_s=c.get("trim_start_s", c.get("start_s")),
-                    trim_end_s=c.get("trim_end_s", c.get("end_s")),
-                    status="ready",
-                    cuts=json.dumps(c.get("cuts") or []),
-                    zooms=json.dumps(c.get("zooms") or []),
-                )
+            clip_id = c.get("clip_id")
+            if clip_id:
                 try:
                     from src.posting import evaluate_clip_autopost
                     evaluate_clip_autopost(clip_id, source_settings=source_settings)

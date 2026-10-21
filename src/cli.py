@@ -101,6 +101,17 @@ def cmd_web(args):
             p.terminate()
 
 
+def cmd_evalset(args):
+    """Per-category eval set: build labels, run Spike with clips held out, score against baselines."""
+    from src import eval_set
+    if args.action == "build":
+        eval_set.build()
+    elif args.action == "run":
+        eval_set.run(args.vod)
+    else:
+        eval_set.print_report(eval_set.score())
+
+
 def cmd_worker(args):
     """Start background worker daemon."""
     from src.worker import start_worker
@@ -177,6 +188,11 @@ def main():
     outreach_parser = subparsers.add_parser("outreach", help="Run the outreach process (lead finder, trial clips, emails)")
     outreach_parser.add_argument("--find-now", action="store_true", help="Run the lead finder once and exit")
     outreach_parser.set_defaults(func=cmd_outreach)
+
+    evalset_parser = subparsers.add_parser("evalset", help="Per-category eval set: build, run or score")
+    evalset_parser.add_argument("action", choices=["build", "run", "score"])
+    evalset_parser.add_argument("--vod", help="run only this VOD id")
+    evalset_parser.set_defaults(func=cmd_evalset)
 
     # music command (§13 Phase 5)
     music_parser = subparsers.add_parser("music", help="Verify music library licenses and list tracks")

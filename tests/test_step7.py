@@ -76,6 +76,16 @@ def test_review_page_shows_stream_time_and_other_moments(clip):
     assert f'action="/candidates/{clip["low"]}/render"' in html
 
 
+def test_other_moments_skip_rendered_and_run_earliest_first(clip):
+    from src.db import list_other_moments
+    base = dict(origin="llm_chunk", punchline="p", hook_text="h", post_caption="c", mood="laugh", status="low_score", llm_score=60)
+    dupe = insert_candidate(clip["video"], {**base, "start_s": 104.0, "end_s": 112.0, "title": "Same moment, new name"})
+    early = insert_candidate(clip["video"], {**base, "start_s": 300.0, "end_s": 320.0, "llm_score": 40, "title": "Early"})
+    ids = [m["id"] for m in list_other_moments([clip["video"]])[clip["video"]]]
+    assert dupe not in ids                      # 7 of its 8 s are the rendered clip
+    assert ids == [early, clip["low"]]          # stream order, not score order
+
+
 def test_clip_page_has_zoom_cut_and_editor_controls(clip):
     html = clip["client"].get(f"/clips/{clip['clip']}").text
     for needle in ('id="btn-zoom"', 'id="zoom-popover"', 'id="edit-strip"', "Cut this part", "Mark start", "Mark end",

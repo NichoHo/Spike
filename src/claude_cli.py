@@ -58,6 +58,7 @@ def run_claude(
     schema: Union[str, Dict[str, Any]],
     video_id: Optional[int] = None,
     label: str = "",
+    model: str = "sonnet",
 ) -> Dict[str, Any]:
     """One non-interactive Claude call. Returns the structured JSON dict; callers validate it with Pydantic.
 
@@ -68,7 +69,7 @@ def run_claude(
     exe = _claude_exe()
     schema_json = schema if isinstance(schema, str) else json.dumps(schema)
     cmd = [
-        exe, "-p", "--model", "sonnet",
+        exe, "-p", "--model", model,
         "--system-prompt", JSON_ONLY + system,
         "--tools", "",
         "--setting-sources", "project",

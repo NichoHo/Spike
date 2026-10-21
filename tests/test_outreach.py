@@ -172,47 +172,23 @@ def test_lifecycle_to_sent(env, monkeypatch):
 
     r = service.approve([a, b, c])
     assert r == {"approved": 2, "needs_contact": 1, "opted_out": 0}
-    db.set_settings({"trial_clips_per_day": 1})
-    assert service.queue_trial_clips() == 1 and service.queue_trial_clips() == 0  # daily cap
-    la = db.get_lead(a)
-    assert la["status"] == "clip_queued"
-    job = spike_db.get_job(la["spike_video_id"])
-    assert job["priority"] == 0 and job["url"].endswith("vid1")
-    assert json.loads(job["settings"]) == {"target_clips": 1, "max_process_s": 7200, "prospect": True}
-    assert spike_db.get_source(la["spike_source_id"])["permission"] == "none"
-
-    db.set_settings({"trial_clips_per_day": 5})
-    assert service.queue_trial_clips() == 1
-    assert spike_db.get_source(db.get_lead(c)["spike_source_id"])["permission"] == "written"
+    assert service.queue_trial_clips() == 0  # no clip before a reply
 
     # needs_contact moves on once an email is added by hand
     assert service.save_contact(b, "Booking@Rafi.ID")["status"] == "approved"
     with pytest.raises(service.OutreachError):
         service.save_contact(b, "not-an-email")
 
-    # Spike renders the clip; the reviewer approves it
-    clip = make_clip(la["spike_video_id"], tmp=env)
-    spike_db.finish_video(la["spike_video_id"], "ready")
-    service.sync_clips()
-    assert db.get_lead(a)["status"] == "clip_ready" and db.get_lead(a)["spike_clip_id"] == clip
-    spike_db.update_clip_status(clip, "approved")
-    service.sync_clips()
-    assert db.get_lead(a)["status"] == "clip_approved"
-
-    assert service.draft_emails()["drafted"] == 0  # no sender configured yet: waits, with a reason
-    assert "sender name" in db.get_lead(a)["clip_error"]
-    db.set_settings({"sender_name": "Nico", "proof_url": "https://youtube.com/@clips"})
-    uploads = []
-    monkeypatch.setattr(google, "upload_shared_file", lambda path, name: uploads.append(name) or {"id": "f1", "url": "https://drive/f1"})
-    monkeypatch.setattr(service, "describe_moment", lambda cand, lang: "the rage quit")
-    assert service.draft_emails()["drafted"] == 1
-    la = db.get_lead(a)
+    # The first email carries the offer, no clip
+    db.set_settings({"proof_url": ""})
+    assert service.draft_emails()["drafted"] == 0  # no website yet: waits, and the dashboard says why
+    assert "website" in " ".join(service.sending_blockers(db.get_settings()))
+    db.set_settings({"proof_url": "https://example.com/"})
+    assert service.draft_emails()["drafted"] == 3
     msg = db.get_message(a, "first")
-    assert la["status"] == "email_ready" and la["drive_file_id"] == "f1"
-    assert "the rage quit di menit 1:06:40" in msg["body"] and "https://drive/f1" in msg["body"] and "$0.50" in msg["body"]
-    assert "10.000 view" in msg["body"] and msg["subject"].startswith("Klip dari stream kamu hari ")
-
-    assert "Nico" in msg["body"] and "https://youtube.com/@clips" in msg["body"]
+    assert db.get_lead(a)["status"] == "email_ready" and db.get_lead(a)["drive_file_id"] is None
+    assert "$0.50 per 1.000 view" in msg["body"] and "10.000 view" in msg["body"] and "https://example.com/" in msg["body"]
+    assert msg["subject"] == "Klip dari stream kamu, bayar hanya per view" and "{" not in msg["body"]
 
     # Sending is blocked until a Google account is connected
     with pytest.raises(service.OutreachError):
@@ -221,13 +197,46 @@ def test_lifecycle_to_sent(env, monkeypatch):
     service.save_draft(a, msg["to_email"], msg["subject"], msg["body"] + " {moment}")
     assert service.queue_send([a])["queued"] == 0  # an unfilled placeholder blocks sending
     service.save_draft(a, msg["to_email"], msg["subject"], msg["body"])
-    assert service.queue_send([a])["queued"] == 1
+    assert service.queue_send([a, c])["queued"] == 2
 
     sent = []
     monkeypatch.setattr(google, "send_email", lambda *args, **kw: sent.append((args, kw)) or {"id": "m1", "thread_id": "t1", "rfc_message_id": "<x@y>"})
-    assert service.send_due()["sent"] == 1
+    with db.connect() as conn:  # both due now
+        conn.execute("UPDATE messages SET scheduled_for = ?", (ago(hours=1),))
+    assert service.send_due()["sent"] == 2
     assert db.get_lead(a)["status"] == "sent" and db.get_message(a, "first")["gmail_thread_id"] == "t1"
     assert sent[0][0][0] == "rafi@studio.id" and sent[0][1]["thread_id"] is None
+
+    # A reply unlocks the sample clip
+    assert service.request_clips([a, c]) == 0  # not replied yet
+    db.update_lead(a, status="replied")
+    db.update_lead(c, status="replied")
+    assert service.request_clips([a, c]) == 2
+    db.set_settings({"trial_clips_per_day": 1})
+    assert service.queue_trial_clips() == 1 and service.queue_trial_clips() == 0  # daily cap
+    la = db.get_lead(a)
+    assert la["status"] == "clip_queued"
+    job = spike_db.get_job(la["spike_video_id"])
+    assert job["priority"] == 0 and job["url"].endswith("vid1")
+    assert json.loads(job["settings"]) == {"target_clips": 1, "max_process_s": 7200, "prospect": True}
+    assert spike_db.get_source(la["spike_source_id"])["permission"] == "none"
+    db.set_settings({"trial_clips_per_day": 5})
+    assert service.queue_trial_clips() == 1
+    assert spike_db.get_source(db.get_lead(c)["spike_source_id"])["permission"] == "written"
+
+    # Spike renders the clip; the reviewer approves it; it is shared for the Gmail reply
+    clip = make_clip(la["spike_video_id"], tmp=env)
+    spike_db.finish_video(la["spike_video_id"], "ready")
+    service.sync_clips()
+    assert db.get_lead(a)["status"] == "clip_ready" and db.get_lead(a)["spike_clip_id"] == clip
+    spike_db.update_clip_status(clip, "approved")
+    service.sync_clips()
+    assert db.get_lead(a)["status"] == "clip_approved"
+    uploads = []
+    monkeypatch.setattr(google, "upload_shared_file", lambda path, name: uploads.append(name) or {"id": "f1", "url": "https://drive/f1"})
+    assert service.share_clips() == 1 and service.share_clips() == 0
+    assert db.get_lead(a)["drive_url"] == "https://drive/f1" and len(uploads) == 1
+    assert service.mark([a], "trial") == 1
 
 
 def test_draft_shows_placeholder_check(env):
@@ -274,7 +283,7 @@ def test_followups_replies_bounces_and_opt_outs(env, monkeypatch):
 
     assert service.schedule_followups() == 3
     f = db.get_message(ids[0], "followup_1")
-    assert f["status"] == "queued" and f["subject"] == "Re: A clip" and "https://drive/x" in f["body"]
+    assert f["status"] == "queued" and f["subject"] == "Re: A clip" and "klip contoh gratis" in f["body"] and "{" not in f["body"]
     assert service.schedule_followups() == 0  # never twice
 
     replies = {
@@ -546,8 +555,9 @@ def test_add_twitch_and_kick_leads_by_hand(env, monkeypatch):
     assert kick["channel_id"] == "kick:rafi" and kick["status"] == "needs_contact"
     assert kick["vod_url"] == "https://kick.com/rafi/videos/abc-1"
 
-    # The trial clip uses the platform's own VOD URL and a Spike source of the same kind
-    assert service.queue_trial_clips() == 1
+    # The sample clip uses the platform's own VOD URL and a Spike source of the same kind
+    db.update_lead(tw["id"], status="replied")
+    assert service.request_clips([tw["id"]]) == 1 and service.queue_trial_clips() == 1
     t = db.get_lead(tw["id"])
     job, src = spike_db.get_job(t["spike_video_id"]), spike_db.get_source(t["spike_source_id"])
     assert job["url"] == "https://www.twitch.tv/videos/555" and job["external_id"] == "555"
@@ -825,3 +835,17 @@ def test_twitch_routes(tw, monkeypatch):
     r = client.post("/outreach/settings", data={"form": "twitch", "twitch_enabled": "1", "twitch_sample_hours": "7"},
                     headers=h, follow_redirects=False)
     assert "TWITCH_CLIENT_ID" in urllib_unquote(r.headers["location"])
+
+
+def test_finder_records_done_and_failed(env, monkeypatch):
+    from src.outreach import daemon
+    db.set_settings({"run_now": 1})
+    daemon.run_finders(db.get_settings())
+    s = db.get_settings()
+    assert s["finder_status"] == "done" and s["run_now"] == 0 and s["finder_finished_at"]
+    def boom(settings):
+        raise RuntimeError("quota API down")
+    monkeypatch.setattr(youtube, "run_finder", boom)
+    daemon.run_finders(db.get_settings())
+    s = db.get_settings()
+    assert s["finder_status"] == "failed" and "quota API down" in s["finder_error"]

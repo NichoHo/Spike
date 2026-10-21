@@ -60,6 +60,20 @@ templates.env.globals["static_v"] = lambda name: int((STATIC_DIR / name).stat().
 from src import config as _config, gemini_budget as _gemini_budget, layout_ai as _layout_ai  # noqa: E402  (Auto layout daily call budget, shown on the pickers)
 templates.env.globals["layout_ai_left"] = _layout_ai.calls_left
 templates.env.globals["layout_ai_limit"] = lambda: _gemini_budget.limit(_config.LAYOUT_GEMINI_MODEL)
+
+
+def _nav_badges() -> dict:
+    """Sidebar counts with a marker of the newest item. The page compares the marker with what this browser
+    last saw on that page and shows a dot when there is something new (app.js)."""
+    from src.db import list_review_clips
+    from src.outreach import db as outreach_db
+    clips = list_review_clips(status="ready")
+    leads, latest = outreach_db.attention()
+    return {"review": (len(clips), f"{max((c['id'] for c in clips), default=0):012d}" if clips else ""),
+            "outreach": (leads, latest)}
+
+
+templates.env.globals["nav_badges"] = _nav_badges
 app.state.templates = templates
 
 # Mount static files

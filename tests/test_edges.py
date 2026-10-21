@@ -57,16 +57,19 @@ def test_end_extends_while_audio_stays_high_then_pads():
     assert capped["end_s"] <= 11.9 + 1 + 0.8 + 1e-6
 
 
-def test_cut_lines_become_intervals_and_payoff_is_never_cut():
-    e = compute_edges(lines(), judge(cut_lines=[4, 5]), PRESET, [])
-    assert e["cuts"] == [[8.0, 9.5]]
-    assert abs(e["net_dur"] - ((e["end_s"] - e["start_s"]) - 1.5)) < 1e-6
-    # cutting most of the clip is ignored
-    e2 = compute_edges(lines(), judge(cut_lines=[2, 3, 4]), PRESET, [])
-    assert e2["cuts"] == []
+def test_judge_cut_lines_are_ignored():
+    # cut_lines removed rant build-ups in real clips; a single clip plays every line between its edges
+    e = compute_edges(lines(), judge(cut_lines=[4]), PRESET, [])
+    assert e["cuts"] == [] and abs(e["net_dur"] - (e["end_s"] - e["start_s"])) < 1e-6
 
 
 def test_cuts_merge_with_silence_cuts_into_keep_intervals():
     cuts = merge_cut_intervals([(10.0, 12.0)], [(11.0, 14.0), (2.0, 2.1), (30.0, 40.0)], clip_start=5.0, clip_end=20.0)
     assert cuts == [(10.0, 14.0)]  # overlap merged, tiny and out-of-window cuts dropped
     assert compute_keep_intervals(5.0, 20.0, cuts) == [(5.0, 10.0), (14.0, 20.0)]
+
+
+def test_slivers_between_cuts_are_cut_too():
+    # a 0.3 s keep between two cuts is breath, not content; a 1 s keep stays
+    assert merge_cut_intervals([(10.0, 12.0), (12.3, 14.0)], clip_start=5.0, clip_end=20.0) == [(10.0, 14.0)]
+    assert merge_cut_intervals([(10.0, 12.0), (13.0, 14.0)], clip_start=5.0, clip_end=20.0) == [(10.0, 12.0), (13.0, 14.0)]

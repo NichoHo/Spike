@@ -9,13 +9,20 @@
     </button>
   </div>
 
+  {% set badges = nav_badges() %}
+  {# Count, plus a dot when something arrived since this browser last opened the page (app.js) #}
+  {% macro nav_badge(key) -%}
+    {%- set count, marker = badges[key] -%}
+    {%- if count -%}
+      <span class="nav-item__count">{{ count }}</span><span class="nav-item__dot" data-nav-dot hidden><span class="visually-hidden">New</span></span>
+    {%- endif -%}
+  {%- endmacro %}
+
   <nav class="stack stack--sm" aria-label="Main Navigation">
-    <a href="/" class="nav-item {% if active_nav == 'review' %}is-active{% endif %}" {% if active_nav == 'review' %}aria-current="page"{% endif %}>
+    <a href="/" class="nav-item {% if active_nav == 'review' %}is-active{% endif %}" {% if active_nav == 'review' %}aria-current="page"{% endif %} data-nav-key="review" data-nav-marker="{{ badges.review[1] }}">
       {{ ui.icon("film-strip", 16) }}
       <span>Review</span>
-      {% if review_count is defined and review_count > 0 %}
-        <span class="nav-item__count">{{ review_count }}</span>
-      {% endif %}
+      {{ nav_badge("review") }}
     </a>
 
     <a href="/new" class="nav-item {% if active_nav == 'new' %}is-active{% endif %}" {% if active_nav == 'new' %}aria-current="page"{% endif %}>
@@ -38,9 +45,10 @@
       <span>Posts</span>
     </a>
 
-    <a href="/outreach" class="nav-item {% if active_nav == 'outreach' %}is-active{% endif %}" {% if active_nav == 'outreach' %}aria-current="page"{% endif %}>
+    <a href="/outreach" class="nav-item {% if active_nav == 'outreach' %}is-active{% endif %}" {% if active_nav == 'outreach' %}aria-current="page"{% endif %} data-nav-key="outreach" data-nav-marker="{{ badges.outreach[1] }}">
       {{ ui.icon("envelope-simple", 16) }}
       <span>Outreach</span>
+      {{ nav_badge("outreach") }}
     </a>
 
     {% if user and user.role == 'admin' %}

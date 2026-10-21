@@ -147,61 +147,63 @@ def fetch_third_party_emotes(channel_id: Optional[str] = None) -> Dict[str, List
     return {k: sorted(list(v)) for k, v in emotes_by_family.items()}
 
 
-def fetch_twitch_community_clips(
-    broadcaster_id: str,
-    started_at: Optional[str] = None,
-    ended_at: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+def fetch_twitch_community_clips(vod_id: str, max_pages: int = 10) -> List[Dict[str, Any]]:
     """
-    Fetch community clips via Twitch Helix Get Clips endpoint (Blueprint §5, §6.1).
+    Fetch community clips of one VOD via Twitch Helix (Blueprint §5, §6.1).
+    Helix filters clips by broadcaster and creation time, not by VOD: the VOD gives its owner and start time,
+    clips made from then on are paged through, and only clips cut from this VOD are kept.
     Requires valid client_id and client_secret in .env.
     """
-    if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET or TWITCH_CLIENT_ID.startswith("your_"):
+    vod_id = vod_id.lstrip("v")
+    if not vod_id.isdigit() or not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET or TWITCH_CLIENT_ID.startswith("your_"):
         return []
 
     try:
         # Acquire app access token
-        token_url = "https://id.twitch.tv/oauth2/token"
         data = urllib.parse.urlencode({
             "client_id": TWITCH_CLIENT_ID,
             "client_secret": TWITCH_CLIENT_SECRET,
             "grant_type": "client_credentials",
         }).encode("utf-8")
-        req = urllib.request.Request(token_url, data=data, method="POST")
+        req = urllib.request.Request("https://id.twitch.tv/oauth2/token", data=data, method="POST")
         with urllib.request.urlopen(req, timeout=8) as r:
-            token_resp = json.loads(r.read().decode())
-        token = token_resp.get("access_token")
+            token = json.loads(r.read().decode()).get("access_token")
         if not token:
             return []
+        headers = {"Client-ID": TWITCH_CLIENT_ID, "Authorization": f"Bearer {token}", "User-Agent": "Mozilla/5.0"}
 
-        headers = {
-            "Client-ID": TWITCH_CLIENT_ID,
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "Mozilla/5.0"
-        }
-        params = {"broadcaster_id": broadcaster_id, "first": 100}
-        if started_at:
-            params["started_at"] = started_at
-        if ended_at:
-            params["ended_at"] = ended_at
+        def helix(path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+            url = f"https://api.twitch.tv/helix/{path}?{urllib.parse.urlencode(params)}"
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=8) as resp:
+                return json.loads(resp.read().decode())
 
-        clips_url = f"https://api.twitch.tv/helix/clips?{urllib.parse.urlencode(params)}"
-        req2 = urllib.request.Request(clips_url, headers=headers)
-        with urllib.request.urlopen(req2, timeout=8) as r2:
-            clips_resp = json.loads(r2.read().decode())
+        vods = helix("videos", {"id": vod_id}).get("data") or []
+        if not vods:
+            return []
+        params = {"broadcaster_id": vods[0]["user_id"], "started_at": vods[0]["created_at"], "first": 100}
 
         clips = []
-        for item in clips_resp.get("data", []):
-            clips.append({
-                "id": item.get("id"),
-                "url": item.get("url"),
-                "vod_offset": item.get("vod_offset"),
-                "creator_id": item.get("creator_id"),
-                "view_count": item.get("view_count", 0),
-                "is_featured": item.get("is_featured", False),
-                "duration": item.get("duration", 0.0),
-                "title": item.get("title", ""),
-            })
+        for _ in range(max_pages):  # ponytail: 1000 clips max; the most-viewed come first
+            page = helix("clips", params)
+            for item in page.get("data", []):
+                if item.get("video_id") != vod_id:
+                    continue
+                clips.append({
+                    "id": item.get("id"),
+                    "url": item.get("url"),
+                    "vod_offset": item.get("vod_offset"),
+                    "creator_id": item.get("creator_id"),
+                    "view_count": item.get("view_count", 0),
+                    "is_featured": item.get("is_featured", False),
+                    "duration": item.get("duration", 0.0),
+                    "title": item.get("title", ""),
+                    "created_at": item.get("created_at"),
+                    "vod_created_at": vods[0]["created_at"],  # with created_at, tells a live clip from a VOD clip
+                })
+            cursor = (page.get("pagination") or {}).get("cursor")
+            if not cursor:
+                break
+            params["after"] = cursor
         return clips
     except Exception as e:
         print(f"  [stage 4] Note: Helix community clips call: {e}")
@@ -238,8 +240,7 @@ def run_stage4_crowd(video_dir: Path, meta: Dict[str, Any]) -> Dict[str, Any]:
             with open(clips_path, "r", encoding="utf-8") as f:
                 clips = json.load(f)
         else:
-            broadcaster_id = str(meta.get("uploader_id") or meta.get("id") or "")
-            clips = fetch_twitch_community_clips(broadcaster_id)
+            clips = fetch_twitch_community_clips(str(meta.get("id") or ""))
             with open(clips_path, "w", encoding="utf-8") as f:
                 json.dump(clips, f, indent=2)
 

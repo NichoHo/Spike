@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initToasts();
   initDialogs();
   initDropzones();
+  initClaudeApproval();
 });
 
 // ── Hover/Focus Video Previews for Clip Cards (DESIGN.md §9.10) ──────────────
@@ -624,3 +625,60 @@ document.addEventListener("submit", async (e) => {
   form.requestSubmit(sub || undefined);
   form._requirementsOk = false;
 }, true);
+
+// ── Sidebar "new" dots ───────────────────────────────────────────────────────
+// Each counted nav item carries a marker of its newest item. Opening that page stores the marker in this
+// browser; elsewhere a newer marker shows the yellow dot. Storage can be blocked: then no dots, no errors.
+document.querySelectorAll("[data-nav-marker]").forEach((link) => {
+  const key = "spike-seen-" + link.dataset.navKey;
+  const marker = link.dataset.navMarker;
+  const dot = link.querySelector("[data-nav-dot]");
+  try {
+    if (link.classList.contains("is-active")) localStorage.setItem(key, marker);
+    else if (dot && marker > (localStorage.getItem(key) || "")) dot.hidden = false;
+  } catch (e) { /* storage unavailable */ }
+});
+
+// ── Claude fallback approval ─────────────────────────────────────────────────
+// A pipeline job paused on "use the Claude plan?" waits for an answer here. Polled on every page.
+function initClaudeApproval() {
+  const dlg = document.getElementById("claude-approval-dialog");
+  if (!dlg) return;
+  let current = null;
+  const poll = async () => {
+    if (document.hidden) return;
+    try {
+      const res = await fetch("/api/claude-approval");
+      if (!res.ok) return;
+      const req = (await res.json()).request;
+      if (!req) {
+        current = null;
+        if (dlg.open) dlg.close();
+        return;
+      }
+      if (current === req.id && dlg.open) return;
+      current = req.id;
+      dlg.querySelector("[data-claude-approval-label]").textContent = req.label;
+      dlg.querySelector("[data-claude-approval-skip]").checked = false;
+      if (!dlg.open) dlg.showModal();
+    } catch (e) {}
+  };
+  dlg.querySelectorAll("[data-claude-approval-answer]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!current) return;
+      const approve = btn.dataset.claudeApprovalAnswer === "approve";
+      const skip = dlg.querySelector("[data-claude-approval-skip]").checked;
+      try {
+        await fetch("/api/claude-approval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: current, approve: approve, skip_today: approve && skip }),
+        });
+      } catch (e) {}
+      dlg.close();
+      showToast(approve ? "Running on Claude." : "Denied. The job will stop.", approve ? "success" : "danger");
+    });
+  });
+  poll();
+  setInterval(poll, 3000);
+}

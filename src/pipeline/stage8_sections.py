@@ -28,7 +28,7 @@ def _fetch_range(meta: Dict[str, Any], sections_dir: Path, stem: str, pad_st: fl
             "-ss", str(pad_st),
             "-to", str(pad_et),
             "-i", local_path,
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
             "-c:a", "aac", "-b:a", "128k",
             str(out_file)
         ]
@@ -36,7 +36,10 @@ def _fetch_range(meta: Dict[str, Any], sections_dir: Path, stem: str, pad_st: fl
     else:
         # Remote URL section download via yt-dlp
         ydl_opts = {
-            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            # Highest resolution up to 1440p, whatever the container: the old mp4-only filter could settle for a
+            # low progressive stream. Crops and zooms upscale, so source pixels matter.
+            "format": "bv*+ba/b",
+            "format_sort": ["res:1440", "fps"],
             "merge_output_format": "mp4",
             "outtmpl": str(sections_dir / f"{stem}.%(ext)s"),
             "download_ranges": yt_dlp.utils.download_range_func(None, [(pad_st, pad_et)]),
@@ -55,7 +58,7 @@ def _fetch_range(meta: Dict[str, Any], sections_dir: Path, stem: str, pad_st: fl
                 "-ss", str(pad_st),
                 "-to", str(pad_et),
                 "-i", video_url,
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                 "-c:a", "aac",
                 str(out_file)
             ]
