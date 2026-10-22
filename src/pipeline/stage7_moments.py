@@ -51,29 +51,30 @@ from src.music import list_all_tracks, track_catalog_for_llm
 from src.profile import build_episodes, concept_terms, episode_of, fix_streamer, get_preset, profile_block, streamer_name
 
 
-_capped: Dict[Tuple[str, int], str] = {}  # (model, key index) -> day that key's daily quota ran out. ponytail: in memory, a restart retries each key once
-
-
 class _MultiKeyClient:
     """genai.Client lookalike over every key in GEMINI_API_KEY. Uses the first key until its daily quota for a model
-    is gone, then the next. When every key is out, the last error is raised as before."""
+    is gone, then the next. When every key is out, the last error is raised as before.
+
+    Per-key exhaustion is persisted in the shared settings table (gemini_budget.key_capped / cap_key), so a capped
+    key stays capped until the day resets even across a restart (Option A), and every Tailscale user's process
+    reads the same state from the one shared DB -- no key is probed twice once it is known to be out."""
 
     def __init__(self, keys: List[str]):
+        self._keys = list(keys)
         self._clients = [genai.Client(api_key=k) for k in keys]
         self.models = self
 
     def generate_content(self, model: str, **kwargs: Any) -> Any:
-        day = gemini_budget._today()
-        live = [i for i in range(len(self._clients)) if _capped.get((model, i)) != day] or [0]
+        live = [i for i in range(len(self._clients)) if not gemini_budget.key_capped(model, self._keys[i])] or [0]
         for n, i in enumerate(live):
             try:
                 return self._clients[i].models.generate_content(model=model, **kwargs)
             except Exception as e:
-                out = _daily_cap(e)
-                if out:
-                    _capped[(model, i)] = day
-                if not out or n == len(live) - 1:
-                    raise
+                if _daily_cap(e):
+                    gemini_budget.cap_key(model, self._keys[i])
+                    if n < len(live) - 1:
+                        continue
+                raise
 
 
 def get_gemini_client() -> _MultiKeyClient:

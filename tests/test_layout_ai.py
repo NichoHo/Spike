@@ -126,14 +126,14 @@ def test_second_gemini_key_takes_over_when_the_first_hits_its_daily_quota(monkey
             return "ok"
 
     monkeypatch.setattr(s7.genai, "Client", Fake)
-    monkeypatch.setattr(s7, "_capped", {})
     monkeypatch.setattr("src.config.GEMINI_API_KEY", "a, b")
     client = s7.get_gemini_client()
     assert client.models.generate_content(model="m", contents="x") == "ok"
     assert client.models.generate_content(model="m", contents="x") == "ok"
     assert used == ["a", "b", "b"]  # key a is skipped once its daily quota is gone
+    assert gb.key_capped("m", "a")  # the cap is persisted (survives a restart; shared across users)
     assert gb.limit("m") == 2 * config.GEMINI_DAILY_LIMIT  # two keys, two quotas
-    used.clear(); s7._capped.clear()
+    used.clear()
     monkeypatch.setattr("src.config.GEMINI_API_KEY", "slow, b")
     with pytest.raises(RuntimeError):
         s7.get_gemini_client().models.generate_content(model="m", contents="x")

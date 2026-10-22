@@ -4,6 +4,7 @@ through generate_content_with_retry (the only call site) is counted here. The li
 GEMINI_DAILY_LIMIT in config. Only the Auto layout checks it; the pipeline never blocks on it.
 """
 
+import hashlib
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -16,6 +17,32 @@ _lock = threading.Lock()
 def _today() -> str:
     """Gemini daily quotas reset at midnight Pacific. ponytail: fixed UTC-8, an hour late during daylight time."""
     return (datetime.now(timezone.utc) - timedelta(hours=8)).strftime("%Y-%m-%d")
+
+
+def _key_tag(api_key: str) -> str:
+    """A short, stable id for a key's value, so per-key caps follow the key even if .env order changes and never
+    store the key itself."""
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12]
+
+
+def _cap_key(model: str, api_key: str) -> str:
+    return f"gemini_key_capped:{model}:{_key_tag(api_key)}"
+
+
+def key_capped(model: str, api_key: str) -> bool:
+    """True when this key's daily quota for this model ran out today. Persisted in the shared settings table, so it
+    survives a restart (Option A: capped until midnight Pacific) and every Tailscale user's process reads the same
+    state from the one shared DB."""
+    return get_setting(_cap_key(model, api_key)) == _today()
+
+
+def cap_key(model: str, api_key: str) -> None:
+    """Mark this key's daily quota for this model used up for the rest of the day. Idempotent; never raises."""
+    try:
+        with _lock:
+            set_setting(_cap_key(model, api_key), _today())
+    except Exception:
+        pass
 
 
 def _key(model: str) -> str:
