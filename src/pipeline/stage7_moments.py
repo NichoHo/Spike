@@ -102,7 +102,22 @@ def claude_instead(contents: Any, config: Any, purpose: str, claude_model: str =
     except ClaudeError as e:
         print(f"  [claude] Fallback call failed: {e}")
         return None
-    return SimpleNamespace(text=json.dumps(out))
+    return SimpleNamespace(text=json.dumps(_unstring(out)))
+
+
+def _unstring(v: Any) -> Any:
+    """With the loose {"type": "object"} schema Claude returns every value as a string, lists included
+    ('["twitch", "kai"]'). Pydantic coerces "28" and "false" but not a list in a string, so decode those."""
+    if isinstance(v, dict):
+        return {k: _unstring(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_unstring(x) for x in v]
+    if isinstance(v, str) and v[:1] in "[{":
+        try:
+            return _unstring(json.loads(v))
+        except ValueError:
+            return v
+    return v
 
 
 def _retry_delay_s(err_str: str) -> float:

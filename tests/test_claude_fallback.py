@@ -62,3 +62,11 @@ def test_claude_instead_returns_gemini_shaped_text_and_skips_video(monkeypatch):
     assert s7.claude_instead(["video part", "text"], None, "watch a clip") is None
     monkeypatch.setattr(cf, "ask", lambda purpose, detail: False)
     assert s7.claude_instead("judge this", None, "score one moment") is None
+
+
+def test_list_values_returned_as_strings_are_decoded():
+    # Haiku under the loose schema: '["twitch", "kai"]' as a string, "[laughter]" stays text
+    out = s7._unstring({"hashtags": '["twitch", "kai"]', "score": "28", "punchline": "[laughter] no way",
+                        "moments": '[{"start_line": "3"}]'})
+    assert out["hashtags"] == ["twitch", "kai"] and out["moments"] == [{"start_line": "3"}]
+    assert out["punchline"] == "[laughter] no way" and out["score"] == "28"

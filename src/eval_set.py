@@ -161,15 +161,20 @@ def find_video_id(vod: str) -> Optional[int]:
 
 
 def run(only: Optional[str] = None) -> None:
-    from src.pipeline.runner import run_pipeline
-    for v in load_set():
-        if (only and v["vod"] != only) or find_video_id(v["vod"]):
-            continue
+    """Queue each unfinished eval VOD as a worker job, oldest VOD first (lower priority number runs later, so
+    priority falls along the list). The eval settings live on the job row: a worker that restarts and requeues
+    the job keeps them. Running the pipeline in this process instead let a restarted worker start a second copy
+    of the same VOD without the settings, so it saw the held-out clips."""
+    from src.db import register_video
+    todo = [v for v in load_set() if (not only or v["vod"] == only) and not find_video_id(v["vod"])]
+    for i, v in enumerate(todo):
         chat = EVAL_DIR / v["vod"] / "chat.json"
-        run_pipeline(f"https://www.twitch.tv/videos/{v['vod']}", source_settings={
+        vid = register_video("url", f"https://www.twitch.tv/videos/{v['vod']}", priority=len(todo) - i, settings={
             "max_process_s": v.get("slice_s"), "holdout_clips": True,
             **({"chat_file": str(chat)} if chat.exists() else {}),
         })
+        print(f"  queued {v['vod']} ({v['category']}) as video {vid}")
+    print("The worker runs them (start it with `py spike.py web` or `py spike.py worker`).")
 
 
 def score() -> Dict[str, Any]:
@@ -188,17 +193,19 @@ def score() -> Dict[str, Any]:
         vid = find_video_id(v["vod"])
         arms["spike"] = spike_preds(vid) if vid else None
         for tol_name, tol in TOLERANCES.items():
-            for arm, preds in arms.items():
-                if preds is None:
-                    continue
+            scored = {arm: score_ranking(preds, moments, tol) for arm, preds in arms.items() if preds is not None}
+            for arm, sc in scored.items():
                 cell = rows.setdefault(v["category"], {}).setdefault(f"{arm}@{tol_name}", {})
-                for k, val in score_ranking(preds, moments, tol).items():
+                for k, val in sc.items():
                     cell.setdefault(k, []).append(val)
+            if "spike" in scored and "chat" in scored:  # lift is paired: the same VODs on both sides
+                cell = rows[v["category"]][f"spike@{tol_name}"]
+                cell.setdefault("lift", []).append(scored["spike"]["recall@10"] - scored["chat"]["recall@10"])
             rand = [score_ranking(random_preds(dur, s), moments, tol) for s in range(20)]
             cell = rows.setdefault(v["category"], {}).setdefault(f"random@{tol_name}", {})
             for k in rand[0]:
                 cell.setdefault(k, []).append(sum(r[k] for r in rand) / len(rand))
-    return {cat: {arm: {k: sum(x) / len(x) for k, x in m.items()} | {"n": len(next(iter(m.values())))}
+    return {cat: {arm: {k: sum(x) / len(x) for k, x in m.items()} | {"n": len(m["recall@10"])}
                   for arm, m in arms.items()} for cat, arms in rows.items()}
 
 
@@ -208,12 +215,11 @@ def print_report(result: Dict[str, Any]) -> None:
         print(f"{'category':<16}{'arm':<8}{'n':>3}{'HIT@1':>8}{'R@5':>7}{'R@10':>7}{'NDCG@10':>9}{'lift R@10 vs chat':>19}")
         macro: Dict[str, List[float]] = {}
         for cat, arms in sorted(result.items()):
-            chat = arms.get(f"chat@{tol}", {}).get("recall@10")
             for arm in ("spike", "chat", "random"):
                 m = arms.get(f"{arm}@{tol}")
                 if not m:
                     continue
-                lift = f"{m['recall@10'] - chat:+.3f}" if chat is not None and arm == "spike" else ""
+                lift = f"{m['lift']:+.3f}" if "lift" in m else ""
                 print(f"{cat:<16}{arm:<8}{m['n']:>3}{m['hit@1']:>8.2f}{m['recall@5']:>7.2f}{m['recall@10']:>7.2f}{m['ndcg@10']:>9.3f}{lift:>19}")
                 macro.setdefault(arm, []).append(m["recall@10"])
         print("macro R@10: " + ", ".join(f"{a} {sum(x) / len(x):.3f}" for a, x in macro.items()))

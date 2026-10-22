@@ -904,10 +904,15 @@ def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[
             """,
             tuple(video_ids or ()),
         ).fetchall()
-    out: Dict[int, List[Dict[str, Any]]] = {}
-    for r in rows:
-        out.setdefault(r["video_id"], []).append(dict(r))
-    return out
+    # Moments that mostly overlap each other are one moment: keep the one with a render job, else the higher score.
+    # ponytail: O(n²) per video, fine for tens of candidates
+    kept: Dict[int, List[Dict[str, Any]]] = {}
+    for r in sorted(map(dict, rows), key=lambda m: (m["render_status"] is None, -(m["llm_score"] or 0), m["start_s"])):
+        same = kept.setdefault(r["video_id"], [])
+        if not any(min(k["end_s"], r["end_s"]) - max(k["start_s"], r["start_s"])
+                   > 0.5 * min(k["end_s"] - k["start_s"], r["end_s"] - r["start_s"]) for k in same):
+            same.append(r)
+    return {vid: sorted(ms, key=lambda m: m["start_s"]) for vid, ms in kept.items()}
 
 
 def enqueue_candidate_render(candidate_id: int, user_id: Optional[int] = None) -> bool:

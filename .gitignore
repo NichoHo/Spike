@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 data/
 tools/
+.kiro/
 phase0/openshorts/
 phase0/*.m4a
 phase0/*.tflite

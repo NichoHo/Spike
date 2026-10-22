@@ -77,7 +77,7 @@
           </summary>
           {% for m in group.moments %}
           <div class="moment-row">
-            {{ ui.time_chip(group.video.url, m.start_s) }}
+            {{ ui.time_chip(group.video.url, m.start_s, end=m.end_s) }}
             <div class="moment-row__title">
               {{ m.title or 'Untitled moment' }}
               {% if m.status_reason %}<span class="moment-row__why">{{ m.status_reason }}</span>{% endif %}

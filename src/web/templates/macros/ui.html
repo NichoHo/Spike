@@ -29,13 +29,14 @@
 {%- endmacro %}
 
 {# Stream time of a moment, linked to the source at that second when the source has a public page #}
-{% macro time_chip(url, seconds, inline=False) -%}
+{% macro time_chip(url, seconds, inline=False, end=None) -%}
   {%- set href = url | stream_link(seconds) -%}
   {%- set cls = "time-link" if inline else "time-chip" -%}
+  {%- set label = (seconds | stream_time) ~ ((" - " ~ (end | stream_time)) if end is not none else "") -%}
   {%- if href -%}
-    <a class="{{ cls }}" href="{{ href }}" target="_blank" rel="noopener" title="Open the source video at {{ seconds | stream_time }}" aria-label="Stream time {{ seconds | stream_time }}, opens the source video">{{ seconds | stream_time }}{{ _svg("arrow-up-right", 14) }}</a>
+    <a class="{{ cls }}" href="{{ href }}" target="_blank" rel="noopener" title="Open the source video at {{ seconds | stream_time }}" aria-label="Stream time {{ label }}, opens the source video">{{ label }}{{ _svg("arrow-up-right", 14) }}</a>
   {%- else -%}
-    <span class="{{ cls }}" title="Position in the source video">{{ seconds | stream_time }}</span>
+    <span class="{{ cls }}" title="Position in the source video">{{ label }}</span>
   {%- endif -%}
 {%- endmacro %}
 

@@ -73,6 +73,7 @@ def test_review_page_shows_stream_time_and_other_moments(clip):
     assert 'href="' + YT + '&amp;t=105s"' in html or YT + "&t=105s" in html   # 1:45 links to the source
     assert ">1:45" in html
     assert "Other moments (1)" in html and "Quiet bit" in html and "raw score 58 below 65" in html
+    assert "15:00 - 15:30" in html             # the moment shows its end, not just its start
     assert f'action="/candidates/{clip["low"]}/render"' in html
 
 
@@ -84,6 +85,10 @@ def test_other_moments_skip_rendered_and_run_earliest_first(clip):
     ids = [m["id"] for m in list_other_moments([clip["video"]])[clip["video"]]]
     assert dupe not in ids                      # 7 of its 8 s are the rendered clip
     assert ids == [early, clip["low"]]          # stream order, not score order
+    twin = insert_candidate(clip["video"], {**base, "start_s": 302.0, "end_s": 318.0, "llm_score": 55, "title": "Early, again"})
+    near = insert_candidate(clip["video"], {**base, "start_s": 316.0, "end_s": 340.0, "llm_score": 30, "title": "Just after"})
+    ids = [m["id"] for m in list_other_moments([clip["video"]])[clip["video"]]]
+    assert ids == [twin, near, clip["low"]]     # mostly overlapping collapses to the higher score; a small overlap stays
 
 
 def test_clip_page_has_zoom_cut_and_editor_controls(clip):
