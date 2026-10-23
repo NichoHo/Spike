@@ -86,10 +86,6 @@
     </div>
 
     <div class="player-actions">
-      <a href="/clips/{{ clip.id }}/post" class="btn btn--ghost btn--sm">
-        {{ ui.icon("paper-plane-tilt", 14) }}
-        <span>Post</span>
-      </a>
       <a id="btn-download" href="/clips/{{ clip.id }}/download" class="btn btn--ghost btn--sm">
         {{ ui.icon("download-simple", 14) }}
         <span>Download</span>
@@ -163,31 +159,24 @@
       </div>
     </form>
 
-    <!-- Re-render Form -->
+    <!-- Re-render form: groups in the order an editor works, timing first -->
     <form method="post" action="/clips/{{ clip.id }}/rerender" class="card" id="rerender-form">
       <div class="card__header">
-        <h3 class="card__title">Edit & Re-render</h3>
-        <p class="card__description">Adjust trim boundaries, video framing, captions, or hook text.</p>
+        <h3 class="card__title">Edit &amp; re-render</h3>
+        <p class="card__description">Changes here apply when you re-render.</p>
       </div>
 
-      <div class="card__body stack">
+      <div class="card__body edit-groups">
         <input type="hidden" name="zooms" id="zooms-field">
         <input type="hidden" name="cuts" id="cuts-field">
         <input type="hidden" name="concept" id="f-concept">
         <input type="hidden" name="segments" id="f-segments">
         <input type="hidden" name="overlay" id="f-overlay">
-        <input type="hidden" name="theme" id="f-theme">
         <input type="hidden" name="concept_source" id="f-concept-source">
 
-        <!-- Concept: a section of its own, next to Layout (not inside it) -->
-        <section class="field" id="concept-section" aria-labelledby="concept-label">
-          <div class="row" style="gap: var(--space-2);">
-            <span class="field__label" id="concept-label">Concept</span>
-            <span class="badge badge--accent" id="concept-ai-tag" hidden>AI pick</span>
-          </div>
-          <div class="segmented" role="radiogroup" aria-labelledby="concept-label" id="concept-radios">
-            {% for key, label in concepts %}<input type="radio" id="concept-{{ key }}" name="concept_choice" value="{{ key }}"><label for="concept-{{ key }}">{{ label }}</label>{% endfor %}
-          </div>
+        <!-- Story, POV or countdown content. The concept itself is set when the clip is made. -->
+        <section class="edit-group" id="concept-section" aria-labelledby="concept-label">
+          <h4 class="edit-group__title" id="concept-label">{{ dict(concepts)[concept] }}</h4>
           <p class="field__help" id="concept-help"></p>
           <p class="small" id="concept-note" role="status" aria-live="polite"></p>
 
@@ -205,166 +194,223 @@
             </div>
           </div>
 
-          <div id="panel-story" class="stack stack--sm" hidden>
+          <div id="panel-story" class="stack" hidden>
             <ol class="seg-list" id="story-list" aria-label="Story segments"></ol>
             <div class="field">
-              <label class="field__label" for="story-skip">Skip card text</label>
-              <input type="text" id="story-skip" class="input" maxlength="60" autocomplete="off" placeholder="3 goals later…">
+              <label class="field__label" for="story-skip">Time-skip card</label>
+              <input type="text" id="story-skip" class="input" maxlength="60" autocomplete="off" placeholder="3 goals later…" aria-describedby="story-skip-help">
+              <p class="field__help" id="story-skip-help">A 1 s full-screen card between the setup and the payoff. Empty shows “later”.</p>
             </div>
             <div class="field">
               <label class="field__label" for="story-quote">Callback quote</label>
-              <input type="text" id="story-quote" class="input" maxlength="200" autocomplete="off" placeholder="The claim from the setup, shown on the payoff…">
+              <input type="text" id="story-quote" class="input" maxlength="200" autocomplete="off" placeholder="I never lose to this guy" aria-describedby="story-quote-help">
+              <p class="field__help" id="story-quote-help">The claim from the setup, shown again for 1.5 s at the payoff's peak so the irony lands. Empty shows nothing.</p>
             </div>
-            <label class="switch-row"><input type="checkbox" class="switch" role="switch" id="story-foreshadow"><span>Foreshadow: open with a 0.6 s flash of the payoff</span></label>
+            <div class="field">
+              <label class="switch-row"><input type="checkbox" class="switch" role="switch" id="story-foreshadow" aria-describedby="story-fs-help"><span>Open with a flash of the payoff</span></label>
+              <p class="field__help" id="story-fs-help">Starts the clip with 0.6 s of the payoff's peak, then the setup. Best when the setup is calm.</p>
+            </div>
           </div>
 
           <div id="panel-top" class="stack stack--sm" hidden>
-            <div class="field">
-              <label class="field__label" for="top-theme">Theme</label>
-              <input type="text" id="top-theme" class="input" maxlength="100" autocomplete="off" placeholder="Every goal Kvaratskhelia scored on Speed…">
-            </div>
             <ol class="seg-list" id="top-list" aria-label="Countdown entries, weakest first"></ol>
           </div>
 
           <div class="row" id="concept-pick-row" hidden>
-            <button type="button" class="btn btn--secondary btn--sm" id="concept-pick">Pick moments</button>
+            <button type="button" class="btn btn--secondary btn--sm" id="concept-pick">Pick other moments</button>
           </div>
         </section>
-        <!-- Trim Section -->
-        <div class="field" data-for="single">
-          <label class="field__label">Trim boundaries (seconds)</label>
-          <div class="row" style="flex-wrap: wrap; gap: var(--space-4);">
-            <div class="row">
-              <span class="small muted">Start:</span>
-              <input type="number" step="0.1" name="start_s" id="input-start-s" class="input input--mono input--short" value="{{ clip.trim_start_s or clip.orig_start_s or 0 }}">
-              <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-start-s', -0.5)">-0.5</button>
-              <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-start-s', 0.5)">+0.5</button>
-            </div>
 
-            <div class="row">
-              <span class="small muted">End:</span>
-              <input type="number" step="0.1" name="end_s" id="input-end-s" class="input input--mono input--short" value="{{ clip.trim_end_s or clip.orig_end_s or 30 }}">
-              <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-end-s', -0.5)">-0.5</button>
-              <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-end-s', 0.5)">+0.5</button>
+        <!-- Timing: where it starts and ends, and what is cut out -->
+        <section class="edit-group" data-for="single" aria-labelledby="g-timing">
+          <h4 class="edit-group__title" id="g-timing">Timing</h4>
+          <div class="field">
+            <span class="field__label">Start and end</span>
+            <div class="row" style="flex-wrap: wrap; gap: var(--space-4);">
+              <div class="row">
+                <label class="small muted" for="ts-start">Start</label>
+                <input type="hidden" name="start_s" id="input-start-s" value="{{ clip.trim_start_s or clip.orig_start_s or 0 }}">
+                <input type="text" id="ts-start" data-ts-for="input-start-s" class="input input--mono input--short" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="ts-help">
+                <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-start-s', -1)" aria-label="Start 1 s earlier">-1 s</button>
+                <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-start-s', 1)" aria-label="Start 1 s later">+1 s</button>
+              </div>
+              <div class="row">
+                <label class="small muted" for="ts-end">End</label>
+                <input type="hidden" name="end_s" id="input-end-s" value="{{ clip.trim_end_s or clip.orig_end_s or 30 }}">
+                <input type="text" id="ts-end" data-ts-for="input-end-s" class="input input--mono input--short" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="ts-help">
+                <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-end-s', -1)" aria-label="End 1 s earlier">-1 s</button>
+                <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-end-s', 1)" aria-label="End 1 s later">+1 s</button>
+              </div>
+            </div>
+            <p class="field__help" id="ts-help">Stream time, like 36:18 or 1:02:05.</p>
+          </div>
+
+          <div class="field">
+            <span class="field__label">Pause trim</span>
+            <div class="row" style="gap: var(--space-2); flex-wrap: wrap;">
+              <label class="switch-row">
+                <input type="checkbox" name="silence_trim" class="switch" role="switch" value="1" id="switch-pause" {% if clip.silence_trim == 1 %}checked{% endif %}>
+                <span>Cut pauses longer than</span>
+              </label>
+              <input type="number" name="silence_trim_s" id="input-pause-s" class="input input--mono input--short" min="0.5" max="5" step="0.1" value="{{ '%.1f' % silence_trim_s }}" aria-label="Shortest pause to cut, in seconds">
+              <span class="small muted">s</span>
+            </div>
+            <p class="field__help">Removes dead air between words and keeps a short breath. Default 1.2 s; lower is snappier.</p>
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <span class="field__label">Cuts</span>
+              <span class="small muted" id="cut-count"></span>
+              <button type="button" class="btn btn--secondary btn--sm" id="btn-cuts" popovertarget="cuts-popover">Edit cuts</button>
             </div>
           </div>
-        </div>
+        </section>
 
-        <!-- Cuts: stretches removed from the clip. The same list "Ask the editor" writes. -->
-        <div class="field" data-for="single">
-          <label class="field__label">Cuts</label>
-          <p class="field__help">Play the clip, mark where the part starts and ends, then cut it. Cuts skip while you preview and are applied on re-render.</p>
-          <div class="cut-marks">
-            <div class="cut-marks__readout"><span class="small muted">Start</span><span class="timecode-lg" id="mark-start-tc">-</span></div>
-            <button type="button" class="btn btn--secondary btn--sm" onclick="markCut('start')">Mark start</button>
-            <div class="cut-marks__readout"><span class="small muted">End</span><span class="timecode-lg" id="mark-end-tc">-</span></div>
-            <button type="button" class="btn btn--secondary btn--sm" onclick="markCut('end')">Mark end</button>
-            <button type="button" class="btn btn--primary btn--sm" id="btn-cut" onclick="cutThis()" disabled>Cut this part</button>
+        <!-- Framing: layout, mid-clip switches and zooms -->
+        <section class="edit-group" aria-labelledby="g-framing">
+          <h4 class="edit-group__title" id="g-framing">Framing</h4>
+          <div class="field">
+            <span class="field__label">Layout</span>
+            {{ ui.layout_picker('layout', clip.layout or 'split', clip.letterbox_style or 'blur', auto=true) }}
+            <p class="field__help">Auto lets the AI pick the layout and any switches again when you re-render, replacing the switches below.</p>
           </div>
-          <ol class="switch-list" id="cut-list" aria-live="polite"></ol>
-        </div>
 
-        <!-- Framing Layout -->
-        <div class="field">
-          <label class="field__label">Framing layout</label>
-          {{ ui.layout_picker('layout', clip.layout or 'split', clip.letterbox_style or 'blur', auto=true) }}
-          <p class="field__help">Auto lets the AI pick the layout and any mid-clip switches again when you re-render. It replaces the switches below.</p>
-        </div>
-
-        <!-- Layout switches: change framing partway through the clip -->
-        <div class="field" data-for="single">
-          <label class="field__label" for="switch-layout">Layout switches</label>
-          <p class="field__help">For streams that change mid-clip, e.g. a reaction ends and the streamer just talks. Play or scrub the clip to the moment, then add a switch. Times are positions in the clip player.</p>
-          <div class="switch-add">
-            <div class="switch-add__time">
-              <span class="small muted">Playhead</span>
-              <span class="timecode-lg" id="playhead-tc" aria-live="off">0:00.0</span>
+          <div class="field" data-for="single">
+            <div class="field-head">
+              <span class="field__label">Layout switches</span>
+              <span class="small muted" id="switch-count"></span>
+              <button type="button" class="btn btn--secondary btn--sm" id="btn-switches" popovertarget="switches-popover">Edit switches</button>
             </div>
-            <select id="switch-layout" class="select" aria-label="Layout to switch to">
-              <option value="face_track">Face track</option>
-              <option value="split">Split</option>
-              <option value="center">Center</option>
-              <option value="letterbox">Letterbox</option>
-            </select>
-            <button type="button" class="btn btn--secondary btn--sm" onclick="addSwitch()">
-              {{ ui.icon("plus", 14) }}
-              <span>Add switch here</span>
+            <p class="field__help">For streams that change mid-clip, like a reaction ending.</p>
+            <input type="hidden" name="layout_changes" id="layout-changes-field">
+          </div>
+
+          <div class="field" data-for="single">
+            <div class="field-head">
+              <span class="field__label">Zooms</span>
+              <span class="small muted" id="zoom-count"></span>
+              <button type="button" class="btn btn--secondary btn--sm" id="btn-zoom" popovertarget="zoom-popover">Edit zooms</button>
+            </div>
+            <p class="field__help">Punch in on the face at the funny moment.</p>
+          </div>
+        </section>
+
+        <!-- Text on the video -->
+        <section class="edit-group" aria-labelledby="g-text">
+          <h4 class="edit-group__title" id="g-text">Text</h4>
+          <div class="field" data-for="single story top3 top5">
+            <label class="field__label" for="field-hook-text">Hook title</label>
+            <input type="text" name="hook_text" id="field-hook-text" class="input" value="{{ clip.cand_hook or '' }}" maxlength="80" placeholder="Short funny summary of the clip…">
+            <label class="switch-row" style="margin-top: var(--space-2);">
+              <input type="checkbox" name="show_hook" class="switch" role="switch" value="1" {% if clip.show_hook == 1 %}checked{% endif %}>
+              <span>Show on video (top, first 2.5 s)</span>
+            </label>
+            <p class="field__help">Written by the AI. With Letterbox white bars on, this is the title above the video.</p>
+          </div>
+
+          <div class="field">
+            <span class="field__label">Caption style</span>
+            {{ ui.caption_picker('caption', clip.caption_style or 'bold_pop') }}
+            <input type="hidden" name="caption_text" id="caption-text-field" disabled>
+            <button type="button" class="btn btn--secondary btn--sm" id="btn-edit-captions" style="margin-top: var(--space-2); align-self: flex-start;" onclick="openCaptionEditor()">
+              {{ ui.icon("pencil-simple", 14) }}
+              <span>Edit caption text</span>
             </button>
           </div>
-          <ol class="switch-list" id="switch-list"></ol>
-          <input type="hidden" name="layout_changes" id="layout-changes-field">
-        </div>
+        </section>
 
-        <!-- Caption Style -->
-        <div class="field">
-          <label class="field__label">Caption style</label>
-          {{ ui.caption_picker('caption', clip.caption_style or 'bold_pop') }}
-          <input type="hidden" name="caption_text" id="caption-text-field" disabled>
-          <button type="button" class="btn btn--secondary btn--sm" id="btn-edit-captions" style="margin-top: var(--space-2);" onclick="openCaptionEditor()">
-            {{ ui.icon("pencil-simple", 14) }}
-            <span>Edit caption text</span>
-          </button>
-        </div>
-
-        <!-- Hook title: AI-written summary, editable, shown on the video only when switched on -->
-        <div class="field" data-for="single story top3 top5">
-          <label class="field__label" for="field-hook-text">Hook title</label>
-          <input type="text" name="hook_text" id="field-hook-text" class="input" value="{{ clip.cand_hook or '' }}" maxlength="80" placeholder="Short funny summary of the clip…">
-          <label class="switch-row" style="margin-top: var(--space-2);">
-            <input type="checkbox" name="show_hook" class="switch" role="switch" value="1" {% if clip.show_hook == 1 %}checked{% endif %}>
-            <span>Show on video (top, first 2.5 s)</span>
+        <!-- Background music. Every track has a preview button. -->
+        <section class="edit-group" data-for="single" aria-labelledby="g-music">
+          <h4 class="edit-group__title" id="g-music">Music</h4>
+          <label class="switch-row">
+            <input type="checkbox" name="music_enabled" class="switch" role="switch" value="1" id="switch-music" {% if clip.music_track %}checked{% endif %}>
+            <span>Background music, ducked under speech</span>
           </label>
-          <p class="field__help">Written by the AI. Edits are saved when you re-render. With Letterbox white bars on, this is the title above the video.</p>
-        </div>
-
-        <!-- Background Music (Phase 5) -->
-        <div class="field" data-for="single">
-          <label class="field__label">Background music</label>
-          <div class="stack" style="gap: var(--space-2);">
-            <label class="switch-row">
-              <input type="checkbox" name="music_enabled" class="switch" role="switch" value="1" id="switch-music" {% if clip.music_track %}checked{% endif %} onchange="document.getElementById('music-track-row').style.display = this.checked ? 'flex' : 'none';">
-                            <span>Ducked background music</span>
-            </label>
-            <div id="music-track-row" class="row" style="display: {% if clip.music_track %}flex{% else %}none{% endif %}; gap: var(--space-2); margin-top: var(--space-1);">
-              <span class="small muted" style="min-width: 80px;">Track:</span>
-              <select name="music_track" class="select" style="flex: 1;">
-                <option value="auto">Auto (by mood: {{ clip.mood or 'chill' }})</option>
-                {% for trk in music_tracks or [] %}
-                  <option value="{{ trk.path }}" title="{{ trk.use_for }}" {% if clip.music_track and (clip.music_track in trk.path or trk.stem in clip.music_track) %}selected{% endif %}>
-                    {{ trk.title }} ({{ trk.mood }}) · {{ trk.license }}
-                  </option>
-                {% endfor %}
-              </select>
+          {%- set ns = namespace(sel=none) %}
+          {%- for trk in music_tracks or [] %}{% if ns.sel is none and clip.music_track and (clip.music_track in trk.path or trk.stem in clip.music_track) %}{% set ns.sel = trk.path %}{% endif %}{% endfor %}
+          <div class="music-list" id="music-list" role="radiogroup" aria-label="Track" {% if not clip.music_track %}hidden{% endif %}>
+            <div class="music-row">
+              <input type="radio" name="music_track" id="mt-auto" value="auto" {% if ns.sel is none %}checked{% endif %}>
+              <label for="mt-auto"><span class="music-row__title">Auto</span><span class="music-row__desc">A {{ clip.mood or 'chill' }} track picked for the clip's mood</span></label>
             </div>
-            <p class="field__help">Sits at -22 dB under speech and ducks automatically when someone talks.</p>
-          </div>
-        </div>
-
-        <!-- Effects & Pacing (Phase 5) -->
-        <div class="field" data-for="single">
-          <label class="field__label">Effects & pacing</label>
-          <div class="stack" style="gap: var(--space-2);">
-            <label class="switch-row">
-              <input type="checkbox" name="silence_trim" class="switch" role="switch" value="1" {% if clip.silence_trim == 1 %}checked{% endif %}>
-                            <span>Silence trim (cut dead air pauses > 1.2s)</span>
-            </label>
-            <div class="row" style="gap: var(--space-3);">
-              <button type="button" class="btn btn--secondary btn--sm" id="btn-zoom" popovertarget="zoom-popover">Zoom</button>
-              <span class="small muted" id="zoom-count"></span>
+            {%- for trk in music_tracks or [] %}
+            <div class="music-row">
+              <input type="radio" name="music_track" id="mt-{{ loop.index }}" value="{{ trk.path }}" {% if ns.sel == trk.path %}checked{% endif %}>
+              <label for="mt-{{ loop.index }}"><span class="music-row__title">{{ trk.title }} <span class="badge">{{ trk.mood }}</span></span><span class="music-row__desc">{{ trk.use_for or trk.description }}</span></label>
+              <button type="button" class="btn btn--ghost btn--icon btn--sm" data-src="/media/music/{{ trk.rel_path|urlencode }}" aria-pressed="false" aria-label="Preview {{ trk.title }}">
+                <span class="js-mplay">{{ ui.icon("play", 14) }}</span><span class="js-mpause" hidden>{{ ui.icon("pause", 14) }}</span>
+              </button>
             </div>
-            <p class="field__help">Punch in on the face at the funny moment. No zooms means no zoom.</p>
+            {%- endfor %}
           </div>
-        </div>
+          <audio id="music-preview" preload="none"></audio>
+          <p class="field__help">Sits at -22 dB and ducks when someone talks. Tracks are CC BY; the credit is added to the copied caption.</p>
+        </section>
       </div>
 
       <div class="card__footer">
         <span class="card__footer-note">Version {{ clip.version or 1 }} · {% if clip.status == 'rendering' %}Rendering in the background. You can leave this page.{% else %}Renders in about a minute.{% endif %}</span>
-        <button type="submit" class="btn btn--secondary" {% if clip.status == 'rendering' %}disabled{% endif %} onclick="this.classList.add('is-loading')">
+        <button type="submit" class="btn btn--primary" {% if clip.status == 'rendering' %}disabled{% endif %} onclick="this.classList.add('is-loading')">
           {{ ui.icon("arrow-clockwise", 16) }}
           <span>Re-render clip</span>
         </button>
       </div>
     </form>
+
+    <!-- Layout switch editor. A manual popover like the cut and zoom editors. -->
+    <div id="switches-popover" class="zoom-pop" popover="manual" role="dialog" aria-labelledby="switches-pop-title">
+      <div class="zoom-pop__head">
+        <h3 class="zoom-pop__title" id="switches-pop-title">Layout switches</h3>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm" popovertarget="switches-popover" popovertargetaction="hide" aria-label="Close switch editor">{{ ui.icon("x", 14) }}</button>
+      </div>
+      <p class="field__help">Play or scrub the clip to the moment, then add a switch. Times are positions in the clip player.</p>
+      <div class="switch-add">
+        <div class="switch-add__time">
+          <span class="small muted">Playhead</span>
+          <span class="timecode-lg" id="playhead-tc" aria-live="off">0:00.0</span>
+        </div>
+        <select id="switch-layout" class="select" aria-label="Layout to switch to">
+          <option value="face_track">Face track</option>
+          <option value="split">Split</option>
+          <option value="center">Center</option>
+          <option value="letterbox">Letterbox</option>
+        </select>
+        <button type="button" class="btn btn--secondary btn--sm" onclick="addSwitch()">
+          {{ ui.icon("plus", 14) }}
+          <span>Add switch here</span>
+        </button>
+      </div>
+      <ol class="switch-list" id="switch-list"></ol>
+      <div class="zoom-pop__foot" style="margin-top: var(--space-4);">
+        <button type="button" class="btn btn--secondary" popovertarget="switches-popover" popovertargetaction="hide">Done</button>
+        <button type="button" class="btn btn--primary" onclick="applyPop('switches-popover')">Apply &amp; re-render</button>
+      </div>
+    </div>
+
+    <!-- Cut editor. A manual popover like the zoom editor, so the player stays usable while it is open. -->
+    <div id="cuts-popover" class="zoom-pop zoom-pop--wide" popover="manual" role="dialog" aria-labelledby="cuts-pop-title">
+      <div class="zoom-pop__head">
+        <h3 class="zoom-pop__title" id="cuts-pop-title">Cuts</h3>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm" popovertarget="cuts-popover" popovertargetaction="hide" aria-label="Close cut editor">{{ ui.icon("x", 14) }}</button>
+      </div>
+      <p class="field__help">Parts removed from the clip. Times count from the clip start as if nothing were cut. The preview skips new cuts; re-render to apply them.</p>
+      <div class="cut-marks">
+        <div class="cut-marks__readout"><span class="small muted">Start</span><span class="timecode-lg" id="mark-start-tc">-</span></div>
+        <button type="button" class="btn btn--secondary btn--sm" onclick="markCut('start')">Mark start</button>
+        <div class="cut-marks__readout"><span class="small muted">End</span><span class="timecode-lg" id="mark-end-tc">-</span></div>
+        <button type="button" class="btn btn--secondary btn--sm" onclick="markCut('end')">Mark end</button>
+        <button type="button" class="btn btn--primary btn--sm" id="btn-cut" onclick="cutThis()" disabled>Cut this part</button>
+      </div>
+      <ul class="zoom-list" id="cut-rows" aria-live="polite"></ul>
+      <h4 class="edit-group__title">Pause cuts</h4>
+      <p class="field__help" id="pause-note"></p>
+      <ul class="pause-list" id="pause-rows"></ul>
+      <div class="zoom-pop__foot" style="margin-top: var(--space-4);">
+        <button type="button" class="btn btn--secondary" popovertarget="cuts-popover" popovertargetaction="hide">Done</button>
+        <button type="button" class="btn btn--primary" onclick="applyPop('cuts-popover')">Apply &amp; re-render</button>
+      </div>
+    </div>
 
     <!-- Zoom editor. Manual popover: it stays open while you play and scrub the clip. -->
     <div id="zoom-popover" class="zoom-pop" popover="manual" role="dialog" aria-label="Zooms">
@@ -377,7 +423,7 @@
       <button type="button" class="btn btn--secondary btn--sm" onclick="zoomAdd()">{{ ui.icon("plus", 14) }}<span>Add zoom at playhead</span></button>
       <div class="zoom-pop__foot" style="margin-top: var(--space-4);">
         <span class="small muted">Re-renders the whole clip.</span>
-        <button type="button" class="btn btn--primary" onclick="applyZooms()">Apply &amp; re-render</button>
+        <button type="button" class="btn btn--primary" onclick="applyPop('zoom-popover')">Apply &amp; re-render</button>
       </div>
     </div>
 
@@ -506,6 +552,7 @@ function renderSwitches() {
     `<span>Switch to <strong>${LAYOUT_NAMES[sw.layout]}</strong></span>` +
     `<button type="button" class="btn btn--ghost btn--sm" onclick="removeSwitch(${i})" aria-label="Remove switch at ${tc(toClip(sw.t))}">Remove</button></li>`));
   list.innerHTML = rows.join('');
+  document.getElementById('switch-count').textContent = switches.length ? `${switches.length} switch${switches.length > 1 ? 'es' : ''}` : 'No switches';
   // The letterbox style toggle shows while any part of the clip uses Letterbox
   const lbUsed = baseLayout() === 'letterbox' || baseLayout() === 'auto' || switches.some((sw) => sw.layout === 'letterbox');
   document.getElementById('layout-letterbox-opt').style.display = lbUsed ? '' : 'none';
@@ -566,6 +613,9 @@ renderSwitches();
 const $ = (id) => document.getElementById(id);
 const BAKED_ZOOMS = {{ zooms | tojson }};
 const BAKED_CUTS = {{ manual_cuts | tojson }};
+const PAUSE_CUTS = {{ pause_cuts | tojson }};
+const PAUSE_ON = {{ (clip.silence_trim == 1) | tojson }}, PAUSE_S = {{ silence_trim_s | tojson }};
+const CLIP_END = {{ (clip.trim_end_s or clip.orig_end_s or 30) | tojson }};
 let zooms = BAKED_ZOOMS.map((z) => ({ ...z }));
 let cuts = BAKED_CUTS.map((c) => [...c]);
 let markS = null, markE = null;
@@ -664,7 +714,7 @@ $('edit-strip').addEventListener('keydown', (e) => {
 player.addEventListener('loadedmetadata', drawStrip);
 
 // Zoom editor
-function syncZooms() { $('zooms-field').value = JSON.stringify(zooms); $('zoom-count').textContent = zooms.length ? `${zooms.length} zoom${zooms.length > 1 ? 's' : ''}` : 'None'; drawStrip(); preview(); }
+function syncZooms() { $('zooms-field').value = JSON.stringify(zooms); $('zoom-count').textContent = zooms.length ? `${zooms.length} zoom${zooms.length > 1 ? 's' : ''}` : 'No zooms'; drawStrip(); preview(); }
 function renderZoomRows() {
   zooms.sort((a, b) => a.t - b.t);
   $('zoom-rows').innerHTML = zooms.length ? zooms.map((z, i) => `
@@ -693,17 +743,21 @@ function zoomUsePlayhead(i) { zooms[i].t = toSource(player.currentTime || 0); re
 function zoomDelete(i) { zooms.splice(i, 1); renderZoomRows(); }
 function zoomStrength(i, v) { zooms[i].scale = v; syncZooms(); }
 function zoomHold(i, el) { zooms[i].hold_s = r2(parseFloat(el.value)); el.nextElementSibling.textContent = `${zooms[i].hold_s.toFixed(1)} s`; syncZooms(); }
-function applyZooms() { $('zooms-field').value = JSON.stringify(zooms); $('zoom-popover').hidePopover(); $('rerender-form').requestSubmit(); }
-const pop = $('zoom-popover');
-pop.addEventListener('beforetoggle', (e) => { if (e.newState === 'open') renderZoomRows(); });
-pop.addEventListener('toggle', (e) => {
-  if (e.newState !== 'open') return;
-  // Place it under the Zoom button, kept inside the window once its real size is known
-  const r = $('btn-zoom').getBoundingClientRect();
-  pop.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - pop.offsetWidth - 16))}px`;
-  pop.style.top = `${Math.max(16, Math.min(r.bottom + 8, window.innerHeight - pop.offsetHeight - 16))}px`;
-});
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pop.matches(':popover-open')) pop.hidePopover(); });
+function applyPop(id) { $(id).hidePopover(); $('rerender-form').requestSubmit(); }
+// Zoom and cut editors open under their button, kept inside the window once their real size is known
+function wirePop(pop, btn, onOpen) {
+  pop.addEventListener('beforetoggle', (e) => { if (e.newState === 'open') onOpen(); });
+  pop.addEventListener('toggle', (e) => {
+    if (e.newState !== 'open') return;
+    const r = btn.getBoundingClientRect();
+    pop.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - pop.offsetWidth - 16))}px`;
+    pop.style.top = `${Math.max(16, Math.min(r.bottom + 8, window.innerHeight - pop.offsetHeight - 16))}px`;
+  });
+}
+wirePop($('zoom-popover'), $('btn-zoom'), renderZoomRows);
+wirePop($('cuts-popover'), $('btn-cuts'), renderCuts);
+wirePop($('switches-popover'), $('btn-switches'), renderSwitches);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('.zoom-pop:popover-open').forEach((p) => p.hidePopover()); });
 
 // Cuts
 function mergeCuts() {
@@ -725,20 +779,48 @@ function cutThis() {
   renderCuts();
 }
 function cutDelete(i) { cuts.splice(i, 1); renderCuts(); }
+// Typed times are seconds from the clip start, before any cut
+function cutEdit(i, k, el) {
+  const c = [...cuts[i]], v = parseFloat(el.value);
+  if (!Number.isNaN(v)) c[k] = r2(CLIP_START + v);
+  if (Number.isNaN(v) || c[0] < CLIP_START || c[1] > CLIP_END || c[1] - c[0] < 0.2) {
+    showToast(`A cut runs inside 0 to ${(CLIP_END - CLIP_START).toFixed(1)} s and lasts at least 0.2 s`);
+    renderCuts();
+    return;
+  }
+  cuts[i] = c;
+  mergeCuts();
+  renderCuts();
+}
+function cutJump(i) { player.currentTime = Math.max(0, toClip(cuts[i][0]) - 1); player.play(); }
+const secs = (t) => `${(t - CLIP_START).toFixed(1)}`;
 function renderCuts() {
   $('cuts-field').value = JSON.stringify(cuts);
   $('mark-start-tc').textContent = markS === null ? '-' : tc(markS - CLIP_START);
   $('mark-end-tc').textContent = markE === null ? '-' : tc(markE - CLIP_START);
   $('btn-cut').disabled = markS === null || markE === null;
-  $('cut-list').innerHTML = cuts.map((c, i) => `
-    <li class="switch-list__row">
-      <button type="button" class="timecode-lg timecode-btn" onclick="player.currentTime=${toClip(c[0])}" aria-label="Jump to cut ${i + 1}">${tc(c[0] - CLIP_START)}</button>
-      <span>Cut ${(c[1] - c[0]).toFixed(1)} s, ${tc(c[0] - CLIP_START)} to ${tc(c[1] - CLIP_START)}${isBaked(c) ? '' : ' (applied on re-render)'}</span>
-      <button type="button" class="btn btn--ghost btn--sm" onclick="cutDelete(${i})" aria-label="Delete cut ${i + 1}">Delete</button>
-    </li>`).join('');
+  const removed = cuts.reduce((a, c) => a + c[1] - c[0], 0);
+  $('cut-count').textContent = [
+    cuts.length ? `${cuts.length} cut${cuts.length > 1 ? 's' : ''}, ${removed.toFixed(1)} s` : 'No cuts',
+    PAUSE_CUTS.length ? `${PAUSE_CUTS.length} pause cut${PAUSE_CUTS.length > 1 ? 's' : ''}` : '',
+  ].filter(Boolean).join(' · ');
+  $('cut-rows').innerHTML = cuts.length ? cuts.map((c, i) => `
+    <li class="cut-row">
+      <button type="button" class="btn btn--ghost btn--icon btn--sm" onclick="cutJump(${i})" aria-label="Play from just before cut ${i + 1}">{{ ui.icon('play', 14) }}</button>
+      <label class="cut-row__t"><span class="small muted">From</span><input type="number" step="0.1" class="input input--mono input--short" value="${secs(c[0])}" onchange="cutEdit(${i}, 0, this)" aria-label="Cut ${i + 1} start, seconds from clip start"></label>
+      <label class="cut-row__t"><span class="small muted">To</span><input type="number" step="0.1" class="input input--mono input--short" value="${secs(c[1])}" onchange="cutEdit(${i}, 1, this)" aria-label="Cut ${i + 1} end, seconds from clip start"></label>
+      <span class="cut-row__len">${(c[1] - c[0]).toFixed(1)} s</span>
+      ${isBaked(c) ? '<span></span>' : '<span class="badge badge--accent">New</span>'}
+      <button type="button" class="btn btn--ghost btn--icon btn--sm" onclick="cutDelete(${i})" aria-label="Delete cut ${i + 1}">{{ ui.icon('trash', 14) }}</button>
+    </li>`).join('') : '<li class="zoom-empty">No cuts yet. Play the clip, mark a start and an end, then cut it.</li>';
   drawStrip();
   preview();
 }
+// Pause cuts come from pause trim in the current render. They are listed here, and change only through that setting.
+$('pause-note').textContent = !PAUSE_ON ? 'Pause trim is off for this render.'
+  : `Made by pause trim (longer than ${PAUSE_S.toFixed(1)} s). Change that setting in Timing to change these.`;
+$('pause-rows').innerHTML = PAUSE_CUTS.map((c) =>
+  `<li class="pause-row"><span>${secs(c[0])} to ${secs(c[1])} s</span><span>${(c[1] - c[0]).toFixed(1)} s</span></li>`).join('');
 renderCuts();
 renderZoomRows();
 setPlayUi();
@@ -751,12 +833,9 @@ const CONCEPT_HELP = {
   top3: 'Three moments on one theme, weakest first, with #1 teased at the start.',
   top5: 'Five strong moments on one theme, weakest first.',
 };
-const NEEDS = { single: '1', story: '2 to 3', pov: '1', top3: '3', top5: '5' };
 let concept = {{ concept | tojson }};
 let segs = {{ c_segments | tojson }};
 let overlay = Object.assign({ pov_text: '', pov_options: [], emotion: '', skip_card: '', callback_quote: '', foreshadow: false }, {{ overlay | tojson }});
-let theme = {{ (clip.theme or '') | tojson }};
-let conceptSource = {{ (clip.concept_source or '') | tojson }};
 let conceptChanged = false;
 const BANK = {{ pov_bank | tojson }};
 const VIDEO_ID = {{ clip.video_id }};
@@ -775,10 +854,9 @@ function syncConcept() {
   $('f-concept').value = concept;
   $('f-segments').value = JSON.stringify(segs);
   $('f-overlay').value = JSON.stringify(overlay);
-  $('f-theme').value = theme;
   $('f-concept-source').value = conceptChanged ? 'user' : '';   // any change by hand makes it the user's
 }
-function markUser() { conceptChanged = true; $('concept-ai-tag').hidden = true; syncConcept(); }
+function markUser() { conceptChanged = true; syncConcept(); }
 
 function segRow(s, i, tag, isTop) {
   return `<li class="seg-row" data-i="${i}">
@@ -787,8 +865,8 @@ function segRow(s, i, tag, isTop) {
     <span></span>
     ${isTop ? `<input type="text" class="input seg-row__label" data-k="label" value="${esc(s.label || '')}" maxlength="60" autocomplete="off" aria-label="Label for ${tag}" placeholder="Why it is on the list…">` : ''}
     <div class="seg-row__trim">
-      <label><span class="small muted">Start</span><input type="number" step="0.1" class="input input--mono input--short" data-k="start_s" value="${s.start_s}" aria-label="${tag} start in seconds"></label>
-      <label><span class="small muted">End</span><input type="number" step="0.1" class="input input--mono input--short" data-k="end_s" value="${s.end_s}" aria-label="${tag} end in seconds"></label>
+      <label><span class="small muted">Start</span><input type="text" inputmode="decimal" autocomplete="off" class="input input--mono input--short" data-k="start_s" value="${fmtTs(s.start_s)}" aria-label="${tag} start, stream time"></label>
+      <label><span class="small muted">End</span><input type="text" inputmode="decimal" autocomplete="off" class="input input--mono input--short" data-k="end_s" value="${fmtTs(s.end_s)}" aria-label="${tag} end, stream time"></label>
       <span class="small muted" data-len>${segLen(s).toFixed(1)} s</span>
     </div>
     ${isTop ? `<div class="seg-row__btns">
@@ -807,7 +885,6 @@ function renderStory() {
 function renderTop() {
   segs.forEach((s, k) => { s.rank = segs.length - k; });   // weakest first, #1 last
   $('top-list').innerHTML = segs.map((s, i) => segRow(s, i, `#${segs.length - i}`, true)).join('');
-  $('top-theme').value = theme;
 }
 function renderChips() {
   $('pov-chips').innerHTML = (overlay.pov_options || []).map((t, i) =>
@@ -827,9 +904,8 @@ function renderPov() {
   $('pov-emotion').textContent = overlay.emotion ? `The reaction reads as ${overlay.emotion}` : '';
 }
 function renderConcept() {
-  $('concept-radios').querySelectorAll('input').forEach((r) => { r.checked = r.value === concept; });
-  $('concept-ai-tag').hidden = !(conceptSource === 'ai' && !conceptChanged);
-  $('concept-help').textContent = CONCEPT_HELP[concept] + (concept === 'single' ? '' : ` Needs ${NEEDS[concept]} moment${NEEDS[concept] === '1' ? '' : 's'}.`);
+  $('concept-section').hidden = concept === 'single';
+  $('concept-help').textContent = CONCEPT_HELP[concept];
   document.querySelectorAll('[data-for]').forEach((el) => { el.hidden = !el.dataset.for.split(' ').includes(concept); });
   $('panel-pov').hidden = concept !== 'pov';
   $('panel-story').hidden = concept !== 'story';
@@ -847,7 +923,7 @@ function onSegEdit(e) {
   if (!li || !k) return;
   const s = segs[Number(li.dataset.i)];
   if (k === 'label') s.label = e.target.value;
-  else { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) s[k] = v; li.querySelector('[data-len]').textContent = `${segLen(s).toFixed(1)} s`; }
+  else { const v = parseTs(e.target.value); if (v !== null) s[k] = v; li.querySelector('[data-len]').textContent = `${segLen(s).toFixed(1)} s`; }
   markUser();
 }
 function onSegClick(e) {
@@ -867,7 +943,6 @@ function onSegClick(e) {
 $('story-skip').addEventListener('input', (e) => { overlay.skip_card = e.target.value; markUser(); });
 $('story-quote').addEventListener('input', (e) => { overlay.callback_quote = e.target.value; markUser(); });
 $('story-foreshadow').addEventListener('change', (e) => { overlay.foreshadow = e.target.checked; markUser(); });
-$('top-theme').addEventListener('input', (e) => { theme = e.target.value; markUser(); });
 $('concept-pick').addEventListener('click', () =>
   openMomentPicker({ videoId: VIDEO_ID, clipId: CLIP_ID, concept, preselect: segs.map((s) => s.candidate_id).filter(Boolean) }));
 
@@ -913,49 +988,61 @@ $('bank-items').addEventListener('click', (e) => {
   $('bank-dialog').close(); renderPov(); markUser();
 });
 
-// Switching concept. To Single the first segment stays. To POV the reaction peak is found and captions are written.
-// To Story or Top the moment picker opens (the radios stay where they are until the picker has built the clip).
-$('concept-radios').addEventListener('change', async (e) => {
-  const to = e.target.value;
-  if (to === concept) return;
-  if (to === 'single') {
-    segs = segs.slice(0, 1);
-    $('input-start-s').value = segs[0].start_s.toFixed(1);
-    $('input-end-s').value = segs[0].end_s.toFixed(1);
-    concept = 'single'; markUser(); renderConcept(); note('');
-    return;
-  }
-  if (to === 'pov') {
-    note('Finding the reaction and writing captions…');
-    $('concept-radios').querySelectorAll('input').forEach((r) => { r.disabled = true; });
-    try {
-      const r = await fetch(`/clips/${CLIP_ID}/concept/to-pov`, { method: 'POST' });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || 'Could not make a POV from this clip.');
-      concept = 'pov'; segs = body.segments; overlay = Object.assign(overlay, body.overlay); theme = '';
-      markUser(); renderConcept();
-      note((body.warnings || []).length ? 'Check this POV: ' + body.warnings.join('; ') : 'Pick a caption, then re-render.', (body.warnings || []).length > 0);
-    } catch (err) { renderConcept(); note(err.message, true); }
-    finally { $('concept-radios').querySelectorAll('input').forEach((r) => { r.disabled = false; }); }
-    return;
-  }
-  renderConcept();
-  openMomentPicker({ videoId: VIDEO_ID, clipId: CLIP_ID, concept: to, preselect: segs.map((s) => s.candidate_id).filter(Boolean) });
-});
 renderConcept();
+
+const music = $('music-preview');
+let musicBtn = null;
+function setMusicBtn(on) {
+  if (!musicBtn) return;
+  musicBtn.querySelector('.js-mplay').hidden = on;
+  musicBtn.querySelector('.js-mpause').hidden = !on;
+  musicBtn.setAttribute('aria-pressed', String(on));
+}
+$('switch-music').addEventListener('change', (e) => { $('music-list').hidden = !e.target.checked; if (!e.target.checked) music.pause(); });
+$('music-list').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-src]');
+  if (!btn) return;
+  if (btn === musicBtn && !music.paused) { music.pause(); return; }
+  setMusicBtn(false);
+  if (btn !== musicBtn) music.src = btn.dataset.src;
+  musicBtn = btn;
+  player.pause();
+  music.play().catch(() => showToast('Could not play this track'));
+});
+music.addEventListener('play', () => setMusicBtn(true));
+music.addEventListener('pause', () => setMusicBtn(false));
+player.addEventListener('play', () => music.pause());
 
 function toggleTitleEdit(on) {
   document.getElementById('title-form').style.display = on ? 'flex' : 'none';
   document.getElementById('clip-title').parentElement.style.display = on ? 'none' : '';
   if (on) document.querySelector('#title-form input').select();
 }
+// Trim times show as stream timestamps; the hidden fields keep the seconds the form sends
+function fmtTs(t) {
+  t = Math.max(0, Math.round(t));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = String(t % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+function parseTs(str) {   // "1:02:05.3", "36:18.2" or plain seconds; null when it is not a time
+  const parts = String(str).trim().split(':');
+  if (parts.length > 3 || parts.some((x) => !/^\d+(\.\d+)?$/.test(x))) return null;
+  return Math.round(parts.reduce((a, x) => a * 60 + parseFloat(x), 0) * 100) / 100;
+}
 function nudge(inputId, delta) {
   const el = document.getElementById(inputId);
-  if (el) {
-    let val = parseFloat(el.value) || 0;
-    val = Math.max(0, val + delta);
-    el.value = val.toFixed(1);
-  }
+  el.value = Math.max(0, (parseFloat(el.value) || 0) + delta).toFixed(2);
+  document.querySelector(`[data-ts-for="${inputId}"]`).value = fmtTs(parseFloat(el.value));
 }
+document.querySelectorAll('[data-ts-for]').forEach((el) => {
+  const field = document.getElementById(el.dataset.tsFor);
+  el.value = fmtTs(parseFloat(field.value) || 0);
+  el.addEventListener('change', () => {
+    const v = parseTs(el.value);
+    if (v === null) showToast('Use a time like 36:18');
+    else field.value = v;
+    el.value = fmtTs(parseFloat(field.value) || 0);
+  });
+});
 </script>
 {% endblock %}

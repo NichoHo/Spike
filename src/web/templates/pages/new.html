@@ -59,123 +59,21 @@
         </div>
       {% endif %}
 
-      <!-- Pipeline Options -->
-      <section style="margin-top: var(--space-4); border-top: 1px solid var(--color-border); padding-top: var(--space-4);">
-        <h3 class="card__title">Processing options</h3>
-        <div class="stack stack--sm" style="margin-top: var(--space-4);">
+      <!-- Optional settings. From a streamer they only show for a specific VOD; the latest broadcast follows the source's presets. -->
+      {% set from_streamer = active_tab == 'streamer' or not active_tab %}
+      <fieldset id="job-options" class="job-options"{% if from_streamer %} disabled hidden{% endif %}>
+      <details class="disclosure">
+        <summary>{{ ui.icon("caret-right", 14) }} Optional settings <span class="small muted" id="presets-from"></span></summary>
+        <div class="stack disclosure__body">
           <div class="field">
-            <label class="field__label" for="field-target-clips">Target clip count</label>
+            <label class="field__label" for="field-target-clips">Clips to make</label>
             <input type="number" name="target_clips" id="field-target-clips" class="input input--short input--number" placeholder="Auto" min="1" max="10">
-            <p class="field__help">Leave on Auto to scale with video length (about 2 per hour, 2 to 10). Or enter 1 to 10.</p>
+            <p class="field__help">Empty: about 2 per hour of video, 2 to 10.</p>
           </div>
-
-          <fieldset class="field">
-            <legend class="field__label">Layout</legend>
-            {% set layouts = [
-              ("auto", "Auto", "AI picks for each clip."),
-              ("split", "Split", "Streamer on top, what they’re watching below."),
-              ("face_track", "Face track", "Tall crop that follows the face."),
-              ("center", "Center", "Tall crop from the middle of the frame."),
-              ("letterbox", "Letterbox", "Whole wide frame, bars above and below."),
-            ] %}
-            <div class="layout-picker">
-              {% for value, name, desc in layouts %}
-                <input type="radio" name="layout" id="layout-{{ value }}" value="{{ value }}" {% if value == 'auto' %}checked{% endif %}>
-                <label for="layout-{{ value }}" class="layout-option">
-                  <span class="layout-thumb layout-thumb--{{ value }}" aria-hidden="true">
-                    {% if value == "auto" %}
-                      <span class="lt-cam"></span><span class="lt-content"></span><span class="lt-auto">A</span>
-                    {% elif value == "split" %}
-                      <span class="lt-cam"></span><span class="lt-content"></span>
-                    {% elif value == "face_track" %}
-                      <span class="lt-cam"></span>
-                    {% elif value == "center" %}
-                      <span class="lt-content"></span>
-                    {% else %}
-                      <span class="lt-blur"></span><span class="lt-content"></span><span class="lt-blur"></span>
-                    {% endif %}
-                    <span class="lt-caption"></span>
-                  </span>
-                  <span class="layout-option__name">{{ name }}</span>
-                  <span class="layout-option__desc">{{ desc }}</span>
-                  {% if value == "auto" %}<span class="layout-option__quota">{% if layout_ai_left() > 0 %}{{ layout_ai_left() }} of {{ layout_ai_limit() }} Gemini calls left today{% else %}Gemini is out, uses your Claude Pro plan{% endif %}</span>{% endif %}
-                </label>
-              {% endfor %}
-            </div>
-            <label class="switch-row" id="letterbox-opt" style="margin-top: var(--space-3); display: none;">
-              <input type="checkbox" name="letterbox_style" class="switch" role="switch" value="title" checked>
-              <span>White bars with the AI hook title on top. Off: blurred fill.</span>
-            </label>
-            <script>
-              document.querySelectorAll('input[name="layout"]').forEach((r) => r.addEventListener('change', () => {
-                document.getElementById('letterbox-opt').style.display = r.value === 'letterbox' ? '' : 'none';
-              }));
-            </script>
-            <p class="field__help">Blue is the streamer, grey is the game or video, white is where captions go.</p>
-          </fieldset>
-
-          <div class="field">
-            <span class="field__label" id="lbl-captions">Captions</span>
-            <div class="segmented" role="radiogroup" aria-labelledby="lbl-captions">
-              <input type="radio" name="captions" id="cap-on" value="on" checked>
-              <label for="cap-on">On</label>
-              <input type="radio" name="captions" id="cap-off" value="off">
-              <label for="cap-off">Off</label>
-            </div>
-            <p class="field__help">Big word-by-word captions. The spoken word turns yellow.</p>
-          </div>
-
-          <div class="field" id="caption-opts">
-            <span class="field__label">Caption style</span>
-            {{ ui.caption_picker('new-caption', 'bold_pop') }}
-            <label class="switch-row" style="margin-top: var(--space-3);">
-              <input type="checkbox" name="profanity_mask" class="switch" role="switch" value="1" checked>
-              <span>Mask profanity in captions (f***).</span>
-            </label>
-          </div>
-          <script>
-            document.querySelectorAll('input[name="captions"]').forEach((r) => r.addEventListener('change', () => {
-              document.getElementById('caption-opts').style.display = r.value === 'off' && r.checked ? 'none' : '';
-            }));
-          </script>
-
-          <div class="field">
-            <span class="field__label" id="lbl-music">Background music</span>
-            <div class="segmented" role="radiogroup" aria-labelledby="lbl-music">
-              <input type="radio" name="music" id="music-auto" value="auto" checked>
-              <label for="music-auto">Auto</label>
-              <input type="radio" name="music" id="music-on" value="on">
-              <label for="music-on">On</label>
-              <input type="radio" name="music" id="music-off" value="off">
-              <label for="music-off">Off</label>
-            </div>
-            <div class="row" style="margin-top: var(--space-2);">
-              <label class="small muted" for="field-music-mood" style="min-width: 100px;">Default mood:</label>
-              <select name="default_music_mood" id="field-music-mood" class="select" style="max-width: 200px;">
-                {% for m in ("chill", "hype", "funny", "dramatic", "wholesome") %}
-                  <option value="{{ m }}">{{ m|capitalize }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <p class="field__help">Auto: the AI adds a quiet track to talk-heavy clips and skips it when the audio is the joke. The mood is used when the AI has no pick.</p>
-          </div>
-
-          <div class="field">
-            <span class="field__label" id="lbl-cuts">Cut pauses</span>
-            <div class="segmented" role="radiogroup" aria-labelledby="lbl-cuts">
-              <input type="radio" name="cut_pauses" id="cut-auto" value="auto" checked>
-              <label for="cut-auto">Auto</label>
-              <input type="radio" name="cut_pauses" id="cut-tight" value="tight">
-              <label for="cut-tight">Tight</label>
-              <input type="radio" name="cut_pauses" id="cut-natural" value="natural">
-              <label for="cut-natural">Natural</label>
-              <input type="radio" name="cut_pauses" id="cut-off" value="off">
-              <label for="cut-off">Off</label>
-            </div>
-            <p class="field__help">Tight cuts every pause over 0.6 s. Natural only cuts dead air over 1.2 s. Auto lets the AI pick per clip.</p>
-          </div>
+          {{ ui.render_presets('job', presets) }}
         </div>
-      </section>
+      </details>
+      </fieldset>
     </div>
 
     <div class="card__footer">
@@ -186,6 +84,29 @@
       </button>
     </div>
   </form>
+  <script>
+    // From a streamer: the latest broadcast uses the source's presets as they are. A specific VOD shows the
+    // options, starting from those presets. Disabled fields are not sent, so the job then follows the source.
+    (() => {
+      const sel = document.getElementById('field-source');
+      const vod = document.getElementById('field-vod-url');
+      if (!sel || !vod) return;
+      const opts = document.getElementById('job-options');
+      const PRESETS = {{ source_presets | tojson }};
+      const sync = () => {
+        const p = PRESETS[sel.value];
+        const show = Boolean(p && vod.value.trim());
+        opts.hidden = opts.disabled = !show;
+        if (p) {
+          document.getElementById('job-presets').applyPresets(p);
+          document.getElementById('presets-from').textContent = `(from ${sel.selectedOptions[0].textContent.replace(/ \(.*\)$/, '')})`;
+        }
+      };
+      sel.addEventListener('change', sync);
+      vod.addEventListener('change', () => { opts.hidden = opts.disabled = !(PRESETS[sel.value] && vod.value.trim()); });
+      vod.addEventListener('input', () => { opts.hidden = opts.disabled = !(PRESETS[sel.value] && vod.value.trim()); });
+    })();
+  </script>
   <script>
     // Send the form with fetch so a rejected job shows as a popup here instead of a blank JSON page.
     (() => {

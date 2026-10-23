@@ -9,7 +9,7 @@ import time
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 
 from src import requirements
@@ -31,7 +31,10 @@ from src.concepts import CONCEPT_LABELS, CONCEPTS, DEFAULT_AUTO_CONCEPTS
 from src.config import (
     CREATOR_TYPES, HUMOR_STYLES, VIDEOS_DIR, youtube_keys, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
 )
+from src.moment_render import DEFAULT_PRESETS, source_presets
+from src.config import MUSIC_MOODS
 from src.web.auth import get_current_user
+from src.web.routes.new import parse_presets
 
 
 router = APIRouter()
@@ -200,6 +203,7 @@ async def new_source_form(
             "page_width": "narrow",
             "user": user,
             "source": None,
+            "presets": DEFAULT_PRESETS,
             "review_count": review_count,
             "concepts": [(c, CONCEPT_LABELS[c]) for c in CONCEPTS],
             "auto_concepts": DEFAULT_AUTO_CONCEPTS,
@@ -214,32 +218,37 @@ async def create_source_action(
     display_name: str = Form(...),
     permission: str = Form("review"),
     auto_process: bool = Form(False),
+    layout: Optional[str] = Form(None),  # absent on a new source: everything starts on Auto
+    letterbox_style: str = Form("blur"),
+    captions: Optional[str] = Form(None),
     caption_style: str = Form("bold_pop"),
-    music: bool = Form(False),
+    music: str = Form("auto"),
     default_music_mood: str = Form("chill"),
-    silence_trim: bool = Form(False),
+    cut_pauses: str = Form("auto"),
     style_notes: str = Form(""),
     auto_concepts: List[str] = Form(default_factory=list),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     if (todo := requirements.missing("source", kind=kind)):
         raise HTTPException(status_code=400, detail="Finish setup first: " + ", ".join(i["title"] for i in todo) + ".")
+    p = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style) if layout else dict(DEFAULT_PRESETS)
     data = {
         "kind": kind,
         "external_id": external_id.strip(),
         "display_name": display_name.strip(),
         "permission": permission,
         "auto_process": auto_process,
-        "layout": "auto",  # the AI picks per clip; change it on the New page or in clip detail
-        "caption_style": caption_style,
-        "music": 1 if music else 0,
-        "default_music_mood": default_music_mood,
-        "silence_trim": 1 if silence_trim else 0,
-        "letterbox_style": "title",
+        "layout": p["layout"],
+        "caption_style": p["caption_style"],
+        "music": 1 if p["music"] is True else 0,
+        "default_music_mood": default_music_mood if default_music_mood in MUSIC_MOODS else "chill",
+        "silence_trim": 0 if p["cut_pauses"] == "off" else 1,
+        "letterbox_style": p["letterbox_style"],
         "style_notes": style_notes.strip(),
     }
     source_id = create_source(data)
     set_json_column(source_id, "auto_concepts", _chosen_concepts(auto_concepts))
+    set_json_column(source_id, "presets", p)
     return RedirectResponse(url="/sources", status_code=HTTP_303_SEE_OTHER)
 
 
@@ -265,6 +274,7 @@ async def edit_source_form(
             "page_width": "narrow",
             "user": user,
             "source": dict(src_row),
+            "presets": source_presets(dict(src_row)),
             "review_count": review_count,
             "profile": get_json_column(source_id, "creator_profile", None) or {},
             "learned_prefs": get_json_column(source_id, "learned_prefs", []),
@@ -354,10 +364,13 @@ async def update_source_action(
     display_name: str = Form(...),
     permission: str = Form("review"),
     auto_process: bool = Form(False),
+    layout: Optional[str] = Form(None),  # absent on a new source: everything starts on Auto
+    letterbox_style: str = Form("blur"),
+    captions: Optional[str] = Form(None),
     caption_style: str = Form("bold_pop"),
-    music: bool = Form(False),
+    music: str = Form("auto"),
     default_music_mood: str = Form("chill"),
-    silence_trim: bool = Form(False),
+    cut_pauses: str = Form("auto"),
     style_notes: str = Form(""),
     auto_concepts: List[str] = Form(default_factory=list),
     user: Dict[str, Any] = Depends(get_current_user),
@@ -366,21 +379,23 @@ async def update_source_action(
     if not src_row:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Source not found.")
 
+    p = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style) if layout else dict(DEFAULT_PRESETS)
     data = {
         "display_name": display_name.strip(),
         "permission": permission,
         "permission_note": src_row["permission_note"],  # field removed from the form; keep any saved note
         "auto_process": auto_process,
-        "layout": "auto",  # the AI picks per clip; change it on the New page or in clip detail
-        "caption_style": caption_style,
-        "music": 1 if music else 0,
-        "default_music_mood": default_music_mood,
-        "silence_trim": 1 if silence_trim else 0,
-        "letterbox_style": src_row["letterbox_style"] or "title",  # no longer on this form; keep the saved value
+        "layout": p["layout"],
+        "caption_style": p["caption_style"],
+        "music": 1 if p["music"] is True else 0,
+        "default_music_mood": default_music_mood if default_music_mood in MUSIC_MOODS else "chill",
+        "silence_trim": 0 if p["cut_pauses"] == "off" else 1,
+        "letterbox_style": p["letterbox_style"],
         "style_notes": style_notes.strip(),
     }
     update_source(source_id, data)
     set_json_column(source_id, "auto_concepts", _chosen_concepts(auto_concepts))
+    set_json_column(source_id, "presets", p)
     return RedirectResponse(url="/sources", status_code=HTTP_303_SEE_OTHER)
 
 

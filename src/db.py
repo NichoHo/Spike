@@ -256,9 +256,11 @@ def init_db():
             "ALTER TABLE candidates ADD COLUMN concept TEXT DEFAULT 'single'",
             "ALTER TABLE candidates ADD COLUMN concept_spec TEXT",  # JSON {segments, overlay, theme, concept_source}: what the worker renders
             "ALTER TABLE sources ADD COLUMN auto_concepts TEXT",  # JSON list of concepts the pipeline may propose
+            "ALTER TABLE sources ADD COLUMN presets TEXT",  # JSON render presets, the same keys as a job's settings
             "ALTER TABLE candidates ADD COLUMN segments TEXT",  # JSON [[start_s, end_s]] of a story clip (stream seconds)
             "ALTER TABLE candidates ADD COLUMN zooms TEXT",  # JSON [{t, scale, hold_s}]; t is clip time for stories
-            "ALTER TABLE clips ADD COLUMN zooms TEXT",  # JSON [{t, scale, hold_s}]; an empty list means no zoom
+            "ALTER TABLE clips ADD COLUMN zooms TEXT",
+            "ALTER TABLE clips ADD COLUMN silence_trim_s REAL",  # pause length that silence trim cuts; NULL is SILENCE_TRIM_S  # JSON [{t, scale, hold_s}]; an empty list means no zoom
             "ALTER TABLE candidates ADD COLUMN humor_type TEXT",
             "ALTER TABLE candidates ADD COLUMN why_funny TEXT",
             "ALTER TABLE candidates ADD COLUMN status_reason TEXT",  # why a candidate is low_score or rejected
@@ -621,6 +623,7 @@ def create_or_update_clip(
     trim_end_s: Optional[float] = None,
     music_track: Optional[str] = None,
     silence_trim: int = 0,
+    silence_trim_s: Optional[float] = None,
     punch_in_zoom: int = 1,
     status: str = "ready",
     show_hook: int = 0,
@@ -646,7 +649,7 @@ def create_or_update_clip(
                 """
                 UPDATE clips
                 SET version = ?, layout = ?, caption_style = ?, trim_start_s = ?, trim_end_s = ?,
-                    music_track = ?, silence_trim = ?, punch_in_zoom = ?, show_hook = ?,
+                    music_track = ?, silence_trim = ?, silence_trim_s = ?, punch_in_zoom = ?, show_hook = ?,
                     letterbox_style = ?, file_path = ?, thumb_path = ?, status = ?, cuts = COALESCE(?, cuts), zooms = COALESCE(?, zooms),
                     concept = COALESCE(?, concept), segments = COALESCE(?, segments), overlay = COALESCE(?, overlay),
                     theme = COALESCE(?, theme), concept_source = COALESCE(?, concept_source)
@@ -654,7 +657,7 @@ def create_or_update_clip(
                 """,
                 (
                     new_version, layout, caption_style, trim_start_s, trim_end_s,
-                    music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
+                    music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
                     file_path, thumb_path, status, cuts, zooms, concept, segments, overlay, theme, concept_source, clip_id
                 )
             )
@@ -664,14 +667,14 @@ def create_or_update_clip(
                 """
                 INSERT INTO clips (
                     candidate_id, version, layout, caption_style, trim_start_s, trim_end_s,
-                    music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
+                    music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
                     file_path, thumb_path, status, created_at, cuts, zooms, concept, segments, overlay, theme, concept_source
-                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
                     candidate_id, layout, caption_style, trim_start_s, trim_end_s,
-                    music_track, silence_trim, punch_in_zoom, show_hook, letterbox_style,
+                    music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
                     file_path, thumb_path, status, now, cuts, zooms, concept or "single", segments, overlay, theme, concept_source
                 )
             )
@@ -900,8 +903,8 @@ def update_source(source_id: int, data: Dict[str, Any]) -> bool:
 
 
 def get_json_column(source_id: int, column: str, default: Any) -> Any:
-    """Read a JSON TEXT column of sources (creator_profile, learned_prefs)."""
-    assert column in ("creator_profile", "learned_prefs", "auto_concepts")
+    """Read a JSON TEXT column of sources (creator_profile, learned_prefs, auto_concepts, presets)."""
+    assert column in ("creator_profile", "learned_prefs", "auto_concepts", "presets")
     with get_connection() as conn:
         row = conn.execute(f"SELECT {column} FROM sources WHERE id = ?", (source_id,)).fetchone()
     try:
@@ -911,7 +914,7 @@ def get_json_column(source_id: int, column: str, default: Any) -> Any:
 
 
 def set_json_column(source_id: int, column: str, value: Any) -> None:
-    assert column in ("creator_profile", "learned_prefs", "auto_concepts")
+    assert column in ("creator_profile", "learned_prefs", "auto_concepts", "presets")
     with get_connection() as conn:
         conn.execute(f"UPDATE sources SET {column} = ? WHERE id = ?", (json.dumps(value), source_id))
 

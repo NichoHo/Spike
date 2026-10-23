@@ -220,3 +220,77 @@
     {%- endfor %}
   </div>
 {%- endmacro %}
+
+{# How a job renders its clips: the New page and the source form share this. `p` has the keys of moment_render.DEFAULT_PRESETS.
+   The wrapper gets applyPresets(p), which the New page calls when a source is picked. #}
+{% macro render_presets(prefix, p, mood=none) -%}
+  {%- set music = 'auto' if p.music == 'auto' else ('on' if p.music else 'off') -%}
+  <div class="stack" id="{{ prefix }}-presets">
+    <div class="field">
+      <span class="field__label">Layout</span>
+      {{ layout_picker(prefix ~ '-layout', p.layout, p.letterbox_style, auto=true) }}
+      <p class="field__help">Blue is the streamer, grey is the game or video, white is where captions go. Each clip can still be changed in review.</p>
+    </div>
+
+    <div class="field">
+      <label class="switch-row">
+        <input type="checkbox" name="captions" value="on" class="switch" role="switch" {% if p.captions %}checked{% endif %}>
+        <span class="field__label">Captions</span>
+      </label>
+      <div class="js-caption-opts" style="margin-top: var(--space-2);">
+        {{ caption_picker(prefix ~ '-caption', p.caption_style) }}
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="field__label" id="{{ prefix }}-lbl-music">Background music</span>
+      <div class="segmented" role="radiogroup" aria-labelledby="{{ prefix }}-lbl-music">
+        {%- for v, label in [("auto", "Auto"), ("on", "Always"), ("off", "Off")] %}
+        <input type="radio" name="music" id="{{ prefix }}-music-{{ v }}" value="{{ v }}" {% if music == v %}checked{% endif %}><label for="{{ prefix }}-music-{{ v }}">{{ label }}</label>
+        {%- endfor %}
+      </div>
+      <p class="field__help">Auto: the AI adds a quiet track to talk-heavy clips and skips it when the audio is the joke.</p>
+      {%- if mood is not none %}
+      <div class="row js-mood" style="gap: var(--space-2); margin-top: var(--space-2);">
+        <label class="small muted" for="{{ prefix }}-music-mood">Mood when the AI has no pick</label>
+        <select name="default_music_mood" id="{{ prefix }}-music-mood" class="select" style="max-width: 180px;">
+          {%- for m in ("chill", "hype", "funny", "dramatic", "wholesome") %}<option value="{{ m }}" {% if mood == m %}selected{% endif %}>{{ m | capitalize }}</option>{% endfor %}
+        </select>
+      </div>
+      {%- endif %}
+    </div>
+
+    <div class="field">
+      <span class="field__label" id="{{ prefix }}-lbl-cuts">Cut pauses</span>
+      <div class="segmented" role="radiogroup" aria-labelledby="{{ prefix }}-lbl-cuts">
+        {%- for v, label in [("auto", "Auto"), ("tight", "Tight, over 0.6 s"), ("natural", "Natural, over 1.2 s"), ("off", "Off")] %}
+        <input type="radio" name="cut_pauses" id="{{ prefix }}-cut-{{ v }}" value="{{ v }}" {% if p.cut_pauses == v %}checked{% endif %}><label for="{{ prefix }}-cut-{{ v }}">{{ label }}</label>
+        {%- endfor %}
+      </div>
+      <p class="field__help">Auto lets the AI pick per clip. Each clip can be set to any length in review.</p>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById({{ (prefix ~ '-presets') | tojson }});
+      const lbOpt = document.getElementById({{ (prefix ~ '-layout-letterbox-opt') | tojson }});
+      const sync = () => {
+        const lay = (root.querySelector('input[name="layout"]:checked') || {}).value;
+        lbOpt.style.display = lay === 'letterbox' ? '' : 'none';
+        const mood = root.querySelector('.js-mood');
+        if (mood) mood.style.display = (root.querySelector('input[name="music"]:checked') || {}).value === 'off' ? 'none' : '';
+        root.querySelector('.js-caption-opts').style.display = root.querySelector('input[name="captions"]').checked ? '' : 'none';
+      };
+      root.addEventListener('change', sync);
+      root.applyPresets = (p) => {
+        const pick = (name, v) => root.querySelectorAll(`input[name="${name}"]`).forEach((r) => { r.checked = r.value === v; });
+        pick('layout', p.layout); pick('caption_style', p.caption_style); pick('cut_pauses', p.cut_pauses);
+        pick('music', p.music === 'auto' ? 'auto' : p.music ? 'on' : 'off');
+        root.querySelector('input[name="captions"]').checked = Boolean(p.captions);
+        root.querySelector('input[name="letterbox_style"]').checked = p.letterbox_style === 'title';
+        sync();
+      };
+      sync();
+    })();
+  </script>
+{%- endmacro %}

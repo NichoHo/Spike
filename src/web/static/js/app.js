@@ -499,6 +499,7 @@ document.addEventListener("DOMContentLoaded", () => {
       li.addEventListener("mousedown", (e) => {
         e.preventDefault();
         input.value = v.url;
+        input.dispatchEvent(new Event("change"));
         status.textContent = `Selected: ${v.title || v.id}`;
         hide();
       });

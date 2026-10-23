@@ -102,13 +102,15 @@ def find_silence_cut_intervals(
     clip_start: float,
     clip_end: float,
     threshold_s: float = SILENCE_TRIM_S,
-    keep_breath_s: float = SILENCE_TRIM_BREATH_S,
+    keep_breath_s: Optional[float] = None,
 ) -> List[Tuple[float, float]]:
     """
     Find internal pauses between consecutive words longer than threshold_s (1.2 s).
     Returns list of (cut_start_s, cut_end_s) in absolute video timeline seconds.
-    Leaves keep_breath_s (0.4 s) natural breath duration after speech finishes.
+    Leaves keep_breath_s natural breath duration after speech finishes: 0.4 s, or a third of a shorter threshold.
     """
+    if keep_breath_s is None:
+        keep_breath_s = min(SILENCE_TRIM_BREATH_S, threshold_s / 3)
     clip_words = [
         w for w in words
         if float(w.get("start", 0)) >= clip_start - 0.2 and float(w.get("end", 0)) <= clip_end + 0.2
@@ -850,6 +852,7 @@ def run_stage9c_render(
                     trim_end_s=clip_end,
                     music_track=music_str,
                     silence_trim=0 if pace == "off" else 1,
+                    silence_trim_s=SILENCE_TRIM_TIGHT_S if pace == "tight" else None,
                     status="ready",
                     letterbox_style=letterbox_style,
                     cuts=json.dumps(cand.get("cuts") or []),
@@ -890,6 +893,7 @@ def render_single_vertical_clip(
     profanity_mask: bool = True,
     music_track: Optional[str] = None,
     silence_trim: "bool | str" = False,
+    silence_trim_s: Optional[float] = None,
     punch_in_zoom: Optional[bool] = None,
     layout_changes: Optional[List[Dict[str, Any]]] = None,
     letterbox_style: str = "blur",
@@ -903,7 +907,7 @@ def render_single_vertical_clip(
     """
     Renders a single vertical clip from a downloaded section video file.
     Supports interactive adjustments to trims, layout, captions, music, silence trim, and zoom.
-    silence_trim: False/"off", True/"natural" (cut pauses > 1.2 s) or "tight" (> 0.6 s).
+    silence_trim: False/"off", True/"natural" (cut pauses > 1.2 s, or > silence_trim_s) or "tight" (> 0.6 s).
     caption_y: None places captions on the split seam, or at 68% height for other layouts.
     layout_changes: [{t, layout}] switches at source seconds, for streams that change
     mid-clip (e.g. a reaction ends and the streamer goes full-cam).
@@ -934,7 +938,7 @@ def render_single_vertical_clip(
             words, clip_start, clip_end, SILENCE_TRIM_TIGHT_S, SILENCE_TRIM_TIGHT_BREATH_S
         )
     elif pace == "natural":
-        cut_intervals = find_silence_cut_intervals(words, clip_start, clip_end)
+        cut_intervals = find_silence_cut_intervals(words, clip_start, clip_end, silence_trim_s or SILENCE_TRIM_S)
 
     # Editor cuts and manual cuts join the silence cuts, then everything goes through one keep-interval path
     cut_intervals = merge_cut_intervals(cut_intervals, extra_cuts, clip_start=clip_start, clip_end=clip_end)

@@ -82,13 +82,15 @@ def env(tmp_path, monkeypatch):
     shutil.rmtree(vroot, ignore_errors=True)
 
 
-def test_clip_page_has_the_concept_section_picker_and_bank(env):
+def test_clip_page_has_the_concept_panels_cut_editor_and_bank(env):
     html = env["c"].get(f"/clips/{env['clip']}").text
-    for needle in ('id="concept-radios"', 'name="concept_choice"', 'id="panel-pov"', 'id="panel-story"', 'id="panel-top"', 'id="concept-ai-tag"',
-                   'id="pov-new"', 'id="pov-bank-btn"', 'id="moment-picker"', 'id="bank-dialog"', 'name="concept"', 'name="segments"',
-                   'name="overlay"', 'name="concept_source"', 'data-for="single"', 'Ask the editor'):
+    for needle in ('id="panel-pov"', 'id="panel-story"', 'id="panel-top"', 'id="pov-new"', 'id="pov-bank-btn"', 'id="moment-picker"',
+                   'id="bank-dialog"', 'name="concept"', 'name="segments"', 'name="overlay"', 'name="concept_source"', 'data-for="single"',
+                   'Ask the editor', 'id="cuts-popover"', 'name="silence_trim_s"', 'id="music-list"'):
         assert needle in html, needle
-    assert html.index('id="concept-section"') < html.index('Framing layout')    # its own section, not inside Layout
+    for gone in ('id="concept-radios"', 'name="concept_choice"', 'id="top-theme"'):   # the concept is set when the clip is made
+        assert gone not in html, gone
+    assert html.index('id="concept-section"') < html.index('id="g-timing"') < html.index('id="g-framing"')
 
 
 def test_moments_endpoint_lists_every_stored_candidate(env):

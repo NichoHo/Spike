@@ -10,7 +10,7 @@
         <span>Sources</span>
       </a>
       <h1 class="page-header__title">{% if source %}Edit source{% else %}Add source{% endif %}</h1>
-      <p class="page-header__description">Configure the channel, review settings, and processing presets.</p>
+      <p class="page-header__description">The channel, how its clips are found, and how they look by default. A new job from this source starts with these, and every clip can still be edited in review.</p>
     </div>
   </header>
 
@@ -18,13 +18,14 @@
     <div class="card__body stack">
       <!-- Section: Source Identity -->
       <section class="stack stack--sm">
-        <h2 style="font-size: 16px; font-weight: 600; color: var(--color-text);">Channel identity</h2>
+        <h2 class="edit-group__title">Channel</h2>
         <div class="field">
           <label class="field__label" for="field-kind">Platform</label>
-          <select name="kind" id="field-kind" class="select" required>
+          <select name="kind" id="field-kind" class="select" required{% if source %} disabled aria-describedby="kind-help"{% endif %}>
             <option value="twitch" {% if source and source.kind == 'twitch' %}selected{% endif %}>Twitch</option>
             <option value="youtube" {% if source and source.kind == 'youtube' %}selected{% endif %}>YouTube</option>
           </select>
+          {% if source %}<p class="field__help" id="kind-help">Fixed once the source exists. Add a new source for another platform.</p>{% endif %}
         </div>
 
         <div class="field">
@@ -46,10 +47,10 @@
             <p class="info-panel__note">Use the login name from the URL, e.g. <code>twitch.tv/xqc</code> is <code>xqc</code>.</p>
           </div>
           <div class="lookup">
-            <input type="text" name="external_id" id="field-ext-id" class="input input--mono" value="{{ source.external_id if source else '' }}" placeholder="Channel name, @handle, or ID (e.g. xqc, UCX6OQ3DkcsbYNE6H8uQQuVA)" required autocomplete="off"{% if not source %} data-lookup="/sources/lookup"{% endif %}>
+            <input type="text" name="external_id" id="field-ext-id" class="input input--mono" value="{{ source.external_id if source else '' }}" placeholder="Channel name, @handle, or ID (e.g. xqc, UCX6OQ3DkcsbYNE6H8uQQuVA)" required autocomplete="off"{% if source %} readonly{% else %} data-lookup="/sources/lookup"{% endif %}>
             <ul class="lookup__list" id="ext-id-results" role="listbox" hidden></ul>
           </div>
-          <p class="field__help" id="ext-id-status">Twitch username or YouTube channel ID. Type a name to search; pick a result to fill the ID and display name.</p>
+          <p class="field__help" id="ext-id-status">{% if source %}Fixed once the source exists.{% else %}Twitch username or YouTube channel ID. Type a name to search; pick a result to fill the ID and display name.{% endif %}</p>
         </div>
 
         <div class="field">
@@ -58,68 +59,31 @@
         </div>
       </section>
 
-      <!-- Section: Permission -->
+      <!-- Automation: what Spike does without being asked -->
       <section class="stack stack--sm" style="border-top: 1px solid var(--color-border); padding-top: var(--space-6);">
-        <h2 style="font-size: 16px; font-weight: 600; color: var(--color-text);">Posting</h2>
+        <h2 class="edit-group__title">Automation</h2>
+        <div class="field">
+          <label class="switch-row">
+            <input type="checkbox" name="auto_process" id="field-auto" class="switch" role="switch" {% if source and source.auto_process %}checked{% endif %}>
+            <span class="field__label">Clip new streams automatically</span>
+          </label>
+          <p class="field__help">Checks every 15 minutes and starts a job once a stream has ended or a video is uploaded.</p>
+        </div>
         {% set auto_posting = source and source.permission in ('own', 'written', 'program') %}
         <div class="field">
-          <label class="field__label" for="field-permission">Review</label>
-          <select name="permission" id="field-permission" class="select" required>
-            <option value="review" {% if not auto_posting %}selected{% endif %}>Needs review</option>
-            <option value="own" {% if auto_posting %}selected{% endif %}>No review needed (automatic posting)</option>
-          </select>
+          <span class="field__label" id="lbl-permission">Before posting</span>
+          <div class="segmented" role="radiogroup" aria-labelledby="lbl-permission">
+            <input type="radio" name="permission" id="perm-review" value="review" {% if not auto_posting %}checked{% endif %}><label for="perm-review">I review every clip</label>
+            <input type="radio" name="permission" id="perm-own" value="own" {% if auto_posting %}checked{% endif %}><label for="perm-own">Post without review</label>
+          </div>
         </div>
       </section>
 
-      <!-- Section: Processing & Presets -->
+      <!-- Finding clips: what the AI looks for -->
       <section class="stack stack--sm" style="border-top: 1px solid var(--color-border); padding-top: var(--space-6);">
-        <h2 style="font-size: 16px; font-weight: 600; color: var(--color-text);">Processing presets</h2>
-
-        <div class="row" style="gap: var(--space-3); margin-bottom: var(--space-2);">
-          <input type="checkbox" name="auto_process" id="field-auto" class="switch" role="switch" {% if source and source.auto_process %}checked{% endif %}>
-          <label for="field-auto" style="font-size: 14px; font-weight: 500; cursor: pointer;">Clip new streams automatically</label>
-        </div>
-        <p class="field__help" style="margin-top: calc(var(--space-2) * -1);">When this streamer finishes a stream or uploads a video, Spike starts making clips for you. You don't need to paste a link. It checks every 15 minutes and waits until a live stream has ended. Clips still show up in Review for you to approve.</p>
-
-        <div class="field">
-          <label class="field__label">Default caption style</label>
-          {{ ui.caption_picker('src-caption', source.caption_style if source and source.caption_style else 'bold_pop') }}
-        </div>
-
-        <div class="field">
-          <label class="field__label">Background music</label>
-          <div class="stack" style="gap: var(--space-2);">
-            <label class="switch-row">
-              <input type="checkbox" class="switch" role="switch" name="music" value="1" {% if source and source.music == 1 %}checked{% endif %}>
-              <span>Add ducked background music to clips</span>
-            </label>
-            <p class="field__help">Music sits at -22 dB and ducks further during speech. Disabled by default for gaming.</p>
-            <div class="row" style="margin-top: var(--space-2);">
-              <span class="small muted" style="min-width: 100px;">Default mood:</span>
-              <select name="default_music_mood" class="select" style="max-width: 200px;">
-                <option value="chill" {% if not source or source.default_music_mood == 'chill' %}selected{% endif %}>Chill</option>
-                <option value="hype" {% if source and source.default_music_mood == 'hype' %}selected{% endif %}>Hype</option>
-                <option value="funny" {% if source and source.default_music_mood == 'funny' %}selected{% endif %}>Funny</option>
-                <option value="dramatic" {% if source and source.default_music_mood == 'dramatic' %}selected{% endif %}>Dramatic</option>
-                <option value="wholesome" {% if source and source.default_music_mood == 'wholesome' %}selected{% endif %}>Wholesome</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="field">
-          <label class="field__label">Effects & Pacing</label>
-          <div class="stack" style="gap: var(--space-3);">
-            <label class="switch-row">
-              <input type="checkbox" class="switch" role="switch" name="silence_trim" value="1" {% if not source or source.silence_trim == 1 %}checked{% endif %}>
-              <span>Silence trim (cut internal pauses > 1.2s)</span>
-            </label>
-          </div>
-        </div>
-
+        <h2 class="edit-group__title">Finding clips</h2>
         <fieldset class="field" style="border: 0; padding: 0; margin: 0;">
-          <legend class="field__label">Concepts</legend>
-          <p class="field__help">What the pipeline may propose for this source. A moment is used in at most one output. Top 5 is off by default: it needs five strong moments on one theme.</p>
+          <legend class="field__label">Concepts the AI may make</legend>
           <div class="stack" style="gap: var(--space-2); margin-top: var(--space-2);">
             {% for key, label in concepts %}
             <label class="switch-row">
@@ -128,13 +92,26 @@
             </label>
             {% endfor %}
           </div>
+          <p class="field__help">A moment is used in at most one clip. Top 5 is off by default: it needs five strong moments on one theme.</p>
         </fieldset>
 
         <div class="field">
-          <label class="field__label" for="field-style-notes">Style notes (optional)</label>
-          <textarea name="style_notes" id="field-style-notes" class="textarea" placeholder="Instructions included in the LLM prompt for this source">{{ source.style_notes if source else '' }}</textarea>
+          <label class="field__label" for="field-style-notes">Style notes <span class="muted" style="font-weight: 400;">(optional)</span></label>
+          <textarea name="style_notes" id="field-style-notes" class="textarea" rows="3" placeholder="Skip the sponsor segments. He is funniest when he loses to chat.">{{ source.style_notes if source else '' }}</textarea>
+          <p class="field__help">Added to the AI prompt for this source.</p>
         </div>
       </section>
+
+      <!-- How this source's clips look. A new source starts on Auto; change it here once you know the streamer. -->
+      {% if source %}
+      <details class="disclosure">
+        <summary>{{ ui.icon("caret-right", 14) }} Optional settings</summary>
+        <div class="stack disclosure__body">
+          <p class="field__help">Every job from this source uses these. Each clip can still be changed in review.</p>
+          {{ ui.render_presets('src', presets, mood=source.default_music_mood or 'chill') }}
+        </div>
+      </details>
+      {% endif %}
     </div>
 
     <div class="card__footer">

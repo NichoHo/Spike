@@ -3,6 +3,7 @@ Phase 4 Test Suite: Web App, Auth, Routing, Re-render, Security, and Worker.
 Blueprint §3, §4, §8, §10, §13 (Phase 4).
 """
 
+import json
 import os
 import io
 import pytest
@@ -125,7 +126,8 @@ def test_sources_crud(client):
 
     updated = get_source(src_id)
     assert updated["display_name"] == "Test Streamer Updated"
-    assert updated["layout"] == "auto"  # sources always use Auto; the form has no layout field
+    assert updated["layout"] == "split"  # the source's default layout, which new jobs start from
+    assert json.loads(updated["presets"])["caption_style"] == "clean"
 
     # Delete source
     res_del = client.post(f"/sources/{src_id}/delete", follow_redirects=False)

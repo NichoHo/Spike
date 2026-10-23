@@ -61,6 +61,7 @@ async def new_job_page(
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     templates = request.app.state.templates
+    from src.moment_render import DEFAULT_PRESETS, source_presets
     sources = [dict(s) for s in list_sources()]
     review_count = len(list_review_clips(status="ready"))
 
@@ -73,10 +74,34 @@ async def new_job_page(
             "page_width": "narrow",
             "user": user,
             "sources": sources,
+            "presets": DEFAULT_PRESETS,
+            "source_presets": {s["id"]: source_presets(s) for s in sources},  # the form refills when a source is picked
             "active_tab": tab,
             "review_count": review_count,
         },
     )
+
+
+def parse_presets(layout: str, captions: Optional[str], music: str, cut_pauses: str, letterbox_style: str,
+                  caption_style: str) -> Dict[str, Any]:
+    """Render options from the New page or the source form, in the shape a job's settings use.
+    Switches send their value when on and nothing when off. Profanity is always masked."""
+    if (
+        layout not in VALID_LAYOUTS
+        or music not in ("auto", "on", "off")
+        or cut_pauses not in ("auto", "tight", "natural", "off")
+        or caption_style not in ("bold_pop", "karaoke", "clean")
+    ):
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid processing option.")
+    return {
+        "layout": layout,
+        "letterbox_style": "title" if letterbox_style == "title" else "blur",
+        "captions": captions not in (None, "off"),
+        "caption_style": caption_style,
+        "profanity_mask": True,
+        "music": "auto" if music == "auto" else music == "on",
+        "cut_pauses": cut_pauses,
+    }
 
 
 _VOD_TTL = 300
@@ -114,14 +139,12 @@ async def submit_new_job(
     source_id: Optional[int] = Form(None),
     vod_url: Optional[str] = Form(None),
     target_clips: str = Form(""),  # blank = auto (stage 6 scales it with video length)
-    layout: str = Form("auto"),
-    captions: str = Form("on"),
+    layout: Optional[str] = Form(None),  # absent when the options are hidden: the job follows the source's presets
+    captions: Optional[str] = Form(None),  # switch: "on" when on
     music: str = Form("auto"),
     cut_pauses: str = Form("auto"),
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     caption_style: str = Form("bold_pop"),
-    profanity_mask: Optional[str] = Form(None),  # checkbox: present when on
-    default_music_mood: str = Form("chill"),
     file: Optional[UploadFile] = File(None),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -129,27 +152,9 @@ async def submit_new_job(
 
     if (todo := requirements.missing("video", source_id=source_id if tab == "streamer" else None, url=url or "" if tab == "url" else "")):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Finish setup first: " + ", ".join(i["title"] for i in todo) + ".")
-    if (
-        not (target_clips.strip() == "" or target_clips.strip().isdigit())
-        or layout not in VALID_LAYOUTS
-        or captions not in ("on", "off")
-        or music not in ("auto", "on", "off")
-        or cut_pauses not in ("auto", "tight", "natural", "off")
-        or letterbox_style not in ("title", "blur")
-        or caption_style not in ("bold_pop", "karaoke", "clean")
-        or default_music_mood not in ("chill", "hype", "funny", "dramatic", "wholesome")
-    ):
+    if not (target_clips.strip() == "" or target_clips.strip().isdigit()):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid processing option.")
-    settings = {
-        "layout": layout,
-        "captions": captions == "on",
-        "music": "auto" if music == "auto" else music == "on",
-        "cut_pauses": cut_pauses,
-        "letterbox_style": letterbox_style,
-        "caption_style": caption_style,
-        "profanity_mask": profanity_mask is not None,
-        "default_music_mood": default_music_mood,
-    }
+    settings = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style) if layout else {}
     if target_clips.strip():
         settings["target_clips"] = max(1, min(MAX_TARGET_CLIPS, int(target_clips)))
 

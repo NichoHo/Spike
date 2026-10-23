@@ -157,10 +157,8 @@ async def clip_detail(
     caption = clip.get("cand_caption") or clip.get("cand_title") or ""
     credit = music_credit(clip.get("music_track"))
 
-    # Pause cuts in the current render, so the page can map player time <-> source time
-    # for layout switches. ponytail: assumes "natural" pacing; a first render made with
-    # "tight" maps a little off until it is re-rendered from this page.
-    from src.config import VIDEOS_DIR
+    # Pause cuts in the current render, so the page can map player time <-> source time for layout switches
+    from src.config import SILENCE_TRIM_S, VIDEOS_DIR
     from src.pipeline.stage9c_render import find_silence_cut_intervals
     from src.web.routes.clips import _load_words
     from src.pipeline.stage9c_render import default_zooms, merge_cut_intervals
@@ -169,7 +167,7 @@ async def clip_detail(
     silence_cuts = []
     if clip.get("silence_trim") == 1:
         words = _load_words(VIDEOS_DIR / str(clip["video_id"]), clip["candidate_id"])
-        silence_cuts = find_silence_cut_intervals(words, clip_start, clip_end)
+        silence_cuts = find_silence_cut_intervals(words, clip_start, clip_end, clip.get("silence_trim_s") or SILENCE_TRIM_S)
     stored_cuts = json.loads(clip.get("cuts") or "[]")
     # Everything cut out of the video being played now: the page maps player time to source time through these
     cuts = merge_cut_intervals(silence_cuts, stored_cuts, clip_start=clip_start, clip_end=clip_end)
@@ -195,6 +193,8 @@ async def clip_detail(
             "layout_changes": layout_changes,
             "cut_intervals": cuts,
             "manual_cuts": stored_cuts,
+            "pause_cuts": silence_cuts,
+            "silence_trim_s": clip.get("silence_trim_s") or SILENCE_TRIM_S,
             "zooms": zooms,
             "ai_edits": list_clip_ai_edits(clip_id),
             "concept": concept,

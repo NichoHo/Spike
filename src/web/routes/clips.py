@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from starlette.status import HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
 from src.concepts import CONCEPTS
-from src.config import VIDEOS_DIR
+from src.config import SILENCE_TRIM_S, VIDEOS_DIR
 from src.cleanup import delete_rejected_clip_files
 from src.db import (
     get_clip_with_details,
@@ -124,6 +124,16 @@ async def stream_clip_media(clip_id: int):
 
     # inline, not attachment: the player streams it with Range requests
     return FileResponse(path=file_path, media_type="video/mp4", content_disposition_type="inline")
+
+
+@router.get("/media/music/{rel_path:path}")
+async def music_preview(rel_path: str, user: Dict[str, Any] = Depends(get_current_user)):
+    """A library track for the clip page's preview button. Only paths in the music library are served."""
+    from src.music import list_all_tracks
+    track = next((t for t in list_all_tracks() if t["rel_path"] == rel_path), None)
+    if not track:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Track not found.")
+    return FileResponse(path=track["path"], content_disposition_type="inline")
 
 
 @router.get("/media/clip/{clip_id}/thumb")
@@ -314,6 +324,7 @@ async def rerender_clip_action(
     music_enabled: bool = Form(False),
     music_track: Optional[str] = Form(None),
     silence_trim: bool = Form(False),
+    silence_trim_s: float = Form(SILENCE_TRIM_S),  # cut pauses longer than this
     caption_text: Optional[str] = Form(None),
     layout_changes: str = Form(""),
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
@@ -346,7 +357,7 @@ async def rerender_clip_action(
     params = dict(
         start_s=start_s, end_s=end_s, layout=layout, caption_style=caption_style, hook_text=hook_text or "",
         show_hook=show_hook, music_enabled=music_enabled, music_track=music_track, silence_trim=silence_trim,
-        caption_text=caption_text, layout_changes=layout_changes, letterbox_style=letterbox_style,
+        silence_trim_s=min(5.0, max(0.5, silence_trim_s)), caption_text=caption_text, layout_changes=layout_changes, letterbox_style=letterbox_style,
         zooms=_json_list(zooms), cuts=_json_list(cuts),
         concept=concept, segments=_json_list(segments), overlay=_json_dict(overlay), theme=theme,
         concept_source=concept_source if concept_source in ("ai", "user") else None,
@@ -382,7 +393,7 @@ async def ai_edit_clip_action(
         layout=clip.get("layout") or "split", caption_style=clip.get("caption_style") or "bold_pop",
         hook_text=clip.get("cand_hook") or "", show_hook=clip.get("show_hook") == 1,
         music_enabled=bool(clip.get("music_track")), music_track=clip.get("music_track"),
-        silence_trim=clip.get("silence_trim") == 1, caption_text=None, layout_changes=clip.get("layout_changes") or "",
+        silence_trim=clip.get("silence_trim") == 1, silence_trim_s=clip.get("silence_trim_s"), caption_text=None, layout_changes=clip.get("layout_changes") or "",
         letterbox_style=clip.get("letterbox_style") or "blur", zooms=None, cuts=None,
     )
     set_clip_render_state(clip_id, "rendering")
@@ -627,6 +638,7 @@ def _rerender_job(
                 all_words=all_words,
                 music_track=chosen_music_str,
                 silence_trim=p["silence_trim"],
+                silence_trim_s=p.get("silence_trim_s"),
                 layout_changes=switches,
                 letterbox_style=letterbox_style,
                 title_text=clean_hook or clip.get("cand_title") or "",
@@ -659,6 +671,7 @@ def _rerender_job(
         trim_end_s=end_s,
         music_track=chosen_music_str,
         silence_trim=1 if p["silence_trim"] else 0,
+        silence_trim_s=p.get("silence_trim_s"),
         status="ready",
         show_hook=1 if p["show_hook"] and clean_hook and not is_concept else 0,
         letterbox_style=letterbox_style,
