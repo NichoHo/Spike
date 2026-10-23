@@ -68,7 +68,9 @@ class _MultiKeyClient:
         live = [i for i in range(len(self._clients)) if not gemini_budget.key_capped(model, self._keys[i])] or [0]
         for n, i in enumerate(live):
             try:
-                return self._clients[i].models.generate_content(model=model, **kwargs)
+                out = self._clients[i].models.generate_content(model=model, **kwargs)
+                gemini_budget.key_success(model, self._keys[i])
+                return out
             except Exception as e:
                 if _daily_cap(e):
                     gemini_budget.cap_key(model, self._keys[i])

@@ -1,7 +1,8 @@
 """
 Spike: a per-model daily count of Gemini requests. Gemini does not report remaining quota, so every request made
-through generate_content_with_retry (the only call site) is counted here. The limit is the hardcoded
-GEMINI_DAILY_LIMIT in config. Only the Auto layout checks it; the pipeline never blocks on it.
+through generate_content_with_retry (the only call site) is counted here, and every successful call per key.
+The per-key limit starts at GEMINI_DAILY_LIMIT in config and is learned from Google's own 429s (per_key_limit).
+Only the Auto layout checks it; the pipeline never blocks on it.
 """
 
 import hashlib
@@ -51,12 +52,51 @@ def key_capped(model: str, api_key: str) -> bool:
 
 
 def cap_key(model: str, api_key: str) -> None:
-    """Mark this key's daily quota for this model used up for the rest of the day. Idempotent; never raises."""
+    """Mark this key's daily quota for this model used up for the rest of the day. Idempotent; never raises.
+    The key's successful calls today are its real daily limit, so that becomes the learned per-key limit."""
     try:
         with _lock:
             set_setting(_cap_key(model, api_key), today())
+            n = key_used(model, api_key)
+            if n > 0:  # 0: no calls counted on this key today (counted before this code, or used outside Spike)
+                set_setting(_learned_key(model), str(n))
     except Exception:
         pass
+
+
+def _key_used_key(model: str, api_key: str) -> str:
+    return f"gemini_key_used:{model}:{_key_tag(api_key)}"
+
+
+def _learned_key(model: str) -> str:
+    return f"gemini_learned_limit:{model}"
+
+
+def key_used(model: str, api_key: str) -> int:
+    """Successful calls on this key for this model today."""
+    day, _, n = (get_setting(_key_used_key(model, api_key)) or "").partition("|")
+    return int(n) if day == today() and n.isdigit() else 0
+
+
+def key_success(model: str, api_key: str) -> None:
+    """One call on this key went through. A key past the per-key limit with no 429 yet means the real limit is
+    higher, so the learned limit follows it up. Never raises."""
+    try:
+        with _lock:
+            n = key_used(model, api_key) + 1
+            set_setting(_key_used_key(model, api_key), f"{today()}|{n}")
+            if n > per_key_limit(model):
+                set_setting(_learned_key(model), str(n))
+    except Exception:
+        pass
+
+
+def per_key_limit(model: str) -> int:
+    """Calls one key gets per day: learned from Google's 429s (cap_key) and from keys that went past it
+    (key_success), else the config guess. ponytail: Google limits per project, so two keys in one project
+    share a quota and the second one caps early, which lowers this; one key per project keeps it right."""
+    learned = get_setting(_learned_key(model)) or ""
+    return int(learned) if learned.isdigit() else config.GEMINI_DAILY_LIMITS.get(model, config.GEMINI_DAILY_LIMIT)
 
 
 def _key(model: str) -> str:
@@ -70,7 +110,7 @@ def used(model: str) -> int:
 
 def limit(model: str) -> int:
     """Every key has its own daily quota, so the total is the per-key limit times the number of keys."""
-    return config.GEMINI_DAILY_LIMITS.get(model, config.GEMINI_DAILY_LIMIT) * max(1, len(config.gemini_keys()))
+    return per_key_limit(model) * max(1, len(config.gemini_keys()))
 
 
 def left(model: str) -> int:

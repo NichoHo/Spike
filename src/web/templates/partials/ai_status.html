@@ -17,10 +17,10 @@
     <div class="ai-status__quota">
       <div class="ai-status__row">
         <span class="truncate">{{ g.model | replace("gemini-", "") }}</span>
-        <span class="tabular">{{ g.used }} / {{ g.limit }}</span>
+        <span class="tabular" data-tooltip="Calls today across all keys. The limit is learned from Google's limit errors">{{ g.used }} / {{ g.limit }}</span>
       </div>
       <meter min="0" max="{{ g.limit }}" value="{{ g.used }}" low="{{ (g.limit * 0.7) | round }}" high="{{ (g.limit * 0.9) | round }}" optimum="0"
-             aria-label="{{ g.model }} requests today: {{ g.used }} of {{ g.limit }}"></meter>
+             aria-label="{{ g.model }}: {{ g.used }} of {{ g.limit }} calls today"></meter>
     </div>
   {% endfor %}
 

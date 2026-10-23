@@ -65,15 +65,22 @@ async def claude_approval_pending(user: Dict[str, Any] = Depends(require_admin))
 
 
 def ai_status() -> Dict[str, Any]:
-    """Sidebar panel: which AI is working right now, Spike's own count of today's Gemini requests per model
-    (Gemini does not report remaining quota), and whether Claude is paused."""
+    """Sidebar panel: which AI is working right now, today's successful Gemini calls per model across all keys
+    against the learned limit (Gemini does not report remaining quota), and whether Claude is paused."""
     from src import config
     models = dict.fromkeys([config.DEFAULT_GEMINI_MODEL, config.JUDGE_GEMINI_MODEL])  # same model twice: one row
+    keys = config.gemini_keys()
     return {
         "claude_call": claude_fallback.running(),
         "claude_waiting": bool(claude_fallback.pending()),
         "paused": claude_fallback.paused(),
-        "gemini": [{"model": m, "used": gemini_budget.used(m), "limit": gemini_budget.limit(m)} for m in models],
+        # A key Google cut off counts as full, so the bar shows what is really left.
+        "gemini": [{
+            "model": m,
+            "used": sum(gemini_budget.per_key_limit(m) if gemini_budget.key_capped(m, k) else gemini_budget.key_used(m, k)
+                        for k in keys),
+            "limit": gemini_budget.limit(m),
+        } for m in models],
     }
 
 

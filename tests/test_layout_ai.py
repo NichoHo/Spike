@@ -138,3 +138,33 @@ def test_second_gemini_key_takes_over_when_the_first_hits_its_daily_quota(monkey
     with pytest.raises(RuntimeError):
         s7.get_gemini_client().models.generate_content(model="m", contents="x")
     assert used == ["slow"]  # a per-minute 429 is retried by the caller, not handed to the next key
+
+
+def test_per_key_limit_is_learned_from_real_use(monkeypatch):
+    from src import config, gemini_budget as gb
+    from src.pipeline import stage7_moments as s7
+    model, cap_at = "learn-m", {"k1": 4}
+    calls = {}
+    monkeypatch.setattr(config, "GEMINI_DAILY_LIMITS", {model: 2})  # the starting guess: 2 per key
+
+    class Fake:
+        def __init__(self, api_key):
+            self.key, self.models = api_key, self
+
+        def generate_content(self, model, **kw):
+            calls[self.key] = calls.get(self.key, 0) + 1
+            if calls[self.key] > cap_at.get(self.key, 99):
+                raise RuntimeError("429 RESOURCE_EXHAUSTED. Please retry in 7h33m11s")
+            return "ok"
+
+    monkeypatch.setattr(s7.genai, "Client", Fake)
+    monkeypatch.setattr("src.config.GEMINI_API_KEY", "k1,k2,k3")
+    client = s7.get_gemini_client()
+    for _ in range(3):
+        client.models.generate_content(model=model, contents="x")
+    assert gb.per_key_limit(model) == 3  # past the guess of 2 with no 429: the limit follows it up
+    assert gb.limit(model) == 9  # per key times 3 keys
+    client.models.generate_content(model=model, contents="x")  # 4th call on k1 succeeds
+    client.models.generate_content(model=model, contents="x")  # 5th: Google says no, k2 takes over
+    assert gb.key_capped(model, "k1") and gb.key_used(model, "k1") == 4 and gb.key_used(model, "k2") == 1
+    assert gb.per_key_limit(model) == 4  # k1's real daily limit: 4 calls
