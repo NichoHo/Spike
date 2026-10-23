@@ -7,7 +7,39 @@
     <h1 class="page-header__title">Jobs</h1>
     <p class="page-header__description">Pipeline status, execution history, and active background tasks.</p>
   </div>
+  <div class="page-header__actions">
+    {{ ui.button("Reorder queue", variant="secondary", icon="queue", id="btn-reorder-queue") }}
+  </div>
 </header>
+
+{# Queue reorder (drag, or the up/down buttons). The list is built from the live table rows when it opens. #}
+<dialog id="reorder-dialog" class="dialog dialog--md" aria-labelledby="reorder-title">
+  <div class="dialog__body stack">
+    <div>
+      <h2 class="dialog__title" id="reorder-title">Reorder queue</h2>
+      <p class="dialog__text">Drag jobs into the order they should run. The top job runs first.</p>
+    </div>
+    <p class="small muted" data-reorder-empty hidden>Fewer than two jobs are waiting or running, so there is nothing to reorder.</p>
+    <ol class="queue-list" data-reorder-list aria-label="Job order"></ol>
+    <p class="small" data-reorder-error role="alert" style="color: var(--color-danger-text);" hidden></p>
+  </div>
+  <div class="dialog__footer">
+    {{ ui.button("Cancel", variant="secondary", attrs={"data-close-dialog": ""}) }}
+    {{ ui.button("Save order", variant="primary", icon="check", id="btn-reorder-save") }}
+  </div>
+</dialog>
+
+<dialog id="reorder-confirm-dialog" class="dialog" aria-labelledby="reorder-confirm-title">
+  <div class="dialog__body">
+    <h2 class="dialog__title" id="reorder-confirm-title">Pause the running job?</h2>
+    <p class="dialog__text"><strong data-confirm-title></strong> is running now and is no longer first in the order.</p>
+    <p class="dialog__text">It finishes its current step (<span class="mono" data-confirm-stage></span>), then waits in the queue. When its turn comes it picks up from that step, so no finished work is lost.</p>
+  </div>
+  <div class="dialog__footer">
+    {{ ui.button("Keep editing", variant="secondary", attrs={"data-close-dialog": ""}) }}
+    {{ ui.button("Pause and save", variant="primary", icon="pause", id="btn-reorder-confirm") }}
+  </div>
+</dialog>
 
 <div class="stack stack--lg">
   <!-- Top: Disk Usage Meter (DESIGN.md §9.19, §10.7) -->
@@ -60,4 +92,142 @@
     </table>
   </div>
 </div>
+
+<script>
+(() => {
+  const dlg = document.getElementById("reorder-dialog");
+  const confirmDlg = document.getElementById("reorder-confirm-dialog");
+  const list = dlg.querySelector("[data-reorder-list]");
+  const empty = dlg.querySelector("[data-reorder-empty]");
+  const errBox = dlg.querySelector("[data-reorder-error]");
+  const saveBtn = document.getElementById("btn-reorder-save");
+  const icon = (name, size) =>
+    `<svg width="${size}" height="${size}" aria-hidden="true" focusable="false"><use href="/static/icons/sprite.svg#${name}"></use></svg>`;
+
+  function renumber() {
+    [...list.children].forEach((li, i) => {
+      li.querySelector(".queue-item__pos").textContent = i + 1;
+      li.querySelector("[data-move='-1']").disabled = i === 0;
+      li.querySelector("[data-move='1']").disabled = i === list.children.length - 1;
+    });
+  }
+
+  function item(row) {
+    const { queueId: id, queueStatus: status, queueTitle: title, queueStage: stage } = row.dataset;
+    const li = document.createElement("li");
+    li.className = "queue-item";
+    li.draggable = true;
+    Object.assign(li.dataset, { id, status, title, stage });
+    li.innerHTML = `
+      <span class="queue-item__grip">${icon("list", 16)}</span>
+      <span class="queue-item__pos tabular"></span>
+      <span class="queue-item__main">
+        <span class="queue-item__title truncate"></span>
+        <span class="secondary-line"></span>
+      </span>
+      <span class="queue-item__moves">
+        <button type="button" class="btn btn--ghost btn--sm btn--icon queue-item__up" data-move="-1">${icon("caret-down", 14)}</button>
+        <button type="button" class="btn btn--ghost btn--sm btn--icon" data-move="1">${icon("caret-down", 14)}</button>
+      </span>`;
+    // textContent, not innerHTML: titles come from YouTube/Twitch
+    li.querySelector(".queue-item__title").textContent = title;
+    li.querySelector(".secondary-line").textContent =
+      `#${id} · ${status === "running" ? "Running now" : "Queued"}${stage ? " · " + stage : ""}`;
+    li.querySelector("[data-move='-1']").setAttribute("aria-label", `Move #${id} up`);
+    li.querySelector("[data-move='1']").setAttribute("aria-label", `Move #${id} down`);
+    if (status === "running") li.classList.add("is-running");
+    return li;
+  }
+
+  document.getElementById("btn-reorder-queue").addEventListener("click", () => {
+    const rows = document.querySelectorAll("#jobs-tbody tr[data-queue-id]");
+    list.replaceChildren(...[...rows].map(item));
+    const enough = rows.length >= 2;
+    list.hidden = !enough;
+    empty.hidden = enough;
+    saveBtn.disabled = !enough;
+    errBox.hidden = true;
+    if (enough) renumber();
+    dlg.showModal();
+  });
+
+  // Up/down buttons: the keyboard path for the same reorder
+  list.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-move]");
+    if (!btn) return;
+    const li = btn.closest("li");
+    if (btn.dataset.move === "-1" && li.previousElementSibling) list.insertBefore(li, li.previousElementSibling);
+    else if (btn.dataset.move === "1" && li.nextElementSibling) list.insertBefore(li.nextElementSibling, li);
+    renumber();
+    (btn.disabled ? li.querySelector("[data-move]:not(:disabled)") : btn)?.focus();
+  });
+
+  let dragged = null;
+  list.addEventListener("dragstart", (e) => {
+    dragged = e.target.closest("li");
+    dragged.classList.add("is-dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragged.dataset.id);
+  });
+  list.addEventListener("dragover", (e) => {
+    if (!dragged) return;
+    e.preventDefault();
+    // Insert before the first item whose middle is below the pointer
+    const after = [...list.children].find((li) => {
+      if (li === dragged) return false;
+      const r = li.getBoundingClientRect();
+      return e.clientY < r.top + r.height / 2;
+    });
+    if (after) { if (after !== dragged.nextElementSibling) list.insertBefore(dragged, after); }
+    else if (list.lastElementChild !== dragged) list.appendChild(dragged);
+  });
+  list.addEventListener("drop", (e) => e.preventDefault());
+  list.addEventListener("dragend", () => {
+    dragged?.classList.remove("is-dragging");
+    dragged = null;
+    renumber();
+  });
+
+  async function save(confirmPause) {
+    const order = [...list.children].map((li) => Number(li.dataset.id));
+    saveBtn.disabled = true;
+    try {
+      const res = await fetch("/jobs/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order, confirm_pause: confirmPause }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409 && data.needs_confirm) return askPause(data.needs_confirm);
+      if (!res.ok) throw new Error(data.detail || `Save failed (${res.status})`);
+      confirmDlg.close();
+      dlg.close();
+      htmx.ajax("GET", "/jobs/table", { target: "#jobs-tbody", swap: "outerHTML" });
+      window.showToast?.(data.paused
+        ? `Queue saved. Job #${data.paused} pauses after its current step.`
+        : "Queue order saved.");
+    } catch (err) {
+      confirmDlg.close();
+      errBox.textContent = err.message;
+      errBox.hidden = false;
+    } finally {
+      saveBtn.disabled = false;
+    }
+  }
+
+  function askPause(id) {
+    const li = list.querySelector(`li[data-id="${id}"]`);
+    confirmDlg.querySelector("[data-confirm-title]").textContent = li ? li.dataset.title : `Job #${id}`;
+    confirmDlg.querySelector("[data-confirm-stage]").textContent = (li && li.dataset.stage) || "current step";
+    confirmDlg.showModal();
+  }
+
+  saveBtn.addEventListener("click", () => {
+    const running = list.querySelector("li.is-running");
+    if (running && list.firstElementChild !== running) askPause(running.dataset.id);
+    else save(false);
+  });
+  document.getElementById("btn-reorder-confirm").addEventListener("click", () => save(true));
+})();
+</script>
 {% endblock %}

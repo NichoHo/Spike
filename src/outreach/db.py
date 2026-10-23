@@ -37,9 +37,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "min_stream_hours": 2.0,
     "min_fit_score": 0,
     "max_shorts_14d": 10,
-    # Twitch finder (§6.2 B, accepted risk). Off until an admin turns it on. Sample hours are this PC's time
-    # (WIB): Indonesian prime time 20:00 to 23:00, US evening 07:00 to 11:00.
-    "twitch_enabled": 0,
+    "youtube_enabled": 1,  # per-platform on/off for the finder (both on by default)
+    "twitch_enabled": 1,
+    # Twitch finder (§6.2 B, accepted risk). Runs next to YouTube for active Twitch searches. Sample hours are
+    # this PC's time (WIB): Indonesian prime time 20:00 to 23:00, US evening 07:00 to 11:00.
     "twitch_sample_hours": "7,9,11,20,22",
     "twitch_new_leads_per_day": 15,
     # YouTube quota (verified 2026-10-14: search.list has its own bucket, 100 calls a day;
@@ -47,11 +48,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "search_calls_per_day": 60,
     "units_per_day": 10000,
     "units_reserved_for_spike": 1000,
-    # Trial clips (§6.3)
-    "trial_clips_per_day": 3,
+    # Trial clips (§6.3). trial_clips_per_day removed: unlimited (missing/blank/None means no daily cap).
     "trial_max_vod_s": 7200,
-    # Email (§4.2, §6.3)
-    "emails_per_day": 20,
+    # Email (§4.2, §6.3). emails_per_day removed: unlimited (missing/blank/None means no daily cap).
     "send_gap_min": 4,
     "followups_enabled": 1,
     "followup_1_days": 4,
@@ -184,6 +183,7 @@ CREATE TABLE IF NOT EXISTS leads (
     streams_14d INTEGER,
     avg_stream_h REAL,
     shorts_14d INTEGER,
+    youtube TEXT,  -- Twitch/Kick leads: the streamer's YouTube channel URL for the Shorts count (found in the bio or typed in)
     vod_views INTEGER,  -- median views per stream in the look-back window (streams over a day old)
     whop_flag INTEGER DEFAULT 0,
     vod_video_id TEXT,
@@ -212,7 +212,9 @@ CREATE TABLE IF NOT EXISTS leads (
     drive_uploaded_at TEXT,
     reply_sentiment TEXT,
     client_model TEXT,
-    client_cap TEXT,
+    client_cap TEXT,         -- per-streamer offer terms; NULL means the default from Settings
+    client_rate TEXT,
+    client_min_views INTEGER,
     client_start TEXT,
     notes TEXT,
     api_fetched_at TEXT,
@@ -279,6 +281,7 @@ CREATE TABLE IF NOT EXISTS messages (
     sent_at TEXT,
     reply_at TEXT,
     reply_snippet TEXT,
+    reply_url TEXT,  -- set when a reply outside the thread is logged by hand
     created_at TEXT,
     UNIQUE(lead_id, kind)
 );
@@ -341,6 +344,10 @@ _MIGRATIONS = (
     "ALTER TABLE searches ADD COLUMN max_views INTEGER",
     "ALTER TABLE leads ADD COLUMN twitch_search_id INTEGER",
     "ALTER TABLE leads ADD COLUMN clip_stream_at TEXT",
+    "ALTER TABLE leads ADD COLUMN client_rate TEXT",
+    "ALTER TABLE leads ADD COLUMN client_min_views INTEGER",
+    "ALTER TABLE leads ADD COLUMN youtube TEXT",
+    "ALTER TABLE messages ADD COLUMN reply_url TEXT",
 )
 
 _initialized_path: Optional[str] = None
@@ -695,7 +702,7 @@ def upsert_draft(lead_id: int, kind: str, to_email: str, subject: str, body: str
 
 def update_message(message_id: int, **fields: Any) -> None:
     allowed = {"to_email", "subject", "body", "status", "scheduled_for", "gmail_message_id", "gmail_thread_id",
-               "rfc_message_id", "error", "sent_at", "reply_at", "reply_snippet"}
+               "rfc_message_id", "error", "sent_at", "reply_at", "reply_snippet", "reply_url"}
     assert set(fields) <= allowed, set(fields) - allowed
     sets = ",".join(f"{k} = ?" for k in fields)
     _execute(f"UPDATE messages SET {sets} WHERE id = ?", (*fields.values(), message_id))

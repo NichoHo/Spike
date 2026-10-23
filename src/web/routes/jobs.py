@@ -7,10 +7,10 @@ import shutil
 from datetime import datetime, timedelta
 from typing import Dict, Any
 from fastapi import APIRouter, Request, Depends, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.status import HTTP_303_SEE_OTHER
 
-from src.config import CLAUDE_5H_TOKEN_CAP, CLAUDE_WEEK_TOKEN_CAP, DATA_DIR, VIDEOS_DIR
+from src.config import CLAUDE_5H_TOKEN_CAP, CLAUDE_WEEK_TOKEN_CAP, DATA_DIR, VIDEOS_DIR, PUBLIC_URL
 from src.db import (
     claude_usage_summary,
     list_jobs,
@@ -19,7 +19,10 @@ from src.db import (
     cancel_job,
     list_review_clips,
     estimate_remaining_seconds,
+    log_event,
+    reorder_queue,
 )
+from src import oversize_gate
 from src.web.auth import get_current_user
 
 
@@ -51,6 +54,23 @@ def _with_eta(jobs):
     return jobs
 
 
+def _gate_ctx():
+    """The oversized-input gate waiting for an answer, with its rendered message, or None."""
+    req = oversize_gate.pending()
+    if not req:
+        return None
+    return {
+        "id": req["id"],
+        "video_id": req["video_id"],
+        "title": req.get("title") or f"Video #{req['video_id']}",
+        "level": req.get("level", 1),
+        "message": oversize_gate.build_message(
+            req["video_id"], req.get("title") or f"Video #{req['video_id']}",
+            float(req.get("duration_s") or 0.0), req.get("level", 1), PUBLIC_URL,
+        ),
+    }
+
+
 @router.get("/jobs", response_class=HTMLResponse)
 async def jobs_page(
     request: Request,
@@ -77,6 +97,7 @@ async def jobs_page(
             "claude_5h_cap": CLAUDE_5H_TOKEN_CAP,
             "claude_week_cap": CLAUDE_WEEK_TOKEN_CAP,
             "review_count": review_count,
+            "gate": _gate_ctx(),
         },
     )
 
@@ -95,6 +116,7 @@ async def jobs_table_partial(
         context={
             "jobs": jobs,
             "user": user,
+            "gate": _gate_ctx(),
         },
     )
 
@@ -120,10 +142,46 @@ async def retry_job_action(
     return RedirectResponse(url="/jobs", status_code=HTTP_303_SEE_OTHER)
 
 
+@router.post("/jobs/reorder")
+async def reorder_jobs_action(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Set the queue order. Body: {"order": [job ids, first runs first], "confirm_pause": bool}.
+    409 with needs_confirm when the running job would lose first place and the pause was not confirmed."""
+    try:
+        body = await request.json()
+        order = [int(i) for i in body.get("order", [])]
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="order must be a list of job ids")
+    result = reorder_queue(order, allow_pause=bool(body.get("confirm_pause")))
+    if "needs_confirm" in result:
+        return JSONResponse(result, status_code=409)
+    who = user.get("login", "someone")
+    paused = result["paused"]
+    log_event("info", f"Queue reordered by {who}" + (f"; job #{paused} paused" if paused else ""), video_id=paused)
+    return JSONResponse(result)
+
+
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_job_action(
     job_id: int,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     cancel_job(job_id)
+    return RedirectResponse(url="/jobs", status_code=HTTP_303_SEE_OTHER)
+
+
+@router.post("/jobs/gate/answer")
+async def gate_answer_action(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Answer the oversized-input gate: Continue (decision=continue) lets the pipeline into the moments stage,
+    Stop (decision=stop) stops the job. The waiting worker/pipeline process reads the answer from settings."""
+    form = await request.form()
+    req_id = str(form.get("req_id", ""))
+    decision = str(form.get("decision", ""))
+    if decision in ("continue", "stop"):
+        oversize_gate.answer(req_id, approve=(decision == "continue"))
     return RedirectResponse(url="/jobs", status_code=HTTP_303_SEE_OTHER)

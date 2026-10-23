@@ -74,6 +74,8 @@ def _nav_badges() -> dict:
 
 
 templates.env.globals["nav_badges"] = _nav_badges
+from src.web.routes.clips import ai_status as _ai_status  # noqa: E402
+templates.env.globals["ai_status"] = _ai_status
 app.state.templates = templates
 
 # Mount static files

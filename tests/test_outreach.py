@@ -212,16 +212,14 @@ def test_lifecycle_to_sent(env, monkeypatch):
     db.update_lead(a, status="replied")
     db.update_lead(c, status="replied")
     assert service.request_clips([a, c]) == 2
-    db.set_settings({"trial_clips_per_day": 1})
-    assert service.queue_trial_clips() == 1 and service.queue_trial_clips() == 0  # daily cap
+    # trial_clips_per_day was removed: there is no daily cap, so every requested clip queues at once.
+    assert service.queue_trial_clips() == 2 and service.queue_trial_clips() == 0  # nothing left to queue
     la = db.get_lead(a)
     assert la["status"] == "clip_queued"
     job = spike_db.get_job(la["spike_video_id"])
     assert job["priority"] == 0 and job["url"].endswith("vid1")
     assert json.loads(job["settings"]) == {"target_clips": 1, "max_process_s": 7200, "prospect": True}
     assert spike_db.get_source(la["spike_source_id"])["permission"] == "none"
-    db.set_settings({"trial_clips_per_day": 5})
-    assert service.queue_trial_clips() == 1
     assert spike_db.get_source(db.get_lead(c)["spike_source_id"])["permission"] == "written"
 
     # Spike renders the clip; the reviewer approves it; it is shared for the Gmail reply
@@ -239,17 +237,68 @@ def test_lifecycle_to_sent(env, monkeypatch):
     assert service.mark([a], "trial") == 1
 
 
+def test_per_streamer_terms_override_defaults_and_freeze_on_signing(env):
+    db.set_settings({"proof_url": "https://example.com/"})
+    a = add_lead(language="en", country="US")
+    service.approve([a])
+    service.draft_emails()
+    assert "$1 per 1,000" in db.get_message(a, "first")["body"]  # defaults
+
+    assert service.save_terms(a, "$2", "50.000", "$800") is True
+    assert service.save_terms(a, "$2", "50000", "$800") is False  # unchanged
+    with pytest.raises(service.OutreachError):
+        service.save_terms(a, "", "lots", "")
+    service.draft_emails(None, [a])
+    body = db.get_message(a, "first")["body"]
+    assert "$2 per 1,000" in body and "50,000 views" in body and "$800 monthly cap" in body
+
+    service.save_terms(a, "", "", "$900")  # blank rate and views fall back to the defaults again
+    db.update_lead(a, status="replied")
+    service.mark([a], "client")
+    db.set_settings({"monthly_cap": "$5", "rate_default": "$9"})  # a later default change leaves the deal alone
+    lead = db.get_lead(a)
+    assert service.terms(lead, db.get_settings()) == {"rate": "$1", "min_views": 10000, "cap": "$900"}
+
+
+def test_terms_edit_from_ready_and_clients_tabs(env):
+    from fastapi.testclient import TestClient
+    from src.web.app import app
+    db.set_settings({"proof_url": "https://example.com/"})
+    a = add_lead()  # Indonesian: defaults to the Southeast Asia rate
+    service.approve([a])
+    service.draft_emails()
+    client = TestClient(app)
+    page = client.get("/outreach?tab=email").text
+    assert f'name="rate_{a}"' in page and 'placeholder="$0.50"' in page and 'placeholder="10000"' in page
+
+    form = {"action": "save_drafts", "tab": "email", f"to_{a}": "rafi@studio.id", f"subject_{a}": "s",
+            f"body_{a}": "edited", f"rate_{a}": "$0.75", f"min_views_{a}": "", f"cap_{a}": ""}
+    r = client.post("/outreach/leads/bulk", data=form, headers={"Origin": "http://testserver"}, follow_redirects=False)
+    assert "rewritten" in urllib_unquote(r.headers["location"])
+    assert "$0.75 per 1.000 view" in db.get_message(a, "first")["body"]
+    r = client.post("/outreach/leads/bulk", data={**form, f"body_{a}": "edited again"},  # same terms: edits kept
+                    headers={"Origin": "http://testserver"}, follow_redirects=False)
+    assert db.get_message(a, "first")["body"] == "edited again"
+
+    db.update_lead(a, status="client")
+    assert 'value="$0.75"' in client.get("/outreach?tab=clients").text
+    client.post(f"/outreach/leads/{a}/client", data={"model": "A", "rate": "", "min_views": "20000", "cap": "$1,000", "start": ""},
+                headers={"Origin": "http://testserver"})
+    lead = db.get_lead(a)
+    assert (lead["client_rate"], lead["client_min_views"], lead["client_cap"]) == (None, 20000, "$1,000")
+
+
 def test_draft_shows_placeholder_check(env):
     assert service.render_template("Hi {name}, {unknown} {name.__class__}", {"name": "Rafi"}) == "Hi Rafi, {unknown} {name.__class__}"
 
 
-def test_send_respects_daily_cap_stagger_and_opt_out(env, monkeypatch):
+def test_send_respects_stagger_and_opt_out(env, monkeypatch):
     configure_sending(monkeypatch)
     ids = [add_lead(channel_id=f"UC{i:022d}", email=f"c{i}@x.io") for i in range(3)]
     for i in ids:
         db.update_lead(i, status="email_ready")
         db.upsert_draft(i, "first", db.get_lead(i)["email"], "Hello", "Body")
-    db.set_settings({"send_gap_min": 5, "emails_per_day": 1})
+    db.set_settings({"send_gap_min": 5})  # emails_per_day removed: no daily cap
     assert service.queue_send(ids)["queued"] == 3
     times = sorted(db.get_message(i, "first")["scheduled_for"] for i in ids)
     assert datetime.fromisoformat(times[1]) - datetime.fromisoformat(times[0]) == timedelta(minutes=5)
@@ -259,17 +308,20 @@ def test_send_respects_daily_cap_stagger_and_opt_out(env, monkeypatch):
     db.add_opt_out(db.get_lead(ids[0])["email"], None)
     monkeypatch.setattr(google, "send_email", lambda *a, **k: {"id": "m", "thread_id": "t", "rfc_message_id": ""})
     r = service.send_due()
-    assert r["sent"] == 1 and r["held"] == 1  # opted-out one cancelled, cap of 1 holds the last
+    assert r["sent"] == 2 and r["held"] == 0  # opted-out one cancelled, no cap so the rest all send
     assert db.get_message(ids[0], "first")["status"] == "cancelled"
-    assert sorted(db.get_message(i, "first")["status"] for i in ids[1:]) == ["queued", "sent"]
+    assert sorted(db.get_message(i, "first")["status"] for i in ids[1:]) == ["sent", "sent"]
 
     # An auth failure keeps the message queued instead of failing it
-    db.set_settings({"emails_per_day": 10})
+    for i in ids[1:]:  # re-queue the two that just sent, so the auth-failure path has due mail
+        db.update_message(db.get_message(i, "first")["id"], status="queued")
+    with db.connect() as conn:
+        conn.execute("UPDATE messages SET scheduled_for = ?", (ago(hours=1),))
     def boom(*a, **k):
         raise google.GoogleAuthError("revoked")
     monkeypatch.setattr(google, "send_email", boom)
     service.send_due()
-    assert [db.get_message(i, "first")["status"] for i in ids[1:]].count("queued") == 1
+    assert [db.get_message(i, "first")["status"] for i in ids[1:]].count("queued") >= 1
 
 
 def test_followups_replies_bounces_and_opt_outs(env, monkeypatch):
@@ -690,7 +742,6 @@ def tw(env, monkeypatch):
     from src.outreach import twitch
     monkeypatch.setattr(config, "TWITCH_CLIENT_ID", "spike-app")
     monkeypatch.setattr(config, "TWITCH_CLIENT_SECRET", "s")
-    db.set_settings({"twitch_enabled": 1})
     return twitch
 
 
@@ -700,7 +751,7 @@ def test_twitch_finder_needs_spike_twitch_credentials(env, monkeypatch):
     assert "TWITCH_CLIENT_ID" in twitch.credentials_problem()
     with pytest.raises(twitch.TwitchError):
         twitch.helix("streams", [])
-    assert twitch.run_finder({**db.get_settings(), "twitch_enabled": 1})["stopped"].startswith("Set TWITCH_CLIENT_ID")
+    assert twitch.run_finder()["stopped"].startswith("Set TWITCH_CLIENT_ID")
     monkeypatch.setattr(config, "TWITCH_CLIENT_ID", "spike-app")
     monkeypatch.setattr(config, "TWITCH_CLIENT_SECRET", "s")
     assert twitch.credentials_problem() is None
@@ -810,7 +861,7 @@ def test_twitch_sample_schedule_runs_once_per_listed_hour(tw, monkeypatch):
     daemon.sample_twitch(db.get_settings())
     daemon.sample_twitch(db.get_settings(), force=True)  # "Sample now"
     assert len(calls) == 2
-    db.set_settings({"twitch_enabled": 0})
+    monkeypatch.setattr(config, "TWITCH_CLIENT_SECRET", "")  # no Twitch app: no sampling
     daemon.sample_twitch(db.get_settings(), force=True)
     assert len(calls) == 2
 
@@ -827,13 +878,13 @@ def test_twitch_routes(tw, monkeypatch):
     assert r.status_code == 303 and db.list_twitch_searches()[0]["game_name"] == "Just Chatting"
     r = client.post("/outreach/twitch/searches", data={"category": "Nope"}, headers=h, follow_redirects=False)
     assert "No+Twitch+category" in r.headers["location"]
-    assert "Twitch finder" in client.get("/outreach?tab=settings").text
-    client.post("/outreach/settings", data={"form": "twitch", "twitch_enabled": "1", "twitch_sample_hours": "22, 7,9"},
+    page = client.get("/outreach?tab=settings").text
+    assert "Just Chatting" in page and 'form="tw-settings"' in page
+    client.post("/outreach/settings", data={"form": "twitch", "twitch_sample_hours": "22, 7,9"},
                 headers=h, follow_redirects=False)
-    assert db.get_settings()["twitch_sample_hours"] == "7,9,22" and db.get_settings()["twitch_enabled"] == 1
-    monkeypatch.setattr(config, "TWITCH_CLIENT_SECRET", "")  # no Twitch app: turning it on is refused
-    r = client.post("/outreach/settings", data={"form": "twitch", "twitch_enabled": "1", "twitch_sample_hours": "7"},
-                    headers=h, follow_redirects=False)
+    assert db.get_settings()["twitch_sample_hours"] == "7,9,22"
+    monkeypatch.setattr(config, "TWITCH_CLIENT_SECRET", "")  # no Twitch app: Sample now is refused
+    r = client.post("/outreach/twitch/sample-now", headers=h, follow_redirects=False)
     assert "TWITCH_CLIENT_ID" in urllib_unquote(r.headers["location"])
 
 

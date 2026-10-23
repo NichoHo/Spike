@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, BackgroundTasks, Request, Depends, Form, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from starlette.status import HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
 from src.concepts import CONCEPTS
@@ -32,7 +32,7 @@ from src.db import (
     log_event,
 )
 from src.pipeline.stage9c_render import SWITCH_LAYOUTS, render_single_vertical_clip
-from src import claude_fallback
+from src import claude_fallback, gemini_budget
 from src.web.auth import get_current_user, require_admin
 
 
@@ -61,7 +61,37 @@ async def render_events(after: Optional[int] = None, user: Dict[str, Any] = Depe
 @router.get("/api/claude-approval")
 async def claude_approval_pending(user: Dict[str, Any] = Depends(require_admin)):
     """The Claude fallback call waiting for the user's OK, polled by every page."""
-    return {"request": claude_fallback.pending()}
+    return {"request": claude_fallback.pending(), "resets_at": gemini_budget.reset_at()}
+
+
+def ai_status() -> Dict[str, Any]:
+    """Sidebar panel: which AI is working right now, Spike's own count of today's Gemini requests per model
+    (Gemini does not report remaining quota), and whether Claude is paused."""
+    from src import config
+    models = dict.fromkeys([config.DEFAULT_GEMINI_MODEL, config.JUDGE_GEMINI_MODEL])  # same model twice: one row
+    return {
+        "claude_call": claude_fallback.running(),
+        "claude_waiting": bool(claude_fallback.pending()),
+        "paused": claude_fallback.paused(),
+        "gemini": [{"model": m, "used": gemini_budget.used(m), "limit": gemini_budget.limit(m)} for m in models],
+    }
+
+
+@router.get("/partials/ai-status", response_class=HTMLResponse)
+async def ai_status_partial(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+    """The sidebar panel, re-rendered for app.js to swap in."""
+    return request.app.state.templates.TemplateResponse(request=request, name="partials/ai_status.html", context={"user": user})
+
+
+@router.post("/api/claude-pause")
+async def claude_pause(request: Request, user: Dict[str, Any] = Depends(require_admin)):
+    """Body: {"paused": bool}. JSON only, like /api/claude-approval."""
+    if not request.headers.get("content-type", "").startswith("application/json"):
+        raise HTTPException(status_code=415, detail="JSON body required")
+    on = bool((await request.json()).get("paused"))
+    claude_fallback.set_paused(on)
+    log_event("info", f"Claude {'paused' if on else 'resumed'} by {user.get('login')}")
+    return {"paused": on}
 
 
 @router.post("/api/claude-approval")

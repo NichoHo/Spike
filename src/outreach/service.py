@@ -104,6 +104,24 @@ def save_contact(lead_id: int, email: str, socials: Optional[Dict[str, str]] = N
     return db.get_lead(lead_id)
 
 
+def save_youtube(lead_id: int, text: str) -> Dict[str, Any]:
+    """The YouTube channel behind a Twitch/Kick lead, typed by hand. Recounts the Shorts straight away; a blank
+    clears both. A refresh never overwrites a link that is already set."""
+    lead = db.get_lead(lead_id)
+    if not lead:
+        raise OutreachError("Lead not found.")
+    text = (text or "").strip()
+    link = youtube.parse_channel_link(text) if text else None
+    if text and not link:
+        raise OutreachError("Paste a YouTube channel link, an @handle, or a channel id (UC...).")
+    shorts = youtube.shorts_for_link(link, db.get_settings())
+    db.update_lead(lead_id, youtube=link, shorts_14d=shorts)
+    lead = db.get_lead(lead_id)
+    if link and shorts is None:
+        lead["_note"] = "Saved, but the Shorts could not be counted (channel not found or YouTube quota used up)."
+    return lead
+
+
 # ── Add a lead by hand (Whop campaigns, Kick, referrals) ──────────────────────
 
 PLATFORM_NAMES = {"youtube": "YouTube", "twitch": "Twitch", "kick": "Kick"}
@@ -272,10 +290,12 @@ def request_clips(lead_ids: Iterable[int]) -> int:
 def queue_trial_clips(settings: Optional[Dict[str, Any]] = None) -> int:
     """Send requested sample clips to Spike, within the daily trial-clip cap. Returns how many."""
     settings = settings or db.get_settings()
-    room = settings["trial_clips_per_day"] - db.count_clips_queued_since(local_midnight_utc_iso())
+    # trial_clips_per_day was removed: unset (or a blank/None value) means UNLIMITED, so no daily cap at all.
+    cap = settings.get("trial_clips_per_day")
+    room = None if cap in (None, "") else int(cap) - db.count_clips_queued_since(local_midnight_utc_iso())
     queued = 0
     for lead in db.list_leads(["clip_wanted"]):
-        if queued >= room:
+        if room is not None and queued >= room:
             break
         if db.is_opted_out(lead["email"], *db.lead_keys(lead)):
             db.update_lead(lead["id"], status="opted_out")
@@ -368,20 +388,32 @@ def _clip_details(clip_id: int) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def default_terms(lead: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:
+    return {"rate": settings["rate_sea"] if is_sea(lead) else settings["rate_default"],
+            "min_views": settings["min_views"], "cap": settings["monthly_cap"]}
+
+
+def terms(lead: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, Any]:
+    """The offer for this streamer: their own rate, min views and cap where set, else the defaults."""
+    d = default_terms(lead, settings)
+    return {"rate": lead.get("client_rate") or d["rate"], "cap": lead.get("client_cap") or d["cap"],
+            "min_views": d["min_views"] if lead.get("client_min_views") is None else lead["client_min_views"]}
+
+
 def template_values(lead: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, str]:
     lang = "id" if lead.get("language") == "id" else "en"
+    offer = terms(lead, settings)
     when = lead.get("clip_stream_at") or lead.get("vod_published_at")
     stream_at = datetime.fromisoformat(when).astimezone() if when else datetime.now().astimezone()
     if lang == "id":
         day, date = ID_DAYS[stream_at.weekday()], f"{stream_at.day} {ID_MONTHS[stream_at.month - 1]} {stream_at.year}"
-        min_views = f"{settings['min_views']:,}".replace(",", ".")
+        min_views = f"{offer['min_views']:,}".replace(",", ".")
     else:
         day, date = stream_at.strftime("%A"), f"{stream_at.strftime('%B')} {stream_at.day}"
-        min_views = f"{settings['min_views']:,}"
+        min_views = f"{offer['min_views']:,}"
     return {
-        "name": lead.get("name") or "there", "day": day, "date": date,
-        "rate": settings["rate_sea"] if is_sea(lead) else settings["rate_default"],
-        "min_views": min_views, "cap": settings["monthly_cap"], "sender_name": settings["sender_name"],
+        "name": lead.get("name") or "there", "day": day, "date": date, "rate": offer["rate"],
+        "min_views": min_views, "cap": offer["cap"], "sender_name": settings["sender_name"],
         "company": settings["company_name"], "proof_url": settings["proof_url"],
     }
 
@@ -531,8 +563,10 @@ def send_due(settings: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
         return out
     if sending_blockers(settings):
         return out  # stay queued; the dashboard shows why
+    # emails_per_day was removed: unset means UNLIMITED. A set blank/None value also means unlimited.
+    email_cap = settings.get("emails_per_day")
     for i, msg in enumerate(due):
-        if db.count_sent_since(local_midnight_utc_iso()) >= settings["emails_per_day"]:
+        if email_cap not in (None, "") and db.count_sent_since(local_midnight_utc_iso()) >= int(email_cap):
             out["held"] = len(due) - i
             break  # the rest go tomorrow, still in order
         if not db.claim_message(msg["id"]):
@@ -639,18 +673,41 @@ def check_lead_replies(lead: Dict[str, Any]) -> bool:
         return False
     latest = max(inbound, key=lambda m: m["at_ms"])
     reply_at = _iso(datetime.fromtimestamp(latest["at_ms"] / 1000, timezone.utc))
-    db.update_message(first["id"], reply_at=reply_at, reply_snippet=(latest["snippet"] or "")[:500])
+    _record_reply(lead, first, reply_at, latest["snippet"] or "", bounce=all(m["bounce"] for m in inbound))
+    return True
+
+
+def _record_reply(lead: Dict[str, Any], first: Dict[str, Any], reply_at: str, snippet: str,
+                  bounce: bool = False, url: Optional[str] = None) -> str:
+    """Store the reply on the first email, stop follow-ups and move the lead on. Returns the new lead status."""
+    db.update_message(first["id"], reply_at=reply_at, reply_snippet=snippet[:500], reply_url=url)
     _cancel_queued(lead["id"], kinds=("followup_1", "followup_2"))
-    if all(m["bounce"] for m in inbound):
+    if bounce:
         db.update_lead(lead["id"], status="bounced")
-        return True
-    sentiment = classify_reply(latest["snippet"])
+        return "bounced"
+    sentiment = classify_reply(snippet)
     if sentiment == "opt_out":
         opt_out([lead["id"]])
         db.update_lead(lead["id"], reply_sentiment="opt_out")
-    else:
-        db.update_lead(lead["id"], status="replied", reply_sentiment=sentiment)
-    return True
+        return "opted_out"
+    db.update_lead(lead["id"], status="replied", reply_sentiment=sentiment)
+    return "replied"
+
+
+def log_reply(lead_id: int, text: str, url: str = "") -> str:
+    """Record a reply the hourly check cannot see: a new email instead of a reply, or one from another address."""
+    text, url = text.strip(), url.strip()
+    if not text:
+        raise OutreachError("Paste the reply text first.")
+    if url and not re.match(r"^https?://", url, re.I):
+        raise OutreachError("The link must start with https://.")
+    lead = next(iter(db.get_leads([lead_id])), None)
+    if not lead or lead["status"] not in db.AWAITING_REPLY:
+        raise OutreachError("That streamer is not waiting on a reply.")
+    first = db.get_message(lead_id, "first")
+    if not first or first["status"] != "sent":
+        raise OutreachError("The first email to that streamer has not been sent.")
+    return _record_reply(lead, first, db.now_iso(), text, url=url[:500] or None)
 
 
 def check_replies() -> int:
@@ -690,19 +747,39 @@ def mark(lead_ids: Iterable[int], status: str) -> int:
         if lead["status"] in ("replied", "trial", "sent", "followup_1", "followup_2", "client",
                               "clip_wanted", "clip_queued", "clip_ready", "clip_failed", "clip_approved"):
             _cancel_queued(lead["id"], kinds=("followup_1", "followup_2"))
-            fields: Dict[str, Any] = {"status": status}
+            # Freeze the agreed terms, so a later change to the defaults does not move a signed deal
+            offer = terms(lead, db.get_settings())
+            fields: Dict[str, Any] = {"status": status, "client_rate": offer["rate"], "client_cap": offer["cap"],
+                                      "client_min_views": offer["min_views"]}
             if status == "client" and not lead["client_start"]:
                 fields["client_start"] = datetime.now().strftime("%Y-%m-%d")
             n += db.update_lead(lead["id"], **fields)
     return n
 
 
-def save_client(lead_id: int, model: str, cap: str, start: str) -> None:
+def save_terms(lead_id: int, rate: str, min_views: str, cap: str) -> bool:
+    """Set a streamer's own rate, min views and monthly cap. Blank means the default. Returns True if any changed."""
+    lead = next(iter(db.get_leads([lead_id])), None)
+    if not lead:
+        raise OutreachError("That streamer no longer exists.")
+    views = re.sub(r"[\s,.]", "", min_views)
+    if views and not (views.isdigit() and int(views) <= 10_000_000):
+        raise OutreachError("Min views must be a whole number up to 10,000,000.")
+    new = {"client_rate": rate.strip()[:40] or None, "client_cap": cap.strip()[:40] or None,
+           "client_min_views": int(views) if views else None}
+    if all(lead[k] == v for k, v in new.items()):
+        return False
+    db.update_lead(lead_id, **new)
+    return True
+
+
+def save_client(lead_id: int, model: str, rate: str, min_views: str, cap: str, start: str) -> None:
     if model not in ("A", "B"):
         raise OutreachError("Model must be A (pay per view) or B (done-for-you).")
     if start and not re.match(r"^\d{4}-\d{2}-\d{2}$", start):
         raise OutreachError("Start date must look like 2026-10-14.")
-    db.update_lead(lead_id, client_model=model, client_cap=cap.strip()[:40] or None, client_start=start or None)
+    save_terms(lead_id, rate, min_views, cap)
+    db.update_lead(lead_id, client_model=model, client_start=start or None)
 
 
 # ── Retention (§6.7) ──────────────────────────────────────────────────────────

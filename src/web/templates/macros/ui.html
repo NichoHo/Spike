@@ -175,7 +175,7 @@
   ] -%}
   <div class="layout-picker">
     {%- for value, name, desc in layouts %}
-      <input type="radio" name="layout" id="{{ prefix }}-{{ value }}" value="{{ value }}" {% if current == value and not (value == 'auto' and ai_left <= 0) %}checked{% endif %}{% if value == 'auto' and ai_left <= 0 %} disabled{% endif %}>
+      <input type="radio" name="layout" id="{{ prefix }}-{{ value }}" value="{{ value }}" {% if current == value %}checked{% endif %}>
       <label for="{{ prefix }}-{{ value }}" class="layout-option">
         <span class="layout-thumb layout-thumb--{{ value }}" aria-hidden="true">
           {%- if value == "auto" %}<span class="lt-cam"></span><span class="lt-content"></span><span class="lt-auto">A</span>
@@ -187,7 +187,7 @@
         </span>
         <span class="layout-option__name">{{ name }}</span>
         <span class="layout-option__desc">{{ desc }}</span>
-        {%- if value == "auto" %}<span class="layout-option__quota{% if ai_left <= 0 %} layout-option__quota--out{% endif %}">{{ ai_left }} of {{ layout_ai_limit() }} Gemini calls left today</span>{% endif %}
+        {%- if value == "auto" %}<span class="layout-option__quota">{% if ai_left > 0 %}{{ ai_left }} of {{ layout_ai_limit() }} Gemini calls left today{% else %}Gemini is out, uses your Claude Pro plan{% endif %}</span>{% endif %}
       </label>
     {%- endfor %}
   </div>

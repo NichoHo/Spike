@@ -439,7 +439,10 @@ def evaluate_clip_autopost(
         return []
 
     scheduled_post_ids: List[int] = []
-    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # YouTube's daily upload quota resets at midnight Pacific, same as Gemini's, so the
+    # posting-cap "day" uses the shared Pacific helper rather than the machine's UTC day.
+    from src import gemini_budget
+    today_prefix = gemini_budget.today()
 
     for acc in accounts:
         acc_id = acc["id"]

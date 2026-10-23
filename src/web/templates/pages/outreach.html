@@ -3,11 +3,11 @@
 
 {# Outreach dashboard, OUTREACH.md §6.5. One page, tabs per review step. #}
 
-{% macro lead_cell(l, second=None) -%}
+{% macro lead_cell(l, second=None, show_platform=True) -%}
   <div class="lead-cell">
     {% if l.thumbnail %}<img class="lead-avatar" src="{{ l.thumbnail }}" width="32" height="32" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<span class="lead-avatar" aria-hidden="true"></span>{% endif %}
     <div class="lead-cell__text">
-      <span class="row lead-cell__name"><a class="primary-cell truncate" href="{{ l.url or ('https://www.youtube.com/channel/' ~ l.channel_id) }}" target="_blank" rel="noopener noreferrer" title="{{ l.name or l.channel_id }}">{{ l.name or l.channel_id }}</a>{% if l.platform != "youtube" %}{{ ui.badge(l.platform | capitalize) }}{% endif %}</span>
+      <span class="row lead-cell__name"><a class="primary-cell truncate" href="{{ l.url or ('https://www.youtube.com/channel/' ~ l.channel_id) }}" target="_blank" rel="noopener noreferrer" title="{{ l.name or l.channel_id }}">{{ l.name or l.channel_id }}</a>{% if show_platform and l.platform != "youtube" %}{{ ui.badge(l.platform | capitalize) }}{% endif %}</span>
       {% if second %}<span class="secondary-line truncate" title="{{ second }}">{{ second }}</span>{% endif %}
     </div>
   </div>
@@ -97,6 +97,10 @@
 
 {% if notice %}<div class="page-alert">{{ ui.alert("info", notice, "") }}</div>{% endif %}
 {% if error and not add_form %}<div class="page-alert">{{ ui.alert("danger", "That did not work", error) }}</div>{% endif %}
+{# Settings shows its own finder status card #}
+{% if finder_state in ("starting", "running") and tab != "settings" %}
+  <div class="page-alert" data-finder-banner>{{ ui.alert("info", "Finding streamers…", "The finder is running. You get a notification when it finishes, and new streamers land in Review.") }}</div>
+{% endif %}
 
 <nav class="tabs tabs--scroll" aria-label="Outreach steps">
   {% for key, (label, _) in tabs.items() %}
@@ -111,6 +115,8 @@
   {% if not leads %}
     {{ ui.empty_state("magnifying-glass", "No streamers to review", "The finder adds new streamers every night from the topics in Settings. Add a few topics, then run it.", "Open settings", "/outreach?tab=settings") }}
   {% else %}
+    {% for l in leads if l.platform != "youtube" %}<form id="yt-{{ l.id }}" method="post" action="/outreach/leads/{{ l.id }}/youtube" hidden><input type="hidden" name="tab" value="review"></form>{% endfor %}
+    {% for l in leads if not l.email %}<form id="contact-{{ l.id }}" method="post" action="/outreach/leads/{{ l.id }}/contact" hidden><input type="hidden" name="tab" value="review"></form>{% endfor %}
     <form method="post" action="/outreach/leads/bulk" class="stack" data-bulk-form>
       <input type="hidden" name="tab" value="review">
       {% call bulk_bar() %}
@@ -125,6 +131,7 @@
             <tr>
               <th class="check-col">{{ select_all() }}</th>
               <th>Streamer</th>
+              <th>Platform</th>
               <th>Fit</th>
               <th class="num">Audience</th>
               <th class="num">Views per stream</th>
@@ -139,21 +146,22 @@
             {% for l in leads %}
               <tr>
                 <td class="check-col">{{ row_check(l) }}</td>
-                <td class="lead-col">{{ lead_cell(l, l.fit_reason or l.notes) }}</td>
+                <td class="lead-col">{{ lead_cell(l, l.fit_reason or l.notes, show_platform=False) }}</td>
+                <td>{{ l.platform | capitalize }}</td>
                 <td>{% if l.fit_score is not none %}{{ ui.score(l.fit_score) }}{% else %}<span class="subtle">None</span>{% endif %}</td>
-                <td class="num">{% if l.subscribers_or_viewers is not none %}{{ l.subscribers_or_viewers | compact_number }}<span class="secondary-line">{{ "avg live viewers" if l.platform == "twitch" else "subscribers" }}</span>{% endif %}</td>
+                <td class="num">{% if l.subscribers_or_viewers is not none %}{{ l.subscribers_or_viewers | compact_number }}<span class="secondary-line">{{ "average live viewers" if l.platform == "twitch" else "subscribers" }}</span>{% endif %}</td>
                 <td class="num" title="Median views of streams in the last {{ settings.lookback_days }} days, leaving out streams under a day old">{{ l.vod_views | compact_number if l.vod_views is not none else "" }}</td>
-                <td class="num" title="Streams of {{ settings.min_stream_hours }} h or more in the last {{ settings.lookback_days }} days">
-                  {{ l.streams_14d or 0 }}{% if l.avg_stream_h %}<span class="secondary-line">avg {{ l.avg_stream_h }} h</span>{% endif %}
+                <td class="num" title="Streams of {{ settings.min_stream_hours }} hours or more in the last {{ settings.lookback_days }} days">
+                  {{ l.streams_14d or 0 }}{% if l.avg_stream_h %}<span class="secondary-line">average {{ l.avg_stream_h }} hours</span>{% endif %}
                 </td>
-                <td class="num" title="YouTube videos of 3 minutes or less in the last {{ settings.lookback_days }} days. TikTok and Reels are not checked.">{% if l.platform == "youtube" %}{{ l.shorts_14d or 0 }}<span class="secondary-line">YouTube only</span>{% endif %}</td>
+                <td class="num" title="YouTube videos of 3 minutes or less in the last {{ settings.lookback_days }} days. TikTok and Reels are not checked.">{% if l.platform == "youtube" %}{{ l.shorts_14d or 0 }}<span class="secondary-line">YouTube only</span>{% else %}{% if l.shorts_14d is not none %}{{ l.shorts_14d }}{% endif %}<span class="row"><input class="input cell-control" type="text" name="youtube" form="yt-{{ l.id }}" value="{{ l.youtube or '' }}" placeholder="YouTube channel" autocomplete="off" spellcheck="false" aria-label="YouTube channel for {{ l.name or l.channel_id }}">{{ ui.button("Save", variant="secondary", size="sm", type="submit", attrs={"form": "yt-" ~ l.id}) }}</span>{% endif %}</td>
                 <td>{% if l.last_stream_at %}<span title="{{ l.last_stream_at | local_time }}">{{ l.last_stream_at | relative_time }}</span>{% endif %}</td>
-                <td>{{ (l.language or "").upper() }}{% if l.whop_flag %} {{ ui.badge("Whop") }}{% endif %}</td>
+                <td>{{ l.language | language if l.language else "" }}{% if l.whop_flag %} {{ ui.badge("Whop") }}{% endif %}</td>
                 <td class="contact-col">
                   {% if (l.twitch or l.kick) and l.platform == "youtube" %}<span class="secondary-line">{% if l.twitch %}<a href="https://www.twitch.tv/{{ l.twitch }}" target="_blank" rel="noopener noreferrer">Twitch</a>{% endif %}{% if l.twitch and l.kick %}, {% endif %}{% if l.kick %}<a href="https://kick.com/{{ l.kick }}" target="_blank" rel="noopener noreferrer">Kick</a>{% endif %}{% if l.stream_source == "reupload" %} re-uploads{% endif %}</span>{% endif %}
                   {% if l.email %}<span class="mono truncate" title="{{ l.email }}">{{ l.email }}</span>
                   {% elif l.instagram or l.x or l.tiktok or l.discord %}<span class="muted">Socials only</span>
-                  {% else %}<span class="subtle">None</span>{% endif %}
+                  {% else %}<span class="row"><input class="input cell-control" type="email" name="email" form="contact-{{ l.id }}" placeholder="Add email" autocomplete="off" spellcheck="false" aria-label="Email for {{ l.name or l.channel_id }}">{{ ui.button("Save", variant="secondary", size="sm", type="submit", attrs={"form": "contact-" ~ l.id}) }}</span>{% endif %}
                 </td>
               </tr>
             {% endfor %}
@@ -223,11 +231,11 @@
                 <td>{{ ui.status("lead", l.status) }}</td>
                 <td class="wrap-col">
                   {% if l.vod_video_id %}<a class="truncate" href="{{ l.vod_url or ('https://www.youtube.com/watch?v=' ~ l.vod_video_id) }}" target="_blank" rel="noopener noreferrer" title="{{ l.vod_title }}">{{ l.vod_title or l.vod_video_id }}</a>
-                  {% if l.vod_duration_s %}<span class="secondary-line">{{ l.vod_duration_s | duration }}, first {{ (settings.trial_max_vod_s / 3600) | round(1) }} h clipped</span>{% endif %}{% endif %}
+                  {% if l.vod_duration_s %}<span class="secondary-line">{{ l.vod_duration_s | duration }}, first {{ (settings.trial_max_vod_s / 3600) | round(1) }} hours clipped</span>{% endif %}{% endif %}
                 </td>
                 <td class="wrap-col">
                   {% if l.clip_error %}<span class="muted">{{ l.clip_error }}</span>
-                  {% elif l.status == "clip_wanted" %}<span class="muted">Starts when a daily slot opens ({{ settings.trial_clips_per_day }} a day).</span>
+                  {% elif l.status == "clip_wanted" %}<span class="muted">Queued. Starts on the next worker cycle.</span>
                   {% elif l.status == "clip_ready" %}<span class="muted">Review and approve it in the clip editor.</span>
                   {% elif l.status == "clip_approved" and not l.drive_url %}<span class="muted">Making a share link…</span>
                   {% elif l.drive_url %}<span class="muted">Ready. Paste the link in your Gmail reply.</span>{% endif %}
@@ -277,6 +285,11 @@
             </div>
             {% if l.clip_error %}{{ ui.alert("warning", "Last update failed", l.clip_error) }}{% endif %}
             {% if m.status == "failed" %}{{ ui.alert("danger", "Sending failed", m.error or "Unknown error") }}{% endif %}
+            <div class="settings-grid">
+              <div class="field"><label class="field__label" for="rate-{{ l.id }}">Rate per 1,000 views</label><input class="input" id="rate-{{ l.id }}" name="rate_{{ l.id }}" value="{{ l.client_rate or '' }}" placeholder="{{ l.default_terms.rate }}" maxlength="40" {% if not is_admin %}disabled{% endif %}></div>
+              <div class="field"><label class="field__label" for="min-views-{{ l.id }}">Free until (views)</label><input class="input input--number" id="min-views-{{ l.id }}" name="min_views_{{ l.id }}" inputmode="numeric" value="{{ l.client_min_views if l.client_min_views is not none else '' }}" placeholder="{{ l.default_terms.min_views }}" {% if not is_admin %}disabled{% endif %}></div>
+              <div class="field"><label class="field__label" for="cap-{{ l.id }}">Monthly cap</label><input class="input" id="cap-{{ l.id }}" name="cap_{{ l.id }}" value="{{ l.client_cap or '' }}" placeholder="{{ l.default_terms.cap }}" maxlength="40" {% if not is_admin %}disabled{% endif %}></div>
+            </div>
             <div class="field">
               <label class="field__label" for="to-{{ l.id }}">To</label>
               <input class="input input--mono" type="email" id="to-{{ l.id }}" name="to_{{ l.id }}" autocomplete="off" spellcheck="false" value="{{ m.to_email or '' }}">
@@ -336,6 +349,42 @@
       </div>
       <p class="small muted">Replies are checked every hour. A reply, bounce, or "no" stops the follow-ups on its own.</p>
     </form>
+    {% set waiting = leads | selectattr("status", "in", ["sent", "followup_1", "followup_2"]) | list %}
+    {% if waiting %}
+      <div class="row section-note">
+        <p class="small muted">Did a streamer answer with a new email, or from another address? The hourly check only sees replies in the same thread.</p>
+        {{ ui.button("Log reply", variant="secondary", size="sm", icon="envelope-simple", attrs={"data-open-dialog": "log-reply-dialog"}) }}
+      </div>
+      <dialog id="log-reply-dialog" class="dialog dialog--md dialog--form" aria-labelledby="log-reply-title">
+        <form method="post" action="/outreach/leads/reply">
+          <div class="dialog__body stack">
+            <div>
+              <h2 class="dialog__title" id="log-reply-title">Log reply</h2>
+              <p class="dialog__text">Paste a reply that arrived outside the thread. It is tagged and handled like any other reply: follow-ups stop, and a "no" opts the streamer out.</p>
+            </div>
+            <div class="field">
+              <label class="field__label" for="reply-lead">Streamer</label>
+              <select class="select" id="reply-lead" name="lead_id" required>
+                {% for l in waiting %}<option value="{{ l.id }}">{{ l.name }} ({{ (l.msgs.first or {}).to_email }})</option>{% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label class="field__label" for="reply-text">Reply</label>
+              <textarea class="textarea" id="reply-text" name="text" rows="8" maxlength="5000" required placeholder="Paste the email they sent…"></textarea>
+            </div>
+            <div class="field">
+              <label class="field__label" for="reply-url">Link to the email <span class="field__optional">(optional)</span></label>
+              <input class="input" id="reply-url" name="url" type="url" autocomplete="off" spellcheck="false" placeholder="https://mail.google.com/mail/u/0/#inbox/…">
+              <p class="field__help">Open the email in Gmail and copy the address bar. Replies shows it as Open in Gmail.</p>
+            </div>
+          </div>
+          <div class="dialog__footer">
+            {{ ui.button("Cancel", variant="secondary", attrs={"data-close-dialog": ""}) }}
+            {{ ui.button("Log reply", variant="primary", type="submit") }}
+          </div>
+        </form>
+      </dialog>
+    {% endif %}
   {% endif %}
 
 {# ── Replies ─────────────────────────────────────────────────────────────── #}
@@ -363,7 +412,7 @@
                 <td class="wrap-col"><span class="truncate" title="{{ m.reply_snippet }}">{{ m.reply_snippet or "No preview available" }}</span></td>
                 <td>{{ ui.status("sentiment", l.reply_sentiment) }}</td>
                 <td>{% if m.reply_at %}<span title="{{ m.reply_at | local_time }}">{{ m.reply_at | relative_time }}</span>{% endif %}</td>
-                <td class="actions">{% if m.gmail_thread_id %}{{ ui.button("Open in Gmail", variant="ghost", size="sm", icon="arrow-up-right", href="https://mail.google.com/mail/u/0/#all/" ~ m.gmail_thread_id, attrs={"target": "_blank", "rel": "noopener noreferrer"}) }}{% endif %}</td>
+                <td class="actions">{% if m.reply_url or m.gmail_thread_id %}{{ ui.button("Open in Gmail", variant="ghost", size="sm", icon="arrow-up-right", href=m.reply_url or "https://mail.google.com/mail/u/0/#all/" ~ m.gmail_thread_id, attrs={"target": "_blank", "rel": "noopener noreferrer"}) }}{% endif %}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -381,7 +430,7 @@
     {% for l in leads %}<form id="client-{{ l.id }}" method="post" action="/outreach/leads/{{ l.id }}/client" hidden></form>{% endfor %}
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>Streamer</th><th>Status</th><th>Model</th><th>Monthly cap</th><th>Start</th><th class="actions">Actions</th></tr></thead>
+        <thead><tr><th>Streamer</th><th>Status</th><th>Model</th><th>Rate per 1,000 views</th><th>Free until (views)</th><th>Monthly cap</th><th>Start</th><th class="actions">Actions</th></tr></thead>
         <tbody>
           {% for l in leads %}
             <tr>
@@ -393,7 +442,9 @@
                   <option value="B" {% if l.client_model == "B" %}selected{% endif %}>B: done-for-you</option>
                 </select>
               </td>
-              <td><input class="input cell-control" name="cap" form="client-{{ l.id }}" value="{{ l.client_cap or settings.monthly_cap }}" aria-label="Monthly cap for {{ l.name }}" {% if not is_admin %}disabled{% endif %}></td>
+              <td><input class="input cell-control" name="rate" form="client-{{ l.id }}" value="{{ l.client_rate or '' }}" placeholder="{{ l.default_terms.rate }}" maxlength="40" aria-label="Rate per 1,000 views for {{ l.name }}" {% if not is_admin %}disabled{% endif %}></td>
+              <td><input class="input input--number cell-control" name="min_views" form="client-{{ l.id }}" inputmode="numeric" value="{{ l.client_min_views if l.client_min_views is not none else '' }}" placeholder="{{ l.default_terms.min_views }}" aria-label="Free until views for {{ l.name }}" {% if not is_admin %}disabled{% endif %}></td>
+              <td><input class="input cell-control" name="cap" form="client-{{ l.id }}" value="{{ l.client_cap or '' }}" placeholder="{{ l.default_terms.cap }}" maxlength="40" aria-label="Monthly cap for {{ l.name }}" {% if not is_admin %}disabled{% endif %}></td>
               <td><input class="input cell-control" type="date" name="start" form="client-{{ l.id }}" value="{{ l.client_start or '' }}" aria-label="Start date for {{ l.name }}" {% if not is_admin %}disabled{% endif %}></td>
               <td class="actions">
                 <div class="row row--end">
@@ -426,7 +477,7 @@
         <tbody>
           {% for s in stats.per_search %}
             <tr>
-              <td><span class="primary-cell">{{ s.query }}</span><span class="secondary-line">{{ {"reupload": "Re-uploads", "twitch": "Twitch live"}.get(s.kind, "Live") }}, {{ (s.language or "any").upper() }}{% if s.kind != "twitch" %} · {{ s.region or "any region" }}{% endif %}{% if not s.active %}, paused{% endif %}</span></td>
+              <td><span class="primary-cell">{{ s.query }}</span><span class="secondary-line">{{ {"reupload": "Re-uploads", "twitch": "Twitch live"}.get(s.kind, "Live") }}, {{ s.language | language }}{% if s.kind != "twitch" %} · {{ s.region or "any region" }}{% endif %}{% if not s.active %}, paused{% endif %}</span></td>
               <td class="num">{{ s.found }}</td><td class="num">{{ s.approved }}</td><td class="num">{{ s.sent }}</td>
               <td class="num">{{ s.replied }}</td><td class="num">{{ s.reply_rate | percent if s.reply_rate is not none else "" }}</td><td class="num">{{ s.clients }}</td>
             </tr>
@@ -445,10 +496,11 @@
 
     {# Row forms live outside the card body: empty forms inside a flex stack would each add a gap #}
     {% for s in searches %}<form id="search-toggle-{{ s.id }}" method="post" action="/outreach/searches/{{ s.id }}/toggle" hidden></form><form id="search-delete-{{ s.id }}" method="post" action="/outreach/searches/{{ s.id }}/delete" hidden></form>{% endfor %}
+    {% for s in twitch_searches %}<form id="tw-toggle-{{ s.id }}" method="post" action="/outreach/twitch/searches/{{ s.id }}/toggle" hidden></form><form id="tw-delete-{{ s.id }}" method="post" action="/outreach/twitch/searches/{{ s.id }}/delete" hidden></form>{% endfor %}
     <section class="card">
       <div class="card__header">
         <h2 class="card__title">Find streamers</h2>
-        <p class="card__description">The finder searches YouTube for each topic below every night at {{ "%02d" | format(settings.run_hour) }}:00. New streamers land in Review.</p>
+        <p class="card__description">Every night at {{ "%02d" | format(settings.run_hour) }}:00 the finder searches YouTube and Twitch for what you add below. New streamers land in Review.</p>
       </div>
       <div class="card__body stack">
         {% set fs = finder_state %}
@@ -469,6 +521,9 @@
         </div>
         {% if fs in ("starting", "running") %}<script>setTimeout(() => location.replace("/outreach?tab=settings"), 5000);</script>{% endif %}
 
+        <div class="finder-platform stack">
+        <div class="row row--between"><h3 class="finder-platform__title">YouTube</h3><form method="post" action="/outreach/platform"><input type="hidden" name="platform" value="youtube"><label class="switch-row"><input type="checkbox" class="switch" role="switch" name="enabled" value="1" {% if settings.youtube_enabled %}checked{% endif %} {% if ro %}disabled{% endif %} onchange="this.form.submit()"> Include in finder runs</label></form></div>
+        {% if settings.youtube_enabled %}
         {% if searches %}
           <div class="table-wrap">
             <table class="table">
@@ -477,7 +532,7 @@
                 {% for s in searches %}
                   <tr>
                     <td><span class="primary-cell">{{ s.query }}</span><span class="secondary-line">{{ "Twitch or Kick re-uploads" if s.kind == "reupload" else "YouTube live streams" }}{% if not s.active %}, paused{% endif %}</span></td>
-                    <td>{{ (s.language or "any").upper() }}</td>
+                    <td>{{ s.language | language }}</td>
                     <td>{% if s.last_run_at %}<span title="{{ s.last_run_at | local_time }}">{{ s.last_run_at | relative_time }}</span>{% else %}<span class="subtle">Never</span>{% endif %}</td>
                     <td class="actions">
                       {% if not ro %}
@@ -493,13 +548,13 @@
             </table>
           </div>
         {% else %}
-          {{ ui.alert("info", "Add a topic to start", "Add 3 to 5 games or topics your streamers play, like \"valorant\", \"just chatting\", or \"main bareng\" with language id. Not sure what to type? Tap an idea below the form. The finder only looks for what you add here.") }}
+          {{ ui.alert("info", "Add a topic to start", "Add 3 to 5 games or topics your streamers play, like \"valorant\", \"just chatting\", or \"main bareng\" in Indonesian. Not sure what to type? Tap an idea below the form. The finder only looks for what you add here.") }}
         {% endif %}
 
         {% if not ro %}
           <form method="post" action="/outreach/searches" class="search-form" data-requires="outreach_find">
             <div class="field"><label class="field__label" for="s-query">Topic</label><input class="input" id="s-query" name="query" required maxlength="200" placeholder="valorant…" autocomplete="off"></div>
-            <div class="field"><label class="field__label" for="s-lang">Language <span class="field__optional">(optional)</span></label><input class="input" id="s-lang" name="language" maxlength="8" placeholder="en" autocomplete="off" spellcheck="false"></div>
+            <div class="field"><label class="field__label" for="s-lang">Language <span class="field__optional">(optional)</span></label><select class="select" id="s-lang" name="language"><option value="">Any language</option>{% for code, name in LANGUAGES %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></div>
             <div class="search-form__submit">{{ ui.button("Add topic", variant="secondary", type="submit", icon="plus") }}</div>
             <div class="chip-row" style="grid-column: 1 / -1" role="group" aria-label="Topic ideas">
               <span class="small muted">Not sure? Tap an idea:</span>
@@ -540,20 +595,108 @@
                     <option value="reupload" data-defaults='{"s-min": "0", "s-vmin": "100", "s-vmax": "20000"}'>Twitch or Kick re-uploads</option>
                   </select></div>
                 <div class="field"><label class="field__label" for="s-region">Region</label><input class="input" id="s-region" name="region" maxlength="2" placeholder="ID" autocomplete="off"></div>
-                <div class="field"><label class="field__label" for="s-min">Min subscribers</label><input class="input input--number" id="s-min" name="min_size" type="number" min="0" value="10000"></div>
-                <div class="field"><label class="field__label" for="s-max">Max subscribers</label><input class="input input--number" id="s-max" name="max_size" type="number" min="0" value="300000"></div>
-                <div class="field"><label class="field__label" for="s-vmin">Min views per stream</label><input class="input input--number" id="s-vmin" name="min_views" type="number" min="0" value="1000"></div>
-                <div class="field"><label class="field__label" for="s-vmax">Max views per stream</label><input class="input input--number" id="s-vmax" name="max_views" type="number" min="0" value="100000"></div>
+                <div class="field"><label class="field__label" for="s-min">Minimum subscribers</label><input class="input input--number" id="s-min" name="min_size" type="number" min="0" value="10000"></div>
+                <div class="field"><label class="field__label" for="s-max">Maximum subscribers</label><input class="input input--number" id="s-max" name="max_size" type="number" min="0" value="300000"></div>
+                <div class="field"><label class="field__label" for="s-vmin">Minimum views per stream</label><input class="input input--number" id="s-vmin" name="min_views" type="number" min="0" value="1000"></div>
+                <div class="field"><label class="field__label" for="s-vmax">Maximum views per stream</label><input class="input input--number" id="s-vmax" name="max_views" type="number" min="0" value="100000"></div>
               </div>
             </details>
           </form>
         {% endif %}
+        {% endif %}
+        </div>
+
+        {# Twitch finder (OUTREACH.md §6.2 B): accepted terms risk, Spike's Twitch app #}
+        <div class="finder-platform stack">
+          <div class="row row--between"><h3 class="finder-platform__title">Twitch</h3><form method="post" action="/outreach/platform"><input type="hidden" name="platform" value="twitch"><label class="switch-row"><input type="checkbox" class="switch" role="switch" name="enabled" value="1" {% if settings.twitch_enabled %}checked{% endif %} {% if ro %}disabled{% endif %} onchange="this.form.submit()"> Include in finder runs</label></form></div>
+          {% if settings.twitch_enabled %}
+          <p class="small muted">Samples live channels at prime time and adds the ones in your viewer range. Risk: Twitch's Developer Agreement bans using its API for commercial offers, and if Twitch revokes Spike's app, Twitch clip lookups stop too.</p>
+          {% if twitch_problem %}{{ ui.alert("warning", "Twitch app not set", twitch_problem) }}{% endif %}
+          {% if settings.twitch_last_summary %}<p class="small muted">Last run {{ settings.twitch_last_summary }}</p>{% endif %}
+          {% if twitch_searches %}
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>Category</th><th>Language</th><th class="num">Live viewers</th><th>Last sampled</th><th class="actions">Actions</th></tr></thead>
+                <tbody>
+                  {% for s in twitch_searches %}
+                    <tr>
+                      <td><span class="primary-cell">{{ s.game_name or "All categories" }}</span>{% if not s.active %}<span class="secondary-line">Paused</span>{% endif %}</td>
+                      <td>{{ s.language | language }}</td>
+                      <td class="num">{{ s.min_viewers | number }} to {{ s.max_viewers | number }}</td>
+                      <td>{% if s.last_sampled_at %}<span title="{{ s.last_sampled_at | local_time }}">{{ s.last_sampled_at | relative_time }}</span>{% else %}<span class="subtle">Never</span>{% endif %}</td>
+                      <td class="actions">
+                        {% if not ro %}
+                          <div class="row row--end">
+                            {{ ui.button("Resume" if not s.active else "Pause", variant="ghost", size="sm", type="submit", attrs={"form": "tw-toggle-" ~ s.id}) }}
+                            {{ ui.button("Delete Twitch search", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "tw-delete-" ~ s.id, "data-confirm": "Delete this Twitch search and its samples? Streamers it found stay."}) }}
+                          </div>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+          {% if not ro %}
+            <form method="post" action="/outreach/twitch/searches" class="search-form" data-requires="outreach_find" data-requires-kind="twitch">
+              <div class="field"><label class="field__label" for="tw-cat">Category <span class="field__optional">(exact Twitch name)</span></label><input class="input" id="tw-cat" name="category" maxlength="100" placeholder="Just Chatting" autocomplete="off"></div>
+              <div class="field"><label class="field__label" for="tw-lang">Language <span class="field__optional">(optional)</span></label><select class="select" id="tw-lang" name="language"><option value="">Any language</option>{% for code, name in LANGUAGES %}<option value="{{ code }}">{{ name }}</option>{% endfor %}<option value="other">Other</option></select></div>
+              <div class="search-form__submit">{{ ui.button("Add category", variant="secondary", type="submit", icon="plus") }}</div>
+              <div class="chip-row" style="grid-column: 1 / -1" role="group" aria-label="Category ideas">
+                <span class="small muted">Not sure? Tap an idea:</span>
+                {% for q, lang in [("VALORANT", "en"), ("Mobile Legends: Bang Bang", "id"), ("Just Chatting", "id"), ("Free Fire", "id"), ("Minecraft", "en"), ("Grand Theft Auto V", "id"), ("PUBG MOBILE", "id"), ("Fortnite", "en")] %}
+                  <button type="button" class="chip" data-tw-topic="{{ q }}" data-lang="{{ lang }}">{{ q }}</button>
+                {% endfor %}
+                <button type="button" class="chip" id="tw-trending-load">Show trending on Twitch</button>
+                <span class="small muted" id="tw-trending-note" role="status"></span>
+              </div>
+              <script>
+                const pickTwCategory = b => b.addEventListener("click", () => {
+                  document.getElementById("tw-cat").value = b.dataset.twTopic;
+                  document.getElementById("tw-lang").value = b.dataset.lang || "";
+                  document.getElementById("tw-cat").focus();
+                });
+                document.querySelectorAll("[data-tw-topic]").forEach(pickTwCategory);
+                document.getElementById("tw-trending-load").addEventListener("click", async e => {
+                  const btn = e.currentTarget, note = document.getElementById("tw-trending-note");
+                  btn.disabled = true; note.textContent = "Loading…";
+                  try {
+                    const r = await (await fetch("/outreach/trending")).json();
+                    note.textContent = r.error || (r.topics.length ? "Trending now (language is left blank):" : "Nothing found.");
+                    r.topics.forEach(t => {
+                      const b = document.createElement("button");
+                      b.type = "button"; b.className = "chip"; b.dataset.twTopic = t; b.textContent = t;
+                      pickTwCategory(b); btn.before(b);
+                    });
+                    if (r.topics.length) btn.remove(); else btn.disabled = false;
+                  } catch { note.textContent = "Could not load trending categories."; btn.disabled = false; }
+                });
+              </script>
+              <details class="disclosure search-form__more">
+                <summary>{{ ui.icon("caret-right", 14) }} More options</summary>
+                <div class="search-form disclosure__body">
+                  <div class="field"><label class="field__label" for="tw-min">Minimum live viewers</label><input class="input input--number" id="tw-min" name="min_viewers" type="number" min="1" value="50"></div>
+                  <div class="field"><label class="field__label" for="tw-max">Maximum live viewers</label><input class="input input--number" id="tw-max" name="max_viewers" type="number" min="1" value="1000"></div>
+                  <div class="field"><label class="field__label" for="tw-hours">Sample at <span class="field__optional">(hours, this PC)</span></label><input class="input input--mono" id="tw-hours" name="twitch_sample_hours" form="tw-settings" value="{{ settings.twitch_sample_hours }}" autocomplete="off"></div>
+                  <div class="field"><label class="field__label" for="tw-cap">Twitch streamers a day</label><input class="input input--number" id="tw-cap" name="twitch_new_leads_per_day" form="tw-settings" type="number" min="0" value="{{ settings.twitch_new_leads_per_day }}"></div>
+                  <div class="row search-form__submit">
+                    {{ ui.button("Save schedule", variant="ghost", size="sm", type="submit", attrs={"form": "tw-settings"}) }}
+                    {{ ui.button("Sample now", variant="ghost", size="sm", type="submit", attrs={"form": "tw-settings", "formaction": "/outreach/twitch/sample-now", "data-requires": "outreach_find", "data-requires-kind": "twitch"}) }}
+                  </div>
+                </div>
+              </details>
+            </form>
+            <form id="tw-settings" method="post" action="/outreach/settings" hidden><input type="hidden" name="form" value="twitch"></form>
+          {% endif %}
+          {% endif %}
+        </div>
       </div>
       {% if not ro %}
         <form method="post" action="/outreach/run-now" class="card__footer" data-requires="outreach_find">
           <span class="card__footer-note">Today: {{ quota.search }} of {{ settings.search_calls_per_day }} YouTube searches used.</span>
           {% set busy = finder_state in ("starting", "running") %}
-          {{ ui.button("Finding…" if busy else "Run finder now", variant="primary", type="submit", icon="magnifying-glass", disabled=busy or not (searches or twitch_searches)) }}
+          {{ ui.button("Finding…" if busy else "Run finder now", variant="primary", type="submit", icon="magnifying-glass", disabled=busy or not ((settings.youtube_enabled and searches) or (settings.twitch_enabled and twitch_searches))) }}
         </form>
       {% endif %}
     </section>
@@ -587,7 +730,7 @@
       <input type="hidden" name="form" value="sender">
       <div class="card__header">
         <h2 class="card__title">Your offer</h2>
-        <p class="card__description">These fill in every new email draft.</p>
+        <p class="card__description">The default offer in every new email draft. Change one streamer's terms in Ready to send or Clients.</p>
       </div>
       <div class="card__body settings-grid">
         <div class="field"><label class="field__label" for="f-company">Signed as</label><input class="input" id="f-company" name="company_name" value="{{ settings.company_name }}" {% if ro %}disabled{% endif %}></div>
@@ -601,14 +744,14 @@
     </form>
 
     <details class="disclosure">
-      <summary>{{ ui.icon("caret-right", 14) }} Advanced: email text, limits, Twitch, activity</summary>
+      <summary>{{ ui.icon("caret-right", 14) }} Advanced: email text, limits, activity</summary>
       <div class="disclosure__body stack stack--lg">
 
     <form method="post" action="/outreach/settings" class="card" data-warn-unsaved>
       <input type="hidden" name="form" value="templates">
       <div class="card__header">
         <h2 class="card__title">Email text</h2>
-        <p class="card__description">English for most streamers, Indonesian for streamers whose language is id. Placeholders: {name} {rate} {min_views} {cap} {company} {proof_url}. A draft with an unfilled placeholder is never sent.</p>
+        <p class="card__description">English for most streamers, Indonesian for streamers who speak Indonesian. Placeholders: {name} {rate} {min_views} {cap} {company} {proof_url}. A draft with an unfilled placeholder is never sent.</p>
       </div>
       <div class="card__body stack">
         {% for key in template_keys %}
@@ -636,23 +779,9 @@
         {% for key, label, help in (
           ("run_hour", "Nightly run hour", "0 to 23, this PC's time"),
           ("new_leads_per_day", "New streamers a day", ""),
-          ("max_searches_per_run", "Topics a run", ""),
-          ("lookback_days", "Look back (days)", "Streams and Shorts are counted in this window"),
-          ("min_long_streams_14d", "Min long streams", "In the look-back window"),
+          ("min_long_streams_14d", "Minimum long streams", "In the look-back window"),
           ("min_stream_hours", "Long stream (hours)", ""),
-          ("min_fit_score", "Min fit score", "0 keeps every scored streamer"),
-          ("max_shorts_14d", "Max Shorts in the window", "YouTube only"),
-          ("emails_per_day", "Emails a day", "First emails and follow-ups together"),
-          ("send_gap_min", "Minutes between emails", ""),
-          ("followup_1_days", "Follow-up 1 after (days)", ""),
-          ("followup_2_days", "Follow-up 2 after (days)", "Counted from the first email"),
-          ("trial_clips_per_day", "Sample clips a day", "Each takes 1 to 2 hours of PC time"),
-          ("trial_max_vod_s", "Clip from the first (seconds)", "7200 is 2 hours"),
-          ("search_calls_per_day", "YouTube searches a day", "Of 100; Spike's source lookup uses the rest"),
-          ("units_per_day", "YouTube units a day", ""),
-          ("units_reserved_for_spike", "Units kept for Spike", ""),
-          ("drive_retention_days", "Delete shared clip after (days)", "For streamers who dropped off"),
-          ("lead_retention_days", "Delete silent leads after (days)", "Opt-outs are kept forever"),
+          ("max_shorts_14d", "Maximum Shorts in the window", "YouTube only"),
         ) %}
           <div class="field">
             <label class="field__label" for="f-{{ key }}">{{ label }}</label>
@@ -667,66 +796,6 @@
       </div>
       {% if not ro %}<div class="card__footer"><span class="card__footer-note">Applies from the next minute.</span>{{ ui.button("Save", variant="secondary", type="submit") }}</div>{% endif %}
     </form>
-
-    {# Twitch finder (OUTREACH.md §6.2 B): accepted terms risk, Spike's Twitch app, off by default #}
-    {% for s in twitch_searches %}<form id="tw-toggle-{{ s.id }}" method="post" action="/outreach/twitch/searches/{{ s.id }}/toggle" hidden></form><form id="tw-delete-{{ s.id }}" method="post" action="/outreach/twitch/searches/{{ s.id }}/delete" hidden></form>{% endfor %}
-    <section class="card">
-      <div class="card__header">
-        <h2 class="card__title">Twitch finder</h2>
-        <p class="card__description">Off by default. Samples live Twitch channels at prime time and adds the ones in your viewer range each night. Risk: Twitch's Developer Agreement bans using its API for commercial offers, and if Twitch revokes Spike's app, Twitch clip lookups stop too.</p>
-      </div>
-      <div class="card__body stack">
-        {% if twitch_problem %}{{ ui.alert("warning", "Twitch app not set", twitch_problem) }}{% endif %}
-        {% if settings.twitch_last_summary %}<p class="small muted">Last run {{ settings.twitch_last_summary }}</p>{% endif %}
-        {% if twitch_searches %}
-          <div class="table-wrap">
-            <table class="table">
-              <thead><tr><th>Category</th><th>Language</th><th class="num">Live viewers</th><th>Last sampled</th><th class="actions">Actions</th></tr></thead>
-              <tbody>
-                {% for s in twitch_searches %}
-                  <tr>
-                    <td><span class="primary-cell">{{ s.game_name or "All categories" }}</span>{% if not s.active %}<span class="secondary-line">Paused</span>{% endif %}</td>
-                    <td>{{ (s.language or "any").upper() }}</td>
-                    <td class="num">{{ s.min_viewers | number }} to {{ s.max_viewers | number }}</td>
-                    <td>{% if s.last_sampled_at %}<span title="{{ s.last_sampled_at | local_time }}">{{ s.last_sampled_at | relative_time }}</span>{% else %}<span class="subtle">Never</span>{% endif %}</td>
-                    <td class="actions">
-                      {% if not ro %}
-                        <div class="row row--end">
-                          {{ ui.button("Resume" if not s.active else "Pause", variant="ghost", size="sm", type="submit", attrs={"form": "tw-toggle-" ~ s.id}) }}
-                          {{ ui.button("Delete Twitch search", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "tw-delete-" ~ s.id, "data-confirm": "Delete this Twitch search and its samples? Streamers it found stay."}) }}
-                        </div>
-                      {% endif %}
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% endif %}
-        {% if not ro %}
-          <form method="post" action="/outreach/twitch/searches" class="search-form" data-requires="outreach_find" data-requires-kind="twitch">
-            <div class="field"><label class="field__label" for="tw-cat">Category <span class="field__optional">(exact Twitch name)</span></label><input class="input" id="tw-cat" name="category" maxlength="100" placeholder="Just Chatting" autocomplete="off"></div>
-            <div class="field"><label class="field__label" for="tw-lang">Language</label><input class="input" id="tw-lang" name="language" maxlength="5" placeholder="en" autocomplete="off"></div>
-            <div class="field"><label class="field__label" for="tw-min">Min live viewers</label><input class="input input--number" id="tw-min" name="min_viewers" type="number" min="1" value="50"></div>
-            <div class="field"><label class="field__label" for="tw-max">Max live viewers</label><input class="input input--number" id="tw-max" name="max_viewers" type="number" min="1" value="1000"></div>
-            <div class="search-form__submit">{{ ui.button("Add Twitch search", variant="secondary", type="submit", icon="plus") }}</div>
-          </form>
-        {% endif %}
-      </div>
-      {% if not ro %}
-        <form method="post" action="/outreach/settings" class="card__footer card__footer--form">
-          <input type="hidden" name="form" value="twitch">
-          <label class="switch-row">
-            <input type="checkbox" class="switch" role="switch" name="twitch_enabled" value="1" {% if settings.twitch_enabled %}checked{% endif %} {% if twitch_problem %}disabled{% endif %}>
-            On
-          </label>
-          <div class="field field--inline"><label class="field__label" for="tw-hours">Sample at (hours)</label><input class="input input--mono" id="tw-hours" name="twitch_sample_hours" value="{{ settings.twitch_sample_hours }}" autocomplete="off"></div>
-          <div class="field field--inline"><label class="field__label" for="tw-cap">Streamers a day</label><input class="input input--number input--short" id="tw-cap" name="twitch_new_leads_per_day" type="number" min="0" value="{{ settings.twitch_new_leads_per_day }}"></div>
-          {{ ui.button("Sample now", variant="ghost", size="sm", type="submit", attrs={"formaction": "/outreach/twitch/sample-now", "data-requires": "outreach_find", "data-requires-kind": "twitch"}) }}
-          {{ ui.button("Save", variant="secondary", type="submit") }}
-        </form>
-      {% endif %}
-    </section>
 
     <section class="card">
       <div class="card__header">
@@ -746,4 +815,22 @@
     </details>
   </div>
 {% endif %}
+<script>
+  // Keep the scroll position across a form post (add, delete, toggle...), which redirects back to this page.
+  (() => {
+    const key = "outreach-scroll";
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(key) || "null");
+      sessionStorage.removeItem(key);
+      if (saved && saved.tab === location.search.match(/tab=(\w+)/)?.[1] && Date.now() - saved.at < 10000) {
+        const go = () => window.scrollTo(0, saved.y);
+        go(); addEventListener("load", go);
+      }
+    } catch {}
+    document.addEventListener("submit", e => {
+      if (e.defaultPrevented || (e.target.method || "").toLowerCase() !== "post") return;
+      try { sessionStorage.setItem(key, JSON.stringify({y: scrollY, at: Date.now(), tab: location.search.match(/tab=(\w+)/)?.[1]})); } catch {}
+    });
+  })();
+</script>
 {% endblock %}

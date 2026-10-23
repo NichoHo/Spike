@@ -35,12 +35,12 @@ TABS = {
 }
 ADMIN_ACTIONS = {"send", "cancel_send", "regenerate"}
 INT_SETTINGS = {  # name: (min, max)
-    "run_hour": (0, 23), "max_searches_per_run": (1, 60), "new_leads_per_day": (1, 200), "lookback_days": (3, 30),
-    "min_long_streams_14d": (0, 14), "min_fit_score": (0, 100), "max_shorts_14d": (0, 200), "search_calls_per_day": (0, 100),
-    "units_per_day": (100, 1000000), "units_reserved_for_spike": (0, 1000000), "trial_clips_per_day": (0, 20),
-    "trial_max_vod_s": (1800, 43200), "emails_per_day": (1, 100), "send_gap_min": (1, 120),
-    "followup_1_days": (1, 30), "followup_2_days": (2, 60), "drive_retention_days": (1, 90),
-    "lead_retention_days": (30, 365), "min_views": (0, 10000000), "twitch_new_leads_per_day": (0, 100),
+    # Limits form keeps only these numeric keys; the rest are hardcoded to DEFAULT_SETTINGS (read via fallback)
+    # or removed entirely (emails_per_day, trial_clips_per_day -> unlimited). See OUTREACH.md / PART A.
+    "run_hour": (0, 23), "new_leads_per_day": (1, 200),
+    "min_long_streams_14d": (0, 14), "max_shorts_14d": (0, 200),
+    # Not on the limits form, but POSTed by the offer and Twitch forms:
+    "min_views": (0, 10000000), "twitch_new_leads_per_day": (0, 100),
 }
 FLOAT_SETTINGS = {"min_stream_hours": (0.5, 12.0)}
 TEXT_SETTINGS = ("sender_name", "company_name", "proof_url", "rate_default", "rate_sea", "monthly_cap")
@@ -89,6 +89,7 @@ def _tab_leads(tab: str, settings: Dict[str, Any]) -> List[Dict[str, Any]]:
         first = l["msgs"].get("first") or {}
         l["queued"] = first.get("status") in ("queued", "sending")
         l["next_followup"] = _next_followup(l, first, settings)
+        l["default_terms"] = service.default_terms(l, settings)
     if tab == "email":
         leads = [l for l in leads if not l["queued"]]
     elif tab == "sent":
@@ -104,6 +105,13 @@ def _finder_state(settings: Dict[str, Any]) -> str:
             return "stuck"
         return "running" if status == "running" else "starting"
     return status
+
+
+@router.get("/api/finder-status")
+async def finder_status(user: Dict[str, Any] = Depends(get_current_user)):
+    """Polled on every page: drives the sidebar spinner and the "finder finished" toast (app.js)."""
+    settings = db.get_settings()
+    return {"state": _finder_state(settings), "finished_at": settings["finder_finished_at"]}
 
 
 @router.get("/outreach", response_class=HTMLResponse)
@@ -172,15 +180,25 @@ async def bulk_action(request: Request, user: Dict[str, Any] = Depends(get_curre
     if action in ADMIN_ACTIONS and user.get("role") != "admin":
         raise HTTPException(HTTP_403_FORBIDDEN, "Only admins can send or regenerate emails.")
     if action == "save_drafts" or action == "send":
-        # Edits on the Ready to email screen are saved before anything is queued
+        # Edits on the Ready to email screen are saved before anything is queued. A draft whose terms changed
+        # is rewritten from the template so it quotes the new numbers, and is held back from sending for review.
+        rewritten = []
         for lid in ([int(k.split("_", 1)[1]) for k in form if k.startswith("body_")] if action == "save_drafts" else ids):
-            if f"body_{lid}" in form:
-                try:
+            try:
+                if f"rate_{lid}" in form and user.get("role") == "admin" and service.save_terms(
+                        lid, form.get(f"rate_{lid}", ""), form.get(f"min_views_{lid}", ""), form.get(f"cap_{lid}", "")):
+                    service.draft_emails(None, [lid])
+                    rewritten.append(lid)
+                elif f"body_{lid}" in form:
                     service.save_draft(lid, form.get(f"to_{lid}", ""), form.get(f"subject_{lid}", ""), form.get(f"body_{lid}", ""))
-                except service.OutreachError as e:
-                    return _back(tab, error=str(e))
+            except service.OutreachError as e:
+                return _back(tab, error=str(e))
+        note = f" {len(rewritten)} draft(s) rewritten with the new terms, check them before sending." if rewritten else ""
         if action == "save_drafts":
-            return _back(tab, notice="Drafts saved.")
+            return _back(tab, notice="Drafts saved." + note)
+        ids = [i for i in ids if i not in rewritten]
+        if not ids:
+            return _back(tab, notice="Terms saved." + note)
     if not ids:
         return _back(tab, error="Select at least one row first.")
     try:
@@ -200,7 +218,7 @@ async def bulk_action(request: Request, user: Dict[str, Any] = Depends(get_curre
             return _back(tab, notice=f"{service.retry_clip(ids)} Spike job(s) queued again.")
         if action == "send":
             r = service.queue_send(ids)
-            msg = f"{r['queued']} email(s) queued, sent {db.get_settings()['send_gap_min']} min apart."
+            msg = f"{r['queued']} email(s) queued, sent {db.get_settings()['send_gap_min']} minutes apart." + note
             return _back("sent" if r["queued"] else tab, notice=msg, error="Skipped: " + "; ".join(r["skipped"]) if r["skipped"] else "")
         if action == "cancel_send":
             return _back(tab, notice=f"{service.cancel_send(ids)} send(s) cancelled. Back in Ready to email.")
@@ -221,20 +239,47 @@ async def bulk_action(request: Request, user: Dict[str, Any] = Depends(get_curre
 @router.post("/outreach/leads/{lead_id}/contact", dependencies=[Depends(same_origin)])
 async def save_contact(lead_id: int, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     form = await request.form()
+    tab = form.get("tab") if form.get("tab") in TABS else "contact"
     try:
         lead = service.save_contact(lead_id, form.get("email", ""),
                                     {k: form.get(k, "") for k in ("instagram", "x", "tiktok", "discord", "website") if k in form})
     except service.OutreachError as e:
-        return _back("contact", error=str(e))
+        return _back(tab, error=str(e))
     moved = lead["status"] == "approved"
-    return _back("contact", notice=f"Saved {lead['name']}." + (" Its email draft appears in Ready to send." if moved else ""))
+    return _back(tab, notice=f"Saved {lead['name']}." + (" Its email draft appears in Ready to send." if moved else ""))
+
+
+@router.post("/outreach/leads/{lead_id}/youtube", dependencies=[Depends(same_origin)])
+async def save_youtube(lead_id: int, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+    form = await request.form()
+    tab = form.get("tab") if form.get("tab") in TABS else "review"
+    try:  # the YouTube lookup blocks
+        lead = await run_in_threadpool(service.save_youtube, lead_id, str(form.get("youtube", ""))[:300])
+    except service.OutreachError as e:
+        return _back(tab, error=str(e))
+    return _back(tab, notice=lead.get("_note") or f"Saved the YouTube channel for {lead['name']}.")
+
+
+@router.post("/outreach/leads/reply", dependencies=[Depends(same_origin)])
+async def log_reply(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+    form = await request.form()
+    lead_id = str(form.get("lead_id", ""))
+    try:  # the Gemini sentiment call blocks
+        status = await run_in_threadpool(service.log_reply, int(lead_id) if lead_id.isdigit() else 0,
+                                         str(form.get("text", ""))[:5000], str(form.get("url", "")))
+    except service.OutreachError as e:
+        return _back("sent", error=str(e))
+    if status == "opted_out":
+        return _back("sent", notice="Reply logged. It asks not to be contacted, so the streamer is opted out.")
+    return _back("replies", notice="Reply logged. Follow-ups for this streamer are stopped.")
 
 
 @router.post("/outreach/leads/{lead_id}/client", dependencies=[Depends(same_origin)])
 async def save_client(lead_id: int, request: Request, user: Dict[str, Any] = Depends(require_admin)):
     form = await request.form()
     try:
-        service.save_client(lead_id, form.get("model", "A"), form.get("cap", ""), form.get("start", ""))
+        service.save_client(lead_id, form.get("model", "A"), form.get("rate", ""), form.get("min_views", ""),
+                            form.get("cap", ""), form.get("start", ""))
     except service.OutreachError as e:
         return _back("clients", error=str(e))
     return _back("clients", notice="Client terms saved.")
@@ -246,8 +291,9 @@ async def save_client(lead_id: int, request: Request, user: Dict[str, Any] = Dep
 async def run_now(user: Dict[str, Any] = Depends(require_admin)):
     settings = db.get_settings()
     has_twitch = settings["twitch_enabled"] and any(s["active"] for s in db.list_twitch_searches())
-    if not db.list_searches(active_only=True) and not has_twitch:
-        return _back("settings", error="Add a topic first: the finder only looks for the topics you add.")
+    has_youtube = settings["youtube_enabled"] and db.list_searches(active_only=True)
+    if not has_youtube and not has_twitch:
+        return _back("settings", error="Nothing to run: turn a platform on and add a topic, because the finder only looks for the topics you add.")
     db.set_settings({"run_now": 1})
     return _back("settings")
 
@@ -279,11 +325,17 @@ async def save_settings(request: Request, user: Dict[str, Any] = Depends(require
         if not hours or not all(h.isdigit() and 0 <= int(h) <= 23 for h in hours):
             return _back("settings", error="Sample hours must be whole hours from 0 to 23, separated by commas.")
         values["twitch_sample_hours"] = ",".join(str(int(h)) for h in sorted(set(hours), key=int))
-        values["twitch_enabled"] = 1 if form.get("twitch_enabled") else 0
-        if values["twitch_enabled"] and twitch.credentials_problem():
-            return _back("settings", error=twitch.credentials_problem())
     db.set_settings(values)
     return _back("settings", notice="Settings saved.")
+
+
+@router.post("/outreach/platform", dependencies=[Depends(same_origin)])
+async def toggle_platform(request: Request, user: Dict[str, Any] = Depends(require_admin)):
+    form = await request.form()
+    platform = form.get("platform")
+    if platform in ("youtube", "twitch"):
+        db.set_settings({platform + "_enabled": 1 if form.get("enabled") else 0})
+    return _back("settings")
 
 
 _trending: Dict[str, Any] = {"at": 0.0, "names": []}

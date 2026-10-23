@@ -119,6 +119,9 @@ async def submit_new_job(
     music: str = Form("auto"),
     cut_pauses: str = Form("auto"),
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
+    caption_style: str = Form("bold_pop"),
+    profanity_mask: Optional[str] = Form(None),  # checkbox: present when on
+    default_music_mood: str = Form("chill"),
     file: Optional[UploadFile] = File(None),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -133,6 +136,8 @@ async def submit_new_job(
         or music not in ("auto", "on", "off")
         or cut_pauses not in ("auto", "tight", "natural", "off")
         or letterbox_style not in ("title", "blur")
+        or caption_style not in ("bold_pop", "karaoke", "clean")
+        or default_music_mood not in ("chill", "hype", "funny", "dramatic", "wholesome")
     ):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid processing option.")
     settings = {
@@ -141,6 +146,9 @@ async def submit_new_job(
         "music": "auto" if music == "auto" else music == "on",
         "cut_pauses": cut_pauses,
         "letterbox_style": letterbox_style,
+        "caption_style": caption_style,
+        "profanity_mask": profanity_mask is not None,
+        "default_music_mood": default_music_mood,
     }
     if target_clips.strip():
         settings["target_clips"] = max(1, min(MAX_TARGET_CLIPS, int(target_clips)))

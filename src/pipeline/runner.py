@@ -11,15 +11,20 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from src.cleanup import cleanup_after_pipeline
-from src.config import VIDEOS_DIR
+from src.config import VIDEOS_DIR, PUBLIC_URL
 from src.db import (
     init_db,
     register_video,
+    enter_stage,
+    JobInterrupted,
     update_video_stage,
     set_video_duration,
     set_stage_progress,
+    get_connection,
+    get_job,
     finish_video,
 )
+from src import oversize_gate
 from src.notify import send_job_ready_notification, send_job_failed_notification
 from src.pipeline.stage1_meta import run_stage1_meta
 from src.profile import ensure_profiles
@@ -32,6 +37,43 @@ from src.pipeline.stage7_moments import run_stage7_moments
 from src.pipeline.stage8_sections import run_stage8_sections
 from src.pipeline.stage9_render import run_stage9_render
 from src.pipeline.stage9c_render import run_stage9c_render
+
+
+def _park_job(video_id: int) -> None:
+    """Set a running job back to 'queued', like a queue-reorder pause, so the worker picks the next one."""
+    with get_connection() as conn:
+        conn.execute("UPDATE videos SET status = 'queued' WHERE id = ? AND status = 'running'", (video_id,))
+
+
+def _oversize_gate(video_id: int, meta: Dict[str, Any]) -> None:
+    """Pause before the expensive 'moments' stage when the VOD is too long, and ask the user.
+
+    Levels: 4 h threshold -> ask once; 6 h soft ceiling -> ask a second, escalated time; a Continue there
+    processes the WHOLE video (no truncation). Stop cancels the job; no answer within the timeout parks it
+    (back to 'queued') and raises JobInterrupted so the worker moves to the next queued job and resumes this
+    one later from the same stage.
+    """
+    duration_s = float(meta.get("duration") or 0.0)
+    if duration_s <= oversize_gate.THRESHOLD_S:
+        return
+    job = get_job(video_id)
+    title = (job["title"] if job and job["title"] else None) or meta.get("title") or f"Video #{video_id}"
+
+    # Level 1 at the 4 h threshold, then level 2 if the user continues past the 6 h ceiling.
+    levels = [1] + ([2] if duration_s > oversize_gate.CEILING_S else [])
+    for level in levels:
+        decision = oversize_gate.ask(video_id, title, duration_s, level, PUBLIC_URL)
+        if decision == "stop":
+            with get_connection() as conn:
+                conn.execute("UPDATE videos SET status = 'done', error = 'Stopped: video too long' "
+                             "WHERE id = ? AND status = 'running'", (video_id,))
+            oversize_gate.clear(video_id)
+            raise JobInterrupted(video_id, "cancelled")
+        if decision == "timeout":
+            _park_job(video_id)
+            raise JobInterrupted(video_id, "queued")
+        # decision == "continue": fall through to the next level (if any), else proceed into stage 7.
+    oversize_gate.clear(video_id)
 
 
 def run_pipeline(
@@ -51,34 +93,39 @@ def run_pipeline(
     origin = "upload" if is_local else "url"
 
     # Register in DB, unless the worker already claimed a queued row for this job
+    claimed = video_id is not None
     video_id = video_id or register_video(origin, source_input)
     video_dir = VIDEOS_DIR / str(video_id)
     video_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        # Stage 1: fetch_meta
-        update_video_stage(video_id, "fetch_meta", status="running")
+        # Stage 1: fetch_meta. A CLI run has no worker claim, so it marks its own row running.
+        # Every enter_stage raises JobInterrupted if the job was paused (queue reorder) or cancelled.
+        if claimed:
+            enter_stage(video_id, "fetch_meta")
+        else:
+            update_video_stage(video_id, "fetch_meta", status="running")
         meta = run_stage1_meta(video_dir, source_input, (source_settings or {}).get("max_process_s"))
         if meta.get("duration"):
             set_video_duration(video_id, meta["duration"])
 
         # Stage 2: fetch_audio
-        update_video_stage(video_id, "fetch_audio", status="running")
+        enter_stage(video_id, "fetch_audio")
         audio_path = run_stage2_audio(video_dir, meta)
 
         # Stage 3: fetch_chat (Twitch VODs and finished YouTube streams; skipped for uploads)
-        update_video_stage(video_id, "fetch_chat", status="running")
+        enter_stage(video_id, "fetch_chat")
         chat_override = Path(source_settings["chat_file"]) if source_settings and source_settings.get("chat_file") else None
         chat_data = run_stage3_chat(video_dir, meta, source_input, chat_file_override=chat_override)
 
         # Stage 4: fetch_crowd (YouTube comments or Twitch emotes/clips)
-        update_video_stage(video_id, "fetch_crowd", status="running")
+        enter_stage(video_id, "fetch_crowd")
         crowd_data = run_stage4_crowd(video_dir, meta)
         if source_settings and source_settings.get("holdout_clips") and isinstance(crowd_data, dict):
             crowd_data["clips"] = []  # eval runs: community clips are the answer key, so Spike must not see them
 
         # Stage 5: transcribe
-        update_video_stage(video_id, "transcribe", status="running")
+        enter_stage(video_id, "transcribe")
         transcript = run_stage5_transcribe(
             video_dir, audio_path, on_progress=lambda f: set_stage_progress(video_id, f)
         )
@@ -94,7 +141,7 @@ def run_pipeline(
             profile_ctx = None
 
         # Stage 6: signals (fused audio + crowd + chat)
-        update_video_stage(video_id, "signals", status="running")
+        enter_stage(video_id, "signals")
         signals_data = run_stage6_signals(
             video_dir, meta, audio_path, transcript, crowd_data, chat_data=chat_data,
             weight_mult=(profile_ctx or {}).get("preset", {}).get("weight_mult"),
@@ -103,8 +150,13 @@ def run_pipeline(
             signals_data["target_clip_count"] = int(source_settings["target_clips"])
             signals_data["explicit_target"] = True
 
+        # Oversized-input gate (replaces the old hard VOD chop): before the expensive 'moments' stage, a VOD
+        # longer than the 4 h threshold needs a Continue/Stop answer; past the 6 h soft ceiling it needs a
+        # second, escalated one. No answer within the timeout parks the job for the next queued one.
+        _oversize_gate(video_id, meta)
+
         # Stage 7: moments (LLM judge + snapping + pairwise rerank)
-        update_video_stage(video_id, "moments", status="running")
+        enter_stage(video_id, "moments")
         candidates = run_stage7_moments(
             video_id, video_dir, meta, transcript, signals_data, crowd_data, chat_data=chat_data, profile_ctx=profile_ctx
         )
@@ -116,15 +168,15 @@ def run_pipeline(
             return {"video_id": video_id, "candidates": []}
 
         # Stage 8: fetch_sections
-        update_video_stage(video_id, "fetch_sections", status="running")
+        enter_stage(video_id, "fetch_sections")
         run_stage8_sections(video_dir, meta, candidates)
 
         # Stage 9: plain 16:9 baseline cut (Phase 1 output, always produced)
-        update_video_stage(video_id, "render", status="running")
+        enter_stage(video_id, "render")
         rendered_clips = run_stage9_render(video_dir, candidates)
 
         # Stage 9c: Phase 2 vertical 9:16 render with face tracking, captions & effects
-        update_video_stage(video_id, "render_vertical", status="running")
+        enter_stage(video_id, "render_vertical")
         vertical_clips = run_stage9c_render(video_dir, candidates, transcript, source_settings)
 
         # Stage 9c registered each clip with its full render settings. Registering again here wrote defaults
@@ -164,6 +216,8 @@ def run_pipeline(
             "vertical_clips": [str(p) for p in vertical_clips],
         }
 
+    except JobInterrupted:
+        raise  # paused or cancelled, not failed: keep its files so it resumes from this stage
     except Exception as e:
         err_msg = str(e)
         traceback.print_exc()

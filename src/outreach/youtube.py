@@ -37,6 +37,7 @@ STREAM_RES = {  # the streamer's main platform; stored as login/slug so it can b
     "twitch": re.compile(r"(?:https?://)?(?:www\.|m\.)?twitch\.tv/(\w{3,25})(?!\w)", re.I),
     "kick": re.compile(r"(?:https?://)?(?:www\.)?kick\.com/([\w-]{2,40})(?![\w-])", re.I),
 }
+YT_LINK_RE = re.compile(r"(?:https?://)?(?:www\.|m\.)?youtube\.com/(?:@([\w.-]{3,30})|channel/(UC[\w-]{22}))", re.I)
 URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
 _NOT_WEBSITE = ("youtube.", "youtu.be", "instagram.", "twitter.", "x.com", "tiktok.", "discord.", "facebook.",
                 "twitch.tv", "kick.com", "whop.com", "linktr.ee", "streamlabs.", "saweria.", "trakteer.", "spotify.")
@@ -338,6 +339,39 @@ def score_fit(rows: List[Dict[str, Any]]) -> Dict[str, FitResult]:
         except Exception as e:  # the reviewer still sees the lead, just unscored
             db.log(f"Fit scoring failed for {len(batch)} channel(s): {e}", "warning")
     return out
+
+
+def find_channel_link(text: Optional[str]) -> Optional[str]:
+    """The first YouTube channel link in a bio, as a clean URL."""
+    m = YT_LINK_RE.search(text or "")
+    if not m:
+        return None
+    return f"https://www.youtube.com/@{m.group(1)}" if m.group(1) else f"https://www.youtube.com/channel/{m.group(2)}"
+
+
+def parse_channel_link(text: str) -> Optional[str]:
+    """What a user typed: a channel link, a bare @handle, or a UC... id."""
+    text = (text or "").strip()
+    bare = "youtube.com/channel/" + text if re.fullmatch(r"UC[\w-]{22}", text) else "youtube.com/" + text.lstrip("/")
+    return find_channel_link(text) or find_channel_link(bare)
+
+
+def shorts_for_link(link: Optional[str], settings: Dict[str, Any]) -> Optional[int]:
+    """Shorts in the look-back window for a channel URL from parse_channel_link, or None when there is no link or
+    the lookup fails. ponytail: links only (the API exposes no Twitch panels); a name search costs 100 quota
+    units per streamer."""
+    m = YT_LINK_RE.search(link or "")
+    if not m:
+        return None
+    params = {"forHandle": "@" + m.group(1)} if m.group(1) else {"id": m.group(2)}
+    try:
+        items = call("channels", settings, part="snippet,statistics,contentDetails", **params).get("items", [])
+        if not items:
+            return None
+        ch = channel_fields(items[0])
+        return fetch_activity({ch["channel_id"]: ch}, settings)[ch["channel_id"]]["shorts_14d"]
+    except (YouTubeError, QuotaExhausted):
+        return None
 
 
 # ── A lead added by hand (OUTREACH.md §6.5 "Add lead") ────────────────────────

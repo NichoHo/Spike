@@ -1,6 +1,27 @@
 {% import "macros/ui.html" as ui %}
 
 <tbody id="jobs-tbody" hx-get="/jobs/table" hx-trigger="every 5s" hx-swap="outerHTML">
+  {% if gate %}
+    <tr>
+      <td colspan="5" style="padding: 0;">
+        <div class="alert alert--warning" style="margin: var(--space-3) 0;" role="alert">
+          <div class="stack stack--sm">
+            <strong>{{ "Oversized video: final check" if gate.level == 2 else "Long video: confirm before the expensive stages" }}</strong>
+            <pre class="mono" style="white-space: pre-wrap; font-size: 12px; margin: 0;">{{ gate.message }}</pre>
+            <form method="post" action="/jobs/gate/answer" class="row" style="gap: var(--space-2);">
+              <input type="hidden" name="req_id" value="{{ gate.id }}">
+              <button type="submit" name="decision" value="continue" class="btn btn--primary btn--sm">
+                {{ ui.icon("play", 14) }} <span>Continue</span>
+              </button>
+              <button type="submit" name="decision" value="stop" class="btn btn--secondary btn--sm" style="color: var(--color-danger-text);">
+                {{ ui.icon("x", 14) }} <span>Stop</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      </td>
+    </tr>
+  {% endif %}
   {% if not jobs %}
     <tr>
       <td colspan="5" style="text-align: center; padding: var(--space-8); color: var(--color-text-muted);">
@@ -8,11 +29,20 @@
       </td>
     </tr>
   {% else %}
+    {% set q = namespace(pos=0) %}
     {% for j in jobs %}
+      {% if j.status in ('queued', 'running') %}
+      <tr data-queue-id="{{ j.id }}" data-queue-status="{{ j.status }}" data-queue-title="{{ j.title or j.url }}" data-queue-stage="{{ j.stage or '' }}">
+      {% else %}
       <tr>
+      {% endif %}
         <td>
           <div class="primary-cell truncate" style="max-width: 380px;">{{ j.title or j.url }}</div>
           <span class="secondary-line">{{ j.source_name or j.origin }} · #{{ j.id }}</span>
+          {% if j.status == 'queued' %}
+            {% set q.pos = q.pos + 1 %}
+            <span class="secondary-line">{{ "Next up" if q.pos == 1 else "Queue position " ~ q.pos }}{% if j.claimed_at and j.stage and j.stage != 'fetch_meta' %} · paused, resumes where it stopped{% endif %}</span>
+          {% endif %}
           {% if j.status == 'failed' and j.error %}
             <details style="margin-top: 4px;">
               <summary style="font-size: 12px; color: var(--color-danger-text);">

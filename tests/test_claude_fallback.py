@@ -64,6 +64,40 @@ def test_claude_instead_returns_gemini_shaped_text_and_skips_video(monkeypatch):
     assert s7.claude_instead("judge this", None, "score one moment") is None
 
 
+def test_pause_stops_every_claude_call_and_denies_a_waiting_one(monkeypatch):
+    import pytest
+    from src import claude_cli
+    monkeypatch.setattr(cf, "_notify", lambda label: None)
+    monkeypatch.setattr(cf.time, "sleep", lambda s: _real_sleep(0.05))
+    set_setting(cf.SKIP_KEY, "")
+    set_setting(cf.REQUEST_KEY, "null")
+
+    def pause_when_pending():
+        for _ in range(200):
+            if cf.pending():
+                cf.set_paused(True)
+                return
+            _real_sleep(0.05)
+    t = threading.Thread(target=pause_when_pending)
+    t.start()
+    assert cf.ask("score one moment", "") is False  # the job waiting for the OK stops waiting
+    t.join()
+    assert cf.paused() and cf.ask("score another", "") is False and cf.pending() is None  # no new popup
+    with pytest.raises(claude_cli.ClaudeError, match="paused"):
+        claude_cli.run_claude("s", "p", {"type": "object"})  # the editor, profile etc. fall back to Gemini on this
+    cf.set_paused(False)
+    assert not cf.paused()
+
+
+def test_running_mark_expires():
+    cf.mark_running("editor pass", 60)
+    assert cf.running() == "editor pass"
+    cf.clear_running()
+    assert cf.running() is None
+    cf.mark_running("crashed call", -1)  # the process died mid-call: the mark lapses on its own
+    assert cf.running() is None
+
+
 def test_list_values_returned_as_strings_are_decoded():
     # Haiku under the loose schema: '["twitch", "kai"]' as a string, "[laughter]" stays text
     out = s7._unstring({"hashtags": '["twitch", "kai"]', "score": "28", "punchline": "[laughter] no way",

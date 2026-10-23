@@ -180,6 +180,19 @@ def filter_percent(val: Optional[float]) -> str:
     return f"{int(round(pct))}%"
 
 
+LANGUAGES = [("en", "English"), ("id", "Indonesian"), ("ms", "Malay"), ("tl", "Filipino"), ("th", "Thai"),
+             ("vi", "Vietnamese"), ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese"), ("hi", "Hindi"),
+             ("ar", "Arabic"), ("tr", "Turkish"), ("ru", "Russian"), ("es", "Spanish"), ("pt", "Portuguese"),
+             ("fr", "French"), ("de", "German"), ("it", "Italian"), ("pl", "Polish"), ("nl", "Dutch")]
+_LANGUAGE_NAMES = dict(LANGUAGES, other="Other")
+
+
+def filter_language(code):
+    """'en' -> 'English'. Empty means no language filter; unknown codes show as typed."""
+    code = (code or "").strip().lower()
+    return _LANGUAGE_NAMES.get(code.split("-")[0]) or code.upper() if code else "Any language"
+
+
 def register_filters(jinja_env):
     """Register all filters onto the Jinja2 environment."""
     jinja_env.filters["timecode"] = filter_timecode
@@ -194,3 +207,5 @@ def register_filters(jinja_env):
     jinja_env.filters["number"] = filter_number
     jinja_env.filters["compact_number"] = filter_compact_number
     jinja_env.filters["percent"] = filter_percent
+    jinja_env.filters["language"] = filter_language
+    jinja_env.globals["LANGUAGES"] = LANGUAGES

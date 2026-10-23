@@ -50,6 +50,8 @@ def run_finders(settings: Dict) -> None:
     db.set_settings({"finder_status": "running", "finder_error": "", "finder_started_at": db.now_iso()})
     errors = []
     for name, fn in (("YouTube finder", run_finder_now), ("Twitch finder", run_twitch_finder_now)):
+        if not settings[name.split()[0].lower() + "_enabled"]:
+            continue
         try:
             fn(settings)
         except Exception as e:
@@ -72,7 +74,7 @@ def run_finder_now(settings: Dict) -> None:
 
 
 def run_twitch_finder_now(settings: Dict) -> None:
-    if not settings["twitch_enabled"]:
+    if not any(s["active"] for s in db.list_twitch_searches()):
         return
     summary = twitch.run_finder(settings)
     db.log(f"Twitch finder: {summary}")

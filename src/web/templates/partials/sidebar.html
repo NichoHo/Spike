@@ -48,6 +48,7 @@
     <a href="/outreach" class="nav-item {% if active_nav == 'outreach' %}is-active{% endif %}" {% if active_nav == 'outreach' %}aria-current="page"{% endif %} data-nav-key="outreach" data-nav-marker="{{ badges.outreach[1] }}">
       {{ ui.icon("envelope-simple", 16) }}
       <span>Outreach</span>
+      <span class="nav-item__finder" data-finder-busy data-tooltip="Finding streamers" hidden><span class="badge__spinner"></span><span class="visually-hidden">Finder running</span></span>
       {{ nav_badge("outreach") }}
     </a>
 
@@ -60,6 +61,8 @@
   </nav>
 
   <div class="sidebar__spacer"></div>
+
+  {% include "partials/ai_status.html" %}
 
   {% if user %}
     <div class="user-row">

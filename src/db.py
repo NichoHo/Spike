@@ -364,16 +364,49 @@ def register_video(
         return row[0]
 
 
+class JobInterrupted(Exception):
+    """The job stopped being 'running' while it ran: a queue reorder paused it (back to 'queued') or it was
+    cancelled. Raised at the next stage boundary, so the job resumes later from that stage."""
+
+    def __init__(self, video_id: int, status: Optional[str]):
+        super().__init__(f"Job #{video_id} was {'paused' if status == 'queued' else 'cancelled'}")
+        self.status = status
+
+
+def _start_stage_timing(conn: sqlite3.Connection, video_id: int, stage: str, now: str):
+    if stage == "fetch_meta":
+        conn.execute("DELETE FROM stage_timings WHERE video_id = ?", (video_id,))
+    conn.execute("UPDATE stage_timings SET finished_at = ? WHERE video_id = ? AND finished_at IS NULL", (now, video_id))
+    conn.execute("INSERT INTO stage_timings (video_id, stage, started_at) VALUES (?, ?, ?)", (video_id, stage, now))
+
+
+def enter_stage(video_id: int, stage: str):
+    """Move a running job to its next stage, or raise JobInterrupted if it was paused or cancelled meanwhile.
+    The check and the update are one statement, so a pause cannot land between them."""
+    now = now_utc_iso()
+    with get_connection() as conn:
+        moved = conn.execute(
+            "UPDATE videos SET stage = ?, attempts = attempts + 1 WHERE id = ? AND status = 'running'", (stage, video_id)
+        ).rowcount
+        if moved:
+            _start_stage_timing(conn, video_id, stage, now)
+        else:
+            # The previous stage did finish: close its timing so the ETA history stays right.
+            conn.execute("UPDATE stage_timings SET finished_at = ? WHERE video_id = ? AND finished_at IS NULL", (now, video_id))
+            row = conn.execute("SELECT status FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not moved:
+        raise JobInterrupted(video_id, row["status"] if row else None)
+
+
 def update_video_stage(video_id: int, stage: str, status: str = "running", error: Optional[str] = None):
     now = now_utc_iso()
     with get_connection() as conn:
-        if stage == "fetch_meta":
-            conn.execute("DELETE FROM stage_timings WHERE video_id = ?", (video_id,))
         if status == "failed":
+            if stage == "fetch_meta":
+                conn.execute("DELETE FROM stage_timings WHERE video_id = ?", (video_id,))
             conn.execute("DELETE FROM stage_timings WHERE video_id = ? AND finished_at IS NULL", (video_id,))
         else:
-            conn.execute("UPDATE stage_timings SET finished_at = ? WHERE video_id = ? AND finished_at IS NULL", (now, video_id))
-            conn.execute("INSERT INTO stage_timings (video_id, stage, started_at) VALUES (?, ?, ?)", (video_id, stage, now))
+            _start_stage_timing(conn, video_id, stage, now)
         conn.execute(
             """
             UPDATE videos
@@ -426,6 +459,9 @@ def list_jobs(limit: int = 100) -> List[sqlite3.Row]:
                     WHEN 'ready' THEN 4
                     ELSE 5
                 END,
+                -- queued jobs in the order the worker claims them
+                CASE WHEN v.status = 'queued' THEN v.priority END DESC,
+                CASE WHEN v.status = 'queued' THEN v.created_at END ASC,
                 v.created_at DESC
             LIMIT ?
             """,
@@ -472,6 +508,44 @@ def cancel_job(video_id: int) -> bool:
             (video_id,)
         )
         return res.rowcount > 0
+
+
+# Manual submissions use priority 10. A reordered queue sits above that, so a job submitted after a
+# reorder joins the end of the order the person set instead of jumping into the middle of it.
+_REORDER_BASE_PRIORITY = 10
+
+
+def reorder_queue(order: List[int], allow_pause: bool = False) -> Dict[str, Any]:
+    """Rank the queued and running jobs in `order` (first runs first). Ids that are not queued/running are
+    ignored; active jobs missing from `order` keep their current order after the listed ones.
+
+    A running job that is no longer first is paused: set back to 'queued', so the worker stops it at its next
+    stage boundary and resumes it later from that stage. That only happens with allow_pause; otherwise
+    nothing changes and {"needs_confirm": <running id>} is returned.
+    Returns {"paused": <id or None>} on success.
+    """
+    with get_connection() as conn:
+        active = conn.execute(
+            """SELECT id, status FROM videos WHERE status IN ('queued', 'running')
+               ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, priority DESC, created_at ASC"""
+        ).fetchall()
+        active_ids = [r["id"] for r in active]
+        listed = list(dict.fromkeys(i for i in order if i in set(active_ids)))
+        ranked = listed + [i for i in active_ids if i not in listed]
+        if not ranked:
+            return {"paused": None}
+        running = next((r["id"] for r in active if r["status"] == "running"), None)
+        to_pause = running if running is not None and ranked[0] != running else None
+        if to_pause is not None and not allow_pause:
+            return {"needs_confirm": to_pause}
+        n = len(ranked)
+        conn.executemany(
+            "UPDATE videos SET priority = ? WHERE id = ?",
+            [(_REORDER_BASE_PRIORITY + n - pos, vid) for pos, vid in enumerate(ranked)],
+        )
+        if to_pause is not None:
+            conn.execute("UPDATE videos SET status = 'queued' WHERE id = ? AND status = 'running'", (to_pause,))
+    return {"paused": to_pause}
 
 
 # ── Candidates & Clips ────────────────────────────────────────────────────────

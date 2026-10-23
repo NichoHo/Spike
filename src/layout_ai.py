@@ -66,36 +66,48 @@ def calls_left() -> int:
     return gemini_budget.left(config.LAYOUT_GEMINI_MODEL)
 
 
-def _ask(contents: list, model_cls):
-    from google.genai import types
-    from src.pipeline.stage7_moments import generate_content_with_retry, get_gemini_client
+def _ask(frames: List[Tuple[str, bytes]], prompt: str, model_cls):
+    """Gemini first; when it is out of calls or fails, the same frames go to Claude (Pro plan), after the user's OK."""
+    if config.GEMINI_API_KEY and calls_left() > 0:
+        try:
+            from google.genai import types
+            from src.pipeline.stage7_moments import generate_content_with_retry, get_gemini_client
 
-    resp = generate_content_with_retry(
-        client=get_gemini_client(), model=config.LAYOUT_GEMINI_MODEL, contents=contents,
-        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1),
-    )
-    return model_cls.model_validate_json(resp.text)
+            contents: list = []
+            for label, jpg in frames:
+                contents += ([label] if label else []) + [types.Part.from_bytes(data=jpg, mime_type="image/jpeg")]
+            resp = generate_content_with_retry(
+                client=get_gemini_client(), model=config.LAYOUT_GEMINI_MODEL, contents=contents + [prompt],
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.1),
+            )
+            return model_cls.model_validate_json(resp.text)
+        except Exception as e:
+            print(f"  [layout] Gemini failed ({e}); trying Claude")
+    from src import claude_fallback
+    from src.claude_cli import require_all, run_claude
+
+    if not claude_fallback.ask("Auto layout (Claude Sonnet)", "Auto layout looks at video frames."):
+        raise RuntimeError("Claude fallback not approved")
+    labels = "".join(f"f{i}.jpg = {label}\n" for i, (label, _) in enumerate(frames) if label)
+    out = run_claude("You pick video framing layouts from frames.", labels + prompt, require_all(model_cls.model_json_schema()),
+                     label="auto layout", model="sonnet", images=[jpg for _, jpg in frames])
+    return model_cls.model_validate(out)
 
 
 def choose_layout(sec_file: Path) -> Optional[str]:
     """One layout for a whole section (concept clips): split | face_track | center | letterbox, or None."""
-    if not config.GEMINI_API_KEY or calls_left() <= 0:
-        return None
     sec_file = Path(sec_file)
     try:
         key = (str(sec_file), sec_file.stat().st_mtime)
         if key in _cache:
             return _cache[key]
-        from google.genai import types
-
         dur = _duration(sec_file)
         with tempfile.TemporaryDirectory() as tmp:
-            parts = [types.Part.from_bytes(data=_frame_at(sec_file, dur * f, Path(tmp) / f"f{i}.jpg"), mime_type="image/jpeg")
-                     for i, f in enumerate((0.2, 0.5, 0.8))]
+            parts = [("", _frame_at(sec_file, dur * f, Path(tmp) / f"f{i}.jpg")) for i, f in enumerate((0.2, 0.5, 0.8))]
         prompt = ("These 3 frames come from one section of a landscape video that will be cut into a 9:16 vertical short.\n"
                   f"Pick the framing layout that shows the most important content:\n{LAYOUT_RULES}\n"
                   'Return JSON {"layout": "...", "reason": "<one short sentence>"}.')
-        choice = _ask(parts + [prompt], LayoutChoice)
+        choice = _ask(parts, prompt, LayoutChoice)
         print(f"  [layout] auto -> {choice.layout}: {choice.reason}")
         _cache[key] = choice.layout
         return choice.layout
@@ -149,11 +161,7 @@ def plan_layouts(
 ) -> Optional[List[Dict[str, Any]]]:
     """[{t, layout}] in stream seconds; the first entry is the opening layout (t = clip_start), the rest are
     switches. None when the AI is unavailable, out of calls for today, or fails."""
-    if not config.GEMINI_API_KEY or calls_left() <= 0:
-        return None
     try:
-        from google.genai import types
-
         if sec_start is None:
             sec_start = clip_start - (5.0 if clip_start >= 5.0 else clip_start)  # same guess the renderer makes
         sec_dur = _duration(Path(sec_file))
@@ -161,18 +169,18 @@ def plan_layouts(
         step = max(FRAME_EVERY_S, span / MAX_FRAMES)
         n = max(1, int(span // step) + 1)
         times = [round(clip_start + min(i * step, span - 0.1) if span > 0.1 else clip_start, 2) for i in range(n)]
-        contents: list = []
+        frames: List[Tuple[str, bytes]] = []
         with tempfile.TemporaryDirectory() as tmp:
             for i, t in enumerate(times):
                 jpg = _frame_at(Path(sec_file), min(max(0.0, t - sec_start), sec_dur - 0.1), Path(tmp) / f"f{i}.jpg")
-                contents += [f"Frame {i} (at {t - clip_start:.1f}s into the clip):", types.Part.from_bytes(data=jpg, mime_type="image/jpeg")]
-        contents.append(
+                frames.append((f"Frame {i} (at {t - clip_start:.1f}s into the clip):", jpg))
+        prompt = (
             f"These {n} frames come from one clip of a landscape stream that will be cut into a 9:16 vertical short.\n"
             f"For each frame pick the framing layout that shows its most important content:\n{LAYOUT_RULES}\n"
             "A streamer can switch between these during a clip. Label every frame on its own merits. "
             'Return JSON {"frames": [{"i": 0, "layout": "..."}, ...]} with one entry per frame.'
         )
-        got = {f.i: f.layout for f in _ask(contents, FrameLabels).frames}
+        got = {f.i: f.layout for f in _ask(frames, prompt, FrameLabels).frames}
         labels = [got.get(i) for i in range(n)]
         if None in labels:
             raise ValueError("model skipped frames")

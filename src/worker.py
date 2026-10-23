@@ -19,6 +19,7 @@ from src.db import (
     now_utc_iso,
     claim_candidate_render,
     finish_candidate_render,
+    JobInterrupted,
     log_event,
     update_video_stage,
 )
@@ -101,6 +102,11 @@ def run_worker_cycle() -> bool:
         run_pipeline(source_input=source_input, source_settings=source_settings, video_id=video_id)
         print(f"[worker] Job #{video_id} completed successfully.")
         log_event("info", f"Worker completed job #{video_id}", video_id=video_id)
+        return True
+    except JobInterrupted as e:
+        # Paused jobs are back in the queue; the next claim picks the new first job.
+        print(f"[worker] {e}.")
+        log_event("info", f"{e} at a stage boundary", video_id=video_id)
         return True
     except Exception as e:
         err_msg = str(e)

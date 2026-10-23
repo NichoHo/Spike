@@ -1,0 +1,36 @@
+{# Sidebar AI panel: who is working now, today's Gemini count, Claude pause. app.js re-fetches it from /partials/ai-status #}
+{% import "macros/ui.html" as ui %}
+{% set ai = ai_status() %}
+<div class="ai-status" data-ai-status aria-live="polite">
+  <div class="ai-status__row">
+    <span class="ai-status__title">Using</span>
+    {% if ai.claude_call %}
+      <span data-tooltip="{{ ai.claude_call }}">{{ ui.badge("Claude", "warning") }}</span>
+    {% elif ai.claude_waiting %}
+      {{ ui.badge("Waiting for Claude OK", "warning") }}
+    {% else %}
+      {{ ui.badge("Gemini") }}
+    {% endif %}
+  </div>
+
+  {% for g in ai.gemini %}
+    <div class="ai-status__quota">
+      <div class="ai-status__row">
+        <span class="truncate">{{ g.model | replace("gemini-", "") }}</span>
+        <span class="tabular">{{ g.used }} / {{ g.limit }}</span>
+      </div>
+      <meter min="0" max="{{ g.limit }}" value="{{ g.used }}" low="{{ (g.limit * 0.7) | round }}" high="{{ (g.limit * 0.9) | round }}" optimum="0"
+             aria-label="{{ g.model }} requests today: {{ g.used }} of {{ g.limit }}"></meter>
+    </div>
+  {% endfor %}
+
+  {% if user and user.role == 'admin' %}
+    {% if ai.paused %}
+      {{ ui.button("Resume Claude", size="sm", icon="play", attrs={"data-claude-pause": "0"}) }}
+    {% else %}
+      {{ ui.button("Pause Claude", size="sm", icon="pause", attrs={"data-claude-pause": "1", "data-tooltip": "Jobs stop using Claude: they use Gemini or stop"}) }}
+    {% endif %}
+  {% elif ai.paused %}
+    <span class="ai-status__note">Claude is paused</span>
+  {% endif %}
+</div>

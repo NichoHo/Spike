@@ -20,6 +20,8 @@ from src.db import (
     list_review_clips,
     list_sources,
 )
+from src.config import VIDEOS_DIR
+from src.profile import streamer_name
 from src.web.auth import get_current_user
 
 
@@ -29,6 +31,18 @@ router = APIRouter()
 def _review_signature(source_id: Optional[int]) -> str:
     """Changes whenever a clip enters/leaves the review queue or is re-rendered (version bump)."""
     return ",".join(f"{c['id']}:{c['version']}" for c in list_review_clips(source_id=source_id, status="ready"))
+
+
+def _real_title_and_streamer(video: Dict[str, Any]) -> None:
+    """URL jobs store the pasted link as the title; swap in the stream's title and streamer from meta.json."""
+    try:
+        meta = json.loads((VIDEOS_DIR / str(video["id"]) / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if (video.get("title") or "").startswith(("http://", "https://")) and meta.get("title"):
+        video["title"] = meta["title"]
+    if not video.get("source_name"):
+        video["source_name"] = streamer_name(None, meta)
 
 
 @router.get("/api/review-signature")
@@ -78,6 +92,7 @@ async def review_home(
             }
     for vid, group in job_groups.items():
         group["moments"] = moments.get(vid, [])
+        _real_title_and_streamer(group["video"])
 
     # Review count across all ready clips
     all_ready = list_review_clips(status="ready")

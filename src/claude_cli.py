@@ -8,8 +8,9 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
+from src import claude_fallback
 from src.db import add_claude_usage, log_event
 
 CLAUDE_TIMEOUT_S = 600  # a 12k-character editor prompt took about 170 s
@@ -59,6 +60,7 @@ def run_claude(
     video_id: Optional[int] = None,
     label: str = "",
     model: str = "sonnet",
+    images: Optional[List[bytes]] = None,
 ) -> Dict[str, Any]:
     """One non-interactive Claude call. Returns the structured JSON dict; callers validate it with Pydantic.
 
@@ -66,12 +68,17 @@ def run_claude(
     and skills are switched off (input drops from ~34k to ~4k tokens, measured) and the call runs from an
     empty folder so no project CLAUDE.md is picked up.
     """
+    if claude_fallback.paused():
+        raise ClaudeError("Claude is paused (sidebar)")
     exe = _claude_exe()
+    if images:  # the model views them with the Read tool: f0.jpg, f1.jpg ... in the call's working folder
+        prompt = "Image files in the working folder: " + ", ".join(f"f{i}.jpg" for i in range(len(images))) + ". Read each one first.\n\n" + prompt
     schema_json = schema if isinstance(schema, str) else json.dumps(schema)
     cmd = [
         exe, "-p", "--model", model,
         "--system-prompt", JSON_ONLY + system,
-        "--tools", "",
+        "--tools", "Read" if images else "",
+        *(["--allowedTools", "Read"] if images else []),  # without this -p mode denies the Read
         "--setting-sources", "project",
         "--strict-mcp-config", "--disable-slash-commands",
         "--output-format", "json",
@@ -80,6 +87,8 @@ def run_claude(
     ]
     def attempt(extra: str) -> Dict[str, Any]:
         with tempfile.TemporaryDirectory() as empty_dir:
+            for i, img in enumerate(images or []):
+                (Path(empty_dir) / f"f{i}.jpg").write_bytes(img)
             try:
                 res = subprocess.run(
                     cmd, input=prompt + extra, capture_output=True, text=True, encoding="utf-8",
@@ -96,6 +105,7 @@ def run_claude(
 
     # Structured output is not guaranteed: on a long prompt the model sometimes answers in prose. Retry once.
     retry_note = "\n\nReply ONLY with the structured JSON output. Do not write any prose."
+    claude_fallback.mark_running(label or "call", 2 * CLAUDE_TIMEOUT_S)
     try:
         out = attempt("")
         if not isinstance(out.get("structured_output"), dict):
@@ -104,6 +114,8 @@ def run_claude(
         if "non-JSON" not in str(first):
             raise
         out = attempt(retry_note)
+    finally:
+        claude_fallback.clear_running()
 
     usage = out.get("usage", {})
     tokens_in = (usage.get("input_tokens", 0) + usage.get("cache_creation_input_tokens", 0)

@@ -197,8 +197,8 @@ def run_finder(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     settings = settings or db.get_settings()
     summary = {"sampled_channels": 0, "candidates": 0, "skipped_seen": 0, "qualified": 0, "added": 0, "stopped": ""}
     problem = credentials_problem()
-    if not settings["twitch_enabled"] or problem:
-        summary["stopped"] = problem or "Twitch finder is off"
+    if problem:
+        summary["stopped"] = problem
         return summary
     room = settings["twitch_new_leads_per_day"] - db.count_created_since(youtube.local_midnight_utc_iso(), "twitch")
     if room <= 0:
@@ -262,6 +262,8 @@ def run_finder(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if twin or db.is_opted_out(row.get("email"), *db.lead_keys(row)):
             dropped[row["channel_id"]] = f"same streamer as lead #{twin['id']}" if twin else "opted out on another platform"
             continue
+        row["youtube"] = youtube.find_channel_link(row["_description"])
+        row["shorts_14d"] = youtube.shorts_for_link(row["youtube"], settings)
         lead = {k: v for k, v in row.items() if not k.startswith("_") and (v is not None or k not in db.CONTACT_COLUMNS)}
         if row.get("email"):
             lead["email_source"] = "api"
@@ -306,6 +308,10 @@ def refresh_leads(settings: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
             fields["subscribers_or_viewers"] = round(viewers[lead["handle"]]) if lead["handle"] in viewers else None
             if lead["status"] in youtube.ACTIVITY_STATUSES:
                 act = archive_stats(fetch_archives(u["id"]), settings["lookback_days"], settings["min_stream_hours"])
+                yt = lead["youtube"] or youtube.find_channel_link(u.get("description"))
+                act["shorts_14d"] = youtube.shorts_for_link(yt, settings)
+                if yt and not lead["youtube"]:
+                    act["youtube"] = yt  # a link the user typed is never overwritten
                 fields.update({k: v for k, v in act.items() if not k.startswith("_") and (k not in youtube.VOD_COLUMNS + ("vod_url",) or not lead["vod_manual"])})
             else:  # past approval nothing here is needed again: the clip's stream date was copied to clip_stream_at
                 fields.update({c: None for c in youtube.STAT_COLUMNS + youtube.VOD_COLUMNS})

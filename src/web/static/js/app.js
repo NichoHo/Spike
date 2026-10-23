@@ -7,7 +7,40 @@ document.addEventListener("DOMContentLoaded", () => {
   initDialogs();
   initDropzones();
   initClaudeApproval();
+  initAiStatus();
 });
+
+// ── Sidebar AI panel ─────────────────────────────────────────────────────────
+// Server-rendered (partials/ai_status.html); re-fetched every 5 s and swapped in whole.
+function initAiStatus() {
+  if (!document.querySelector("[data-ai-status]")) return;
+  const refresh = async () => {
+    try {
+      const res = await fetch("/partials/ai-status");
+      const el = document.querySelector("[data-ai-status]");
+      if (res.ok && el) el.outerHTML = await res.text();
+    } catch (e) {}
+  };
+  document.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("[data-claude-pause]");
+    if (!btn) return;
+    const pause = btn.dataset.claudePause === "1";
+    btn.disabled = true;
+    try {
+      const res = await fetch("/api/claude-pause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: pause }),
+      });
+      if (!res.ok) throw new Error();
+      showToast(pause ? "Claude paused. Jobs use Gemini or stop." : "Claude resumed.", pause ? undefined : "success");
+    } catch (e) {
+      showToast("Could not change the Claude setting.", "danger");
+    }
+    await refresh();
+  });
+  setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+}
 
 // ── Hover/Focus Video Previews for Clip Cards (DESIGN.md §9.10) ──────────────
 function initVideoPreviews() {
@@ -183,9 +216,37 @@ function initRenderNotifications() {
           exp: Date.now() + TTL,
         });
       });
-      flush();
       sessionStorage.setItem(KEY, data.epoch + ":" + data.last);
+      await pollFinder();
+      flush();
     } catch (e) {}
+  };
+  // Outreach finder: spinner on the sidebar item while it runs, a toast when a run finishes.
+  // The last finish seen is kept in localStorage so one run toasts once, in one tab.
+  const FKEY = "spikeFinderSeen";
+  const pollFinder = async () => {
+    const res = await fetch("/api/finder-status");
+    if (!res.ok) return;
+    const f = await res.json();
+    const busy = f.state === "starting" || f.state === "running";
+    document.querySelectorAll("[data-finder-busy]").forEach((el) => { el.hidden = !busy; });
+    let seen = null;
+    try { seen = localStorage.getItem(FKEY); } catch (e) { return; }
+    if (seen === null) localStorage.setItem(FKEY, f.finished_at || "");  // first visit: baseline, no toast
+    else if (f.finished_at && f.finished_at !== seen && (f.state === "done" || f.state === "failed")) {
+      localStorage.setItem(FKEY, f.finished_at);
+      const ok = f.state === "done";
+      queue({
+        id: "finder@" + f.finished_at,
+        msg: ok ? "Finder finished. Open Review to see new streamers." : "Finder failed. Open Outreach settings for details.",
+        kind: ok ? "success" : "danger",
+        href: ok ? "/outreach?tab=review" : "/outreach?tab=settings",
+        exp: Date.now() + 12000,
+      });
+    }
+    // The Outreach page's "Finding streamers" banner is server-rendered: reload so it clears and new leads show.
+    // The queued toast survives the reload (sessionStorage).
+    if (!busy && document.querySelector("[data-finder-banner]")) location.reload();
   };
   flush();
   poll();
@@ -650,7 +711,7 @@ function initClaudeApproval() {
     try {
       const res = await fetch("/api/claude-approval");
       if (!res.ok) return;
-      const req = (await res.json()).request;
+      const { request: req, resets_at } = await res.json();
       if (!req) {
         current = null;
         if (dlg.open) dlg.close();
@@ -659,6 +720,12 @@ function initClaudeApproval() {
       if (current === req.id && dlg.open) return;
       current = req.id;
       dlg.querySelector("[data-claude-approval-label]").textContent = req.label;
+      // The reset moment comes from the server (midnight Pacific); only its display uses this device's clock.
+      const reset = new Date(resets_at * 1000);
+      const hours = Math.max(0, (reset - Date.now()) / 3600000);
+      const inText = hours >= 1 ? `${Math.round(hours)} h` : `${Math.max(1, Math.round(hours * 60))} min`;
+      dlg.querySelector("[data-claude-approval-reset]").textContent =
+        ` (${reset.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} your time, in ${inText})`;
       dlg.querySelector("[data-claude-approval-skip]").checked = false;
       if (!dlg.open) dlg.showModal();
     } catch (e) {}

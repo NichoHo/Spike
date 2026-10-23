@@ -80,7 +80,7 @@
             ] %}
             <div class="layout-picker">
               {% for value, name, desc in layouts %}
-                <input type="radio" name="layout" id="layout-{{ value }}" value="{{ value }}" {% if value == ('auto' if layout_ai_left() > 0 else 'split') %}checked{% endif %}{% if value == 'auto' and layout_ai_left() <= 0 %} disabled{% endif %}>
+                <input type="radio" name="layout" id="layout-{{ value }}" value="{{ value }}" {% if value == 'auto' %}checked{% endif %}>
                 <label for="layout-{{ value }}" class="layout-option">
                   <span class="layout-thumb layout-thumb--{{ value }}" aria-hidden="true">
                     {% if value == "auto" %}
@@ -98,7 +98,7 @@
                   </span>
                   <span class="layout-option__name">{{ name }}</span>
                   <span class="layout-option__desc">{{ desc }}</span>
-                  {% if value == "auto" %}<span class="layout-option__quota{% if layout_ai_left() <= 0 %} layout-option__quota--out{% endif %}">{{ layout_ai_left() }} of {{ layout_ai_limit() }} Gemini calls left today</span>{% endif %}
+                  {% if value == "auto" %}<span class="layout-option__quota">{% if layout_ai_left() > 0 %}{{ layout_ai_left() }} of {{ layout_ai_limit() }} Gemini calls left today{% else %}Gemini is out, uses your Claude Pro plan{% endif %}</span>{% endif %}
                 </label>
               {% endfor %}
             </div>
@@ -125,6 +125,20 @@
             <p class="field__help">Big word-by-word captions. The spoken word turns yellow.</p>
           </div>
 
+          <div class="field" id="caption-opts">
+            <span class="field__label">Caption style</span>
+            {{ ui.caption_picker('new-caption', 'bold_pop') }}
+            <label class="switch-row" style="margin-top: var(--space-3);">
+              <input type="checkbox" name="profanity_mask" class="switch" role="switch" value="1" checked>
+              <span>Mask profanity in captions (f***).</span>
+            </label>
+          </div>
+          <script>
+            document.querySelectorAll('input[name="captions"]').forEach((r) => r.addEventListener('change', () => {
+              document.getElementById('caption-opts').style.display = r.value === 'off' && r.checked ? 'none' : '';
+            }));
+          </script>
+
           <div class="field">
             <span class="field__label" id="lbl-music">Background music</span>
             <div class="segmented" role="radiogroup" aria-labelledby="lbl-music">
@@ -135,7 +149,15 @@
               <input type="radio" name="music" id="music-off" value="off">
               <label for="music-off">Off</label>
             </div>
-            <p class="field__help">Auto: the AI adds a quiet track to talk-heavy clips and skips it when the audio is the joke.</p>
+            <div class="row" style="margin-top: var(--space-2);">
+              <label class="small muted" for="field-music-mood" style="min-width: 100px;">Default mood:</label>
+              <select name="default_music_mood" id="field-music-mood" class="select" style="max-width: 200px;">
+                {% for m in ("chill", "hype", "funny", "dramatic", "wholesome") %}
+                  <option value="{{ m }}">{{ m|capitalize }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <p class="field__help">Auto: the AI adds a quiet track to talk-heavy clips and skips it when the audio is the joke. The mood is used when the AI has no pick.</p>
           </div>
 
           <div class="field">

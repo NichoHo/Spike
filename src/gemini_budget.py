@@ -14,9 +14,23 @@ from src.db import get_setting, set_setting
 _lock = threading.Lock()
 
 
-def _today() -> str:
-    """Gemini daily quotas reset at midnight Pacific. ponytail: fixed UTC-8, an hour late during daylight time."""
-    return (datetime.now(timezone.utc) - timedelta(hours=8)).strftime("%Y-%m-%d")
+try:
+    from zoneinfo import ZoneInfo
+    _PACIFIC = ZoneInfo("America/Los_Angeles")
+except Exception:  # no tz database (Windows Python without tzdata): fixed PST, an hour late during daylight time
+    _PACIFIC = timezone(timedelta(hours=-8))
+
+
+def today() -> str:
+    """Gemini daily quotas reset at midnight Pacific (ai.google.dev/gemini-api/docs/rate-limits), whatever the
+    machine's own timezone."""
+    return datetime.now(_PACIFIC).strftime("%Y-%m-%d")
+
+
+def reset_at() -> float:
+    """Unix time of the next quota reset: the coming midnight Pacific."""
+    now = datetime.now(_PACIFIC)
+    return (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).timestamp()
 
 
 def _key_tag(api_key: str) -> str:
@@ -33,14 +47,14 @@ def key_capped(model: str, api_key: str) -> bool:
     """True when this key's daily quota for this model ran out today. Persisted in the shared settings table, so it
     survives a restart (Option A: capped until midnight Pacific) and every Tailscale user's process reads the same
     state from the one shared DB."""
-    return get_setting(_cap_key(model, api_key)) == _today()
+    return get_setting(_cap_key(model, api_key)) == today()
 
 
 def cap_key(model: str, api_key: str) -> None:
     """Mark this key's daily quota for this model used up for the rest of the day. Idempotent; never raises."""
     try:
         with _lock:
-            set_setting(_cap_key(model, api_key), _today())
+            set_setting(_cap_key(model, api_key), today())
     except Exception:
         pass
 
@@ -51,7 +65,7 @@ def _key(model: str) -> str:
 
 def used(model: str) -> int:
     day, _, n = (get_setting(_key(model)) or "").partition("|")
-    return int(n) if day == _today() and n.isdigit() else 0
+    return int(n) if day == today() and n.isdigit() else 0
 
 
 def limit(model: str) -> int:
@@ -67,7 +81,7 @@ def exhaust(model: str) -> None:
     """Google said 429 for good today: treat the model's budget as spent until the day resets."""
     try:
         with _lock:
-            set_setting(_key(model), f"{_today()}|{max(used(model), limit(model))}")
+            set_setting(_key(model), f"{today()}|{max(used(model), limit(model))}")
     except Exception:
         pass
 
@@ -76,6 +90,6 @@ def spend(model: str) -> None:
     """Count one request. Failed and retried requests count too: they use quota."""
     try:
         with _lock:
-            set_setting(_key(model), f"{_today()}|{used(model) + 1}")
+            set_setting(_key(model), f"{today()}|{used(model) + 1}")
     except Exception:
         pass  # counting must never fail a Gemini call

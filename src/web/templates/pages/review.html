@@ -31,7 +31,11 @@
       <section class="clip-group">
         <div class="clip-group__header">
           <h2 class="clip-group__title">
-            {% if group.video.source_name %}{{ group.video.source_name }} · {% endif %}{{ group.video.title or 'Untitled Video' }}
+            {% set vtitle = group.video.title or 'Untitled Video' %}
+            {% if group.video.url and group.video.url.startswith('http') %}
+              <a href="{{ group.video.url }}" target="_blank" rel="noopener noreferrer" title="Open the source video" aria-label="{{ vtitle }}, opens the source video"><span class="clip-group__name">{{ vtitle }}</span>{{ ui.icon("arrow-up-right", 14) }}</a>
+            {% else %}{{ vtitle }}{% endif %}
+            {% if group.video.source_name %}<span class="clip-group__streamer"> · {{ group.video.source_name }}</span>{% endif %}
           </h2>
           <div class="clip-group__meta">
             <button type="button" class="btn btn--ghost btn--sm" onclick="openMomentPicker({ videoId: {{ group.video.id }}, concept: 'top3' })">Combine moments</button>
@@ -56,7 +60,6 @@
               {% if clip.concept and clip.concept != 'single' %}
               <div class="clip-card__concept">
                 <span class="badge badge--accent">{{ {'story': 'Story', 'pov': 'POV', 'top3': 'Top 3', 'top5': 'Top 5'}[clip.concept] }}</span>
-                {% if clip.concept == 'pov' %}{% set pov_text = (clip.overlay | from_json).get('pov_text') %}{% if pov_text %}<span class="clip-card__caption">{{ pov_text }}</span>{% endif %}{% endif %}
               </div>
               {% endif %}
               <div class="clip-card__meta">
