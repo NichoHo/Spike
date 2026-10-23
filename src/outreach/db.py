@@ -149,7 +149,6 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "finder_started_at": "",
     "finder_finished_at": "",
     "last_nightly_date": "",
-    "twitch_sample_now": 0,
     "twitch_last_sample_slot": "",
     "twitch_last_summary": "",
 }

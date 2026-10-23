@@ -878,7 +878,7 @@ def test_twitch_sample_schedule_runs_once_per_listed_hour(tw, monkeypatch):
     assert len(calls) == 1
     db.set_settings({"twitch_sample_hours": str((hour + 1) % 24)})
     daemon.sample_twitch(db.get_settings())
-    daemon.sample_twitch(db.get_settings(), force=True)  # "Sample now"
+    daemon.sample_twitch(db.get_settings(), force=True)  # what Run finder now does first
     assert len(calls) == 2
     monkeypatch.setattr(config, "TWITCH_CLIENT_SECRET", "")  # no Twitch app: no sampling
     daemon.sample_twitch(db.get_settings(), force=True)
@@ -898,13 +898,14 @@ def test_twitch_routes(tw, monkeypatch):
     r = client.post("/outreach/twitch/searches", data={"category": "Nope"}, headers=h, follow_redirects=False)
     assert "No+Twitch+category" in r.headers["location"]
     page = client.get("/outreach?tab=settings").text
-    assert "Just Chatting" in page and 'form="tw-settings"' in page
+    assert "Just Chatting" in page and 'name="twitch_sample_hours" value="22" checked' in page
+    assert '<select class="select" id="s-region"' in page and 'value="ID">Indonesia' in page
     client.post("/outreach/settings", data={"form": "twitch", "twitch_sample_hours": "22, 7,9"},
                 headers=h, follow_redirects=False)
     assert db.get_settings()["twitch_sample_hours"] == "7,9,22"
-    monkeypatch.setattr(config, "TWITCH_CLIENT_SECRET", "")  # no Twitch app: Sample now is refused
-    r = client.post("/outreach/twitch/sample-now", headers=h, follow_redirects=False)
-    assert "TWITCH_CLIENT_ID" in urllib_unquote(r.headers["location"])
+    client.post("/outreach/settings", content="form=twitch&twitch_sample_hours=20&twitch_sample_hours=8",
+                headers={**h, "content-type": "application/x-www-form-urlencoded"}, follow_redirects=False)
+    assert db.get_settings()["twitch_sample_hours"] == "8,20"  # one value per ticked hour chip
 
 
 def test_finder_records_done_and_failed(env, monkeypatch):

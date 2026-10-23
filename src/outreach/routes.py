@@ -321,9 +321,10 @@ async def save_settings(request: Request, user: Dict[str, Any] = Depends(require
     if form.get("form") == "limits":
         values["followups_enabled"] = 1 if form.get("followups_enabled") else 0
     if form.get("form") == "twitch":
-        hours = [h.strip() for h in str(form.get("twitch_sample_hours", "")).split(",") if h.strip()]
+        # One value per ticked hour chip; a comma list still works
+        hours = [h.strip() for h in ",".join(form.getlist("twitch_sample_hours")).split(",") if h.strip()]
         if not hours or not all(h.isdigit() and 0 <= int(h) <= 23 for h in hours):
-            return _back("settings", error="Sample hours must be whole hours from 0 to 23, separated by commas.")
+            return _back("settings", error="Pick at least one hour to check Twitch.")
         values["twitch_sample_hours"] = ",".join(str(int(h)) for h in sorted(set(hours), key=int))
     db.set_settings(values)
     return _back("settings", notice="Settings saved.")
@@ -401,7 +402,7 @@ async def add_twitch_search(request: Request, user: Dict[str, Any] = Depends(req
     if not 1 <= lo <= hi:
         return _back("settings", error="Minimum viewers must be at least 1 and not above the maximum.")
     if not name and not lang:
-        return _back("settings", error="Pick a category, a language, or both: all of Twitch is too broad.")
+        return _back("settings", error="Pick a topic, a language, or both: all of Twitch is too broad.")
     game = None
     if name:
         try:
@@ -409,9 +410,9 @@ async def add_twitch_search(request: Request, user: Dict[str, Any] = Depends(req
         except twitch.TwitchError as e:
             return _back("settings", error=str(e))
         if not game:
-            return _back("settings", error=f"No Twitch category is named exactly '{name}'.")
+            return _back("settings", error=f"No Twitch category is named exactly '{name}'. A Twitch topic must match a Twitch category.")
     db.add_twitch_search(game and game["id"], game and game["name"], lang, lo, hi)
-    return _back("settings", notice=f"Saved Twitch search: {game['name'] if game else 'all categories'}"
+    return _back("settings", notice=f"Added Twitch topic: {game['name'] if game else 'all categories'}"
                  + (f", {lang}" if lang else "") + ". Samples start at the next listed hour.")
 
 
@@ -426,16 +427,7 @@ async def toggle_twitch_search(search_id: int, user: Dict[str, Any] = Depends(re
 @router.post("/outreach/twitch/searches/{search_id}/delete", dependencies=[Depends(same_origin)])
 async def delete_twitch_search(search_id: int, user: Dict[str, Any] = Depends(require_admin)):
     db.delete_twitch_search(search_id)
-    return _back("settings", notice="Twitch search deleted with its samples. Leads it found are kept.")
-
-
-@router.post("/outreach/twitch/sample-now", dependencies=[Depends(same_origin)])
-async def twitch_sample_now(user: Dict[str, Any] = Depends(require_admin)):
-    problem = twitch.credentials_problem()
-    if problem:
-        return _back("settings", error=problem)
-    db.set_settings({"twitch_sample_now": 1})
-    return _back("settings", notice="Sampling live Twitch channels within a minute. Run the finder after a few samples.")
+    return _back("settings", notice="Twitch topic deleted with its samples. Streamers it found are kept.")
 
 
 @router.post("/outreach/searches/{search_id}/delete", dependencies=[Depends(same_origin)])

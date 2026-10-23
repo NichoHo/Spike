@@ -633,6 +633,10 @@ fieldset.field > legend { padding: 0; margin-bottom: var(--space-2); }
 .search-form__more > .disclosure__body { padding: var(--space-3) 0 0; }
 .finder-platform + .finder-platform { padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
 .finder-platform__title { margin: 0; font-size: 15px; font-weight: 600; }
+/* Platform-wide finder settings (schedule, daily cap), apart from the per-search add form */
+.platform-settings { padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+.chip-field { grid-column: 1 / -1; margin: 0; padding: 0; border: 0; min-width: 0; }
+.chip-field > .chip-row { margin-top: var(--space-2); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-2); }
 .stat { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-4); }
 .stat__label { font-size: 13px; color: var(--color-text-muted); }
@@ -785,7 +789,12 @@ a.time-chip:focus-visible { outline: 2px solid var(--color-focus); outline-offse
 }
 .chip:hover { background: var(--color-surface-hover); }
 .chip:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
-.chip.is-on { background: var(--color-accent-subtle); border-color: var(--color-accent-text); color: var(--color-accent-text); }
+.chip.is-on, .chip--toggle:has(:checked) { background: var(--color-accent-subtle); border-color: var(--color-accent-text); color: var(--color-accent-text); }
+/* Checkbox chip: the input stays focusable for keyboards, the label shows its state */
+.chip--toggle { position: relative; min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+.chip--toggle input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.chip--toggle:has(:focus-visible) { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.chip--toggle:has(:disabled) { cursor: default; opacity: 0.7; }
 .is-wrong { color: var(--color-danger-text); }
 .seg-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .seg-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) 0; border-top: 1px solid var(--color-border); }

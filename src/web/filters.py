@@ -185,12 +185,23 @@ LANGUAGES = [("en", "English"), ("id", "Indonesian"), ("ms", "Malay"), ("tl", "F
              ("ar", "Arabic"), ("tr", "Turkish"), ("ru", "Russian"), ("es", "Spanish"), ("pt", "Portuguese"),
              ("fr", "French"), ("de", "German"), ("it", "Italian"), ("pl", "Polish"), ("nl", "Dutch")]
 _LANGUAGE_NAMES = dict(LANGUAGES, other="Other")
+REGIONS = [("ID", "Indonesia"), ("MY", "Malaysia"), ("SG", "Singapore"), ("PH", "Philippines"), ("TH", "Thailand"),
+           ("VN", "Vietnam"), ("JP", "Japan"), ("KR", "South Korea"), ("TW", "Taiwan"), ("IN", "India"),
+           ("AU", "Australia"), ("US", "United States"), ("GB", "United Kingdom"), ("CA", "Canada"),
+           ("BR", "Brazil"), ("MX", "Mexico"), ("ES", "Spain"), ("FR", "France"), ("DE", "Germany"),
+           ("TR", "Turkey"), ("SA", "Saudi Arabia")]
+_REGION_NAMES = dict(REGIONS)
 
 
 def filter_language(code):
     """'en' -> 'English'. Empty means no language filter; unknown codes show as typed."""
     code = (code or "").strip().lower()
     return _LANGUAGE_NAMES.get(code.split("-")[0]) or code.upper() if code else "Any language"
+
+
+def filter_region(code):
+    """'ID' -> 'Indonesia'. Empty means no region filter; unknown codes show as typed."""
+    return _REGION_NAMES.get(code, code) if code else "Any region"
 
 
 def register_filters(jinja_env):
@@ -208,4 +219,6 @@ def register_filters(jinja_env):
     jinja_env.filters["compact_number"] = filter_compact_number
     jinja_env.filters["percent"] = filter_percent
     jinja_env.filters["language"] = filter_language
+    jinja_env.filters["region"] = filter_region
     jinja_env.globals["LANGUAGES"] = LANGUAGES
+    jinja_env.globals["REGIONS"] = REGIONS

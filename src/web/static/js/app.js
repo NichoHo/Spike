@@ -594,6 +594,26 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("dialog[data-open-on-load]").forEach((d) => d.showModal());
 });
 
+// form[data-autosave]: posts in the background on every change (a checkbox at once, a typed field once it
+// loses focus), no Save button. The server's redirect carries ?error= when it refused the value.
+async function autosave(form) {
+  try {
+    const r = await fetch(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)) });
+    const error = new URL(r.url).searchParams.get("error");
+    if (!r.ok || error) showToast(error || "Could not save. Try again.", "danger");
+    else showToast("Saved", "success", null, 2000);
+  } catch (e) {
+    showToast("Could not save. Check the connection.", "danger");
+  }
+}
+document.addEventListener("change", (e) => {
+  const form = e.target.closest("form[data-autosave]");
+  if (form) autosave(form);
+});
+document.addEventListener("submit", (e) => {
+  if (e.target.matches("form[data-autosave]")) e.preventDefault(); // Enter: the change event already saved it
+});
+
 // select[data-sets-fields]: each option's data-defaults ({"field-id": "value"}) fills those fields, except
 // fields the person already changed (Outreach saved searches: live vs re-upload sizes)
 document.addEventListener("change", (e) => {

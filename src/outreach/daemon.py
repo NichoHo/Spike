@@ -126,12 +126,10 @@ def tick(state: Dict[str, float]) -> None:
         db.set_settings({"last_nightly_date": today})
         nightly(settings)
     elif settings["run_now"]:  # cleared by run_finders when done, so the dashboard can show "starting"
-        run_finders(settings)
-    if settings["twitch_sample_now"]:
-        db.set_settings({"twitch_sample_now": 0})
+        # ponytail: a Twitch topic added just now has only this one sample, a thin average until the listed hours add more
         sample_twitch(settings, force=True)
-    else:
-        sample_twitch(settings)
+        run_finders(settings)
+    sample_twitch(settings)
 
 
 def run_daemon() -> None:

@@ -529,18 +529,20 @@
         {% if searches %}
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>Topic</th><th>Language</th><th>Last run</th><th class="actions">Actions</th></tr></thead>
+              <thead><tr><th>Topic</th><th>Language</th><th>Region</th><th class="num">Views per stream</th><th>Last run</th><th class="actions">Actions</th></tr></thead>
               <tbody>
                 {% for s in searches %}
                   <tr>
                     <td><span class="primary-cell">{{ s.query }}</span><span class="secondary-line">{{ "Twitch or Kick re-uploads" if s.kind == "reupload" else "YouTube live streams" }}{% if not s.active %}, paused{% endif %}</span></td>
                     <td>{{ s.language | language }}</td>
+                    <td>{{ s.region | region }}</td>
+                    <td class="num">{{ s.min_views | number }}{% if s.max_views %} to {{ s.max_views | number }}{% else %}+{% endif %}</td>
                     <td>{% if s.last_run_at %}<span title="{{ s.last_run_at | local_time }}">{{ s.last_run_at | relative_time }}</span>{% else %}<span class="subtle">Never</span>{% endif %}</td>
                     <td class="actions">
                       {% if not ro %}
                         <div class="row row--end">
                           {{ ui.button("Resume" if not s.active else "Pause", variant="ghost", size="sm", type="submit", attrs={"form": "search-toggle-" ~ s.id}) }}
-                          {{ ui.button("Delete search", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "search-delete-" ~ s.id, "data-confirm": "Delete this search? Streamers it found stay."}) }}
+                          {{ ui.button("Delete topic", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "search-delete-" ~ s.id, "data-confirm": "Delete this topic? Streamers it found stay."}) }}
                         </div>
                       {% endif %}
                     </td>
@@ -560,7 +562,8 @@
             <div class="search-form__submit">{{ ui.button("Add topic", variant="secondary", type="submit", icon="plus") }}</div>
             <div class="chip-row" style="grid-column: 1 / -1" role="group" aria-label="Topic ideas">
               <span class="small muted">Not sure? Tap an idea:</span>
-              {% for q, lang in [("valorant", "en"), ("mobile legends", "id"), ("just chatting", "en"), ("main bareng", "id"), ("free fire", "id"), ("minecraft", "en"), ("gta roleplay", "id"), ("pubg mobile", "id"), ("fortnite", "en"), ("mabar", "id")] %}
+              {% set added = searches | map(attribute="query") | map("lower") | list %}
+              {% for q, lang in [("valorant", "en"), ("mobile legends", "id"), ("just chatting", "en"), ("main bareng", "id"), ("free fire", "id"), ("minecraft", "en"), ("gta roleplay", "id"), ("pubg mobile", "id"), ("fortnite", "en"), ("mabar", "id")] if q not in added %}
                 <button type="button" class="chip" data-topic="{{ q }}" data-lang="{{ lang }}">{{ q }}</button>
               {% endfor %}
               <button type="button" class="chip" id="trending-load">Show trending on Twitch</button>
@@ -570,7 +573,7 @@
               const pickTopic = b => b.addEventListener("click", () => {
                 document.getElementById("s-query").value = b.dataset.topic;
                 document.getElementById("s-lang").value = b.dataset.lang || "";
-                document.getElementById("s-query").focus();
+                b.closest("form").requestSubmit();  // a tapped idea is added straight away
               });
               document.querySelectorAll("[data-topic]").forEach(pickTopic);
               document.getElementById("trending-load").addEventListener("click", async e => {
@@ -596,7 +599,7 @@
                     <option value="live" data-defaults='{"s-min": "10000", "s-vmin": "1000", "s-vmax": "100000"}'>YouTube live streams</option>
                     <option value="reupload" data-defaults='{"s-min": "0", "s-vmin": "100", "s-vmax": "20000"}'>Twitch or Kick re-uploads</option>
                   </select></div>
-                <div class="field"><label class="field__label" for="s-region">Region</label><input class="input" id="s-region" name="region" maxlength="2" placeholder="ID" autocomplete="off"></div>
+                <div class="field"><label class="field__label" for="s-region">Region</label><select class="select" id="s-region" name="region"><option value="">Any region</option>{% for code, name in REGIONS %}<option value="{{ code }}">{{ name }}</option>{% endfor %}</select></div>
                 <div class="field"><label class="field__label" for="s-min">Minimum subscribers</label><input class="input input--number" id="s-min" name="min_size" type="number" min="0" value="10000"></div>
                 <div class="field"><label class="field__label" for="s-max">Maximum subscribers</label><input class="input input--number" id="s-max" name="max_size" type="number" min="0" value="300000"></div>
                 <div class="field"><label class="field__label" for="s-vmin">Minimum views per stream</label><input class="input input--number" id="s-vmin" name="min_views" type="number" min="0" value="1000"></div>
@@ -605,6 +608,10 @@
             </details>
           </form>
         {% endif %}
+        <form method="post" action="/outreach/settings" class="search-form platform-settings" data-autosave>
+          <input type="hidden" name="form" value="youtube">
+          <div class="field"><label class="field__label" for="yt-cap">YouTube streamers a day</label><input class="input input--number" id="yt-cap" name="new_leads_per_day" type="number" min="1" max="200" value="{{ settings.new_leads_per_day }}" {% if ro %}disabled{% endif %}></div>
+        </form>
         {% endif %}
         </div>
 
@@ -618,7 +625,7 @@
           {% if twitch_searches %}
             <div class="table-wrap">
               <table class="table">
-                <thead><tr><th>Category</th><th>Language</th><th class="num">Live viewers</th><th>Last sampled</th><th class="actions">Actions</th></tr></thead>
+                <thead><tr><th>Topic</th><th>Language</th><th class="num">Live viewers</th><th>Last sampled</th><th class="actions">Actions</th></tr></thead>
                 <tbody>
                   {% for s in twitch_searches %}
                     <tr>
@@ -630,7 +637,7 @@
                         {% if not ro %}
                           <div class="row row--end">
                             {{ ui.button("Resume" if not s.active else "Pause", variant="ghost", size="sm", type="submit", attrs={"form": "tw-toggle-" ~ s.id}) }}
-                            {{ ui.button("Delete Twitch search", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "tw-delete-" ~ s.id, "data-confirm": "Delete this Twitch search and its samples? Streamers it found stay."}) }}
+                            {{ ui.button("Delete Twitch topic", variant="ghost", size="sm", icon="trash", icon_only=True, type="submit", attrs={"form": "tw-delete-" ~ s.id, "data-confirm": "Delete this Twitch topic and its samples? Streamers it found stay."}) }}
                           </div>
                         {% endif %}
                       </td>
@@ -642,12 +649,13 @@
           {% endif %}
           {% if not ro %}
             <form method="post" action="/outreach/twitch/searches" class="search-form" data-requires="outreach_find" data-requires-kind="twitch">
-              <div class="field"><label class="field__label" for="tw-cat">Category <span class="field__optional">(exact Twitch name)</span></label><input class="input" id="tw-cat" name="category" maxlength="100" placeholder="Just Chatting" autocomplete="off"></div>
+              <div class="field"><label class="field__label" for="tw-cat">Topic <span class="field__optional">(Twitch category name)</span></label><input class="input" id="tw-cat" name="category" maxlength="100" placeholder="Just Chatting" autocomplete="off"></div>
               <div class="field"><label class="field__label" for="tw-lang">Language <span class="field__optional">(optional)</span></label><select class="select" id="tw-lang" name="language"><option value="">Any language</option>{% for code, name in LANGUAGES %}<option value="{{ code }}">{{ name }}</option>{% endfor %}<option value="other">Other</option></select></div>
-              <div class="search-form__submit">{{ ui.button("Add category", variant="secondary", type="submit", icon="plus") }}</div>
-              <div class="chip-row" style="grid-column: 1 / -1" role="group" aria-label="Category ideas">
+              <div class="search-form__submit">{{ ui.button("Add topic", variant="secondary", type="submit", icon="plus") }}</div>
+              <div class="chip-row" style="grid-column: 1 / -1" role="group" aria-label="Twitch topic ideas">
                 <span class="small muted">Not sure? Tap an idea:</span>
-                {% for q, lang in [("VALORANT", "en"), ("Mobile Legends: Bang Bang", "id"), ("Just Chatting", "id"), ("Free Fire", "id"), ("Minecraft", "en"), ("Grand Theft Auto V", "id"), ("PUBG MOBILE", "id"), ("Fortnite", "en")] %}
+                {% set tw_added = twitch_searches | map(attribute="game_name") | select | map("lower") | list %}
+                {% for q, lang in [("VALORANT", "en"), ("Mobile Legends: Bang Bang", "id"), ("Just Chatting", "id"), ("Free Fire", "id"), ("Minecraft", "en"), ("Grand Theft Auto V", "id"), ("PUBG MOBILE", "id"), ("Fortnite", "en")] if q | lower not in tw_added %}
                   <button type="button" class="chip" data-tw-topic="{{ q }}" data-lang="{{ lang }}">{{ q }}</button>
                 {% endfor %}
                 <button type="button" class="chip" id="tw-trending-load">Show trending on Twitch</button>
@@ -657,7 +665,7 @@
                 const pickTwCategory = b => b.addEventListener("click", () => {
                   document.getElementById("tw-cat").value = b.dataset.twTopic;
                   document.getElementById("tw-lang").value = b.dataset.lang || "";
-                  document.getElementById("tw-cat").focus();
+                  b.closest("form").requestSubmit();
                 });
                 document.querySelectorAll("[data-tw-topic]").forEach(pickTwCategory);
                 document.getElementById("tw-trending-load").addEventListener("click", async e => {
@@ -672,7 +680,7 @@
                       pickTwCategory(b); btn.before(b);
                     });
                     if (r.topics.length) btn.remove(); else btn.disabled = false;
-                  } catch { note.textContent = "Could not load trending categories."; btn.disabled = false; }
+                  } catch { note.textContent = "Could not load trending topics."; btn.disabled = false; }
                 });
               </script>
               <details class="disclosure search-form__more">
@@ -680,17 +688,22 @@
                 <div class="search-form disclosure__body">
                   <div class="field"><label class="field__label" for="tw-min">Minimum live viewers</label><input class="input input--number" id="tw-min" name="min_viewers" type="number" min="1" value="50"></div>
                   <div class="field"><label class="field__label" for="tw-max">Maximum live viewers</label><input class="input input--number" id="tw-max" name="max_viewers" type="number" min="1" value="1000"></div>
-                  <div class="field"><label class="field__label" for="tw-hours">Sample at <span class="field__optional">(hours, this PC)</span></label><input class="input input--mono" id="tw-hours" name="twitch_sample_hours" form="tw-settings" value="{{ settings.twitch_sample_hours }}" autocomplete="off"></div>
-                  <div class="field"><label class="field__label" for="tw-cap">Twitch streamers a day</label><input class="input input--number" id="tw-cap" name="twitch_new_leads_per_day" form="tw-settings" type="number" min="0" value="{{ settings.twitch_new_leads_per_day }}"></div>
-                  <div class="row search-form__submit">
-                    {{ ui.button("Save schedule", variant="ghost", size="sm", type="submit", attrs={"form": "tw-settings"}) }}
-                    {{ ui.button("Sample now", variant="ghost", size="sm", type="submit", attrs={"form": "tw-settings", "formaction": "/outreach/twitch/sample-now", "data-requires": "outreach_find", "data-requires-kind": "twitch"}) }}
-                  </div>
                 </div>
               </details>
             </form>
-            <form id="tw-settings" method="post" action="/outreach/settings" hidden><input type="hidden" name="form" value="twitch"></form>
           {% endif %}
+          {% set hours_on = settings.twitch_sample_hours.split(",") %}
+          <form method="post" action="/outreach/settings" class="search-form platform-settings" data-autosave>
+            <input type="hidden" name="form" value="twitch">
+            <fieldset class="chip-field">
+              <legend class="field__label">Check who is live at <span class="field__optional">(this PC's time)</span></legend>
+              <p class="field__help">Twitch only shows who is live right now, so Spike looks at these hours and averages each channel's viewers. Pick the hours your streamers are on.</p>
+              <div class="chip-row">
+                {% for h in range(24) %}<label class="chip chip--toggle"><input type="checkbox" name="twitch_sample_hours" value="{{ h }}" {% if h | string in hours_on %}checked{% endif %} {% if ro %}disabled{% endif %}>{{ "%02d" | format(h) }}</label>{% endfor %}
+              </div>
+            </fieldset>
+            <div class="field"><label class="field__label" for="tw-cap">Twitch streamers a day</label><input class="input input--number" id="tw-cap" name="twitch_new_leads_per_day" type="number" min="0" max="100" value="{{ settings.twitch_new_leads_per_day }}" {% if ro %}disabled{% endif %}></div>
+          </form>
           {% endif %}
         </div>
       </div>
@@ -780,7 +793,6 @@
       <div class="card__body settings-grid">
         {% for key, label, help in (
           ("run_hour", "Nightly run hour", "0 to 23, this PC's time"),
-          ("new_leads_per_day", "New streamers a day", ""),
           ("min_long_streams_14d", "Minimum long streams", "In the look-back window"),
           ("min_stream_hours", "Long stream (hours)", ""),
           ("max_shorts_14d", "Maximum Shorts in the window", "YouTube only"),
