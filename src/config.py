@@ -34,7 +34,16 @@ def gemini_keys() -> list:
     return [k.strip() for k in GEMINI_API_KEY.split(",") if k.strip()]
 
 
+# Comma separated like GEMINI_API_KEY. YouTube quota is per Google Cloud project, so extra keys only help when
+# each is from its own project. Outreach moves to the next key when one's daily quota is used up; the rest of
+# Spike uses the first.
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+
+
+def youtube_keys() -> list:
+    return [k.strip() for k in YOUTUBE_API_KEY.split(",") if k.strip()]
+
+
 TWITCH_CLIENT_ID = os.environ.get("TWITCH_CLIENT_ID", "")
 TWITCH_CLIENT_SECRET = os.environ.get("TWITCH_CLIENT_SECRET", "")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")

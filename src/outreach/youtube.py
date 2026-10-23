@@ -54,10 +54,28 @@ class YouTubeError(RuntimeError):
 
 # ── API with quota ledger ─────────────────────────────────────────────────────
 
-def _budget_ok(bucket: str, cost: int, settings: Dict[str, Any]) -> bool:
-    if bucket == "search":
-        return db.quota_used("search") + cost <= settings["search_calls_per_day"]
-    return db.quota_used("units") + cost <= settings["units_per_day"] - settings["units_reserved_for_spike"]
+def key_bucket(bucket: str, i: int) -> str:
+    """Ledger name for key number i: the first key keeps the plain names."""
+    return bucket if i == 0 else f"{bucket}:{i}"
+
+
+def key_limit(bucket: str, i: int, settings: Dict[str, Any]) -> int:
+    """The first key shares its project with the rest of Spike, so Outreach gets the configured share of it.
+    Other keys are Outreach's alone: Google's full default quota."""
+    if i == 0:
+        return settings["search_calls_per_day"] if bucket == "search" else settings["units_per_day"] - settings["units_reserved_for_spike"]
+    return 100 if bucket == "search" else 10000
+
+
+def _budget_ok(bucket: str, cost: int, settings: Dict[str, Any], i: int = 0) -> bool:
+    return db.quota_used(key_bucket(bucket, i)) + cost <= key_limit(bucket, i, settings)
+
+
+def quota_totals(settings: Dict[str, Any]) -> Dict[str, Tuple[int, int]]:
+    """(used, limit) today for search calls and units, summed over all keys."""
+    n = max(len(config.youtube_keys()), 1)
+    return {b: (sum(db.quota_used(key_bucket(b, i)) for i in range(n)), sum(key_limit(b, i, settings) for i in range(n)))
+            for b in ("search", "units")}
 
 
 # ponytail: one limiter per process; the finder runs only in the outreach process
@@ -67,23 +85,30 @@ _limiter = net.RateLimiter(per_minute=60)
 def call(endpoint: str, settings: Dict[str, Any], **params: Any) -> Dict[str, Any]:
     """GET one Data API endpoint. search.list costs 1 call in its own 100-a-day bucket (verified 2026-10-14);
     channels/playlistItems/videos.list cost 1 unit of 10,000. Charged per attempt: errors cost quota too."""
-    if not config.YOUTUBE_API_KEY:
+    keys = config.youtube_keys()
+    if not keys:
         raise YouTubeError("YOUTUBE_API_KEY is not set")
     bucket = "search" if endpoint == "search" else "units"
+    for i, key in enumerate(keys):  # the first key with budget left takes the call
+        if not _budget_ok(bucket, 1, settings, i):
+            continue
 
-    def charge() -> None:
-        if not _budget_ok(bucket, 1, settings):
-            raise QuotaExhausted(f"Outreach share of the YouTube {bucket} quota is used up for today")
-        db.add_quota(bucket, 1)
+        def charge() -> None:
+            if not _budget_ok(bucket, 1, settings, i):
+                raise QuotaExhausted(f"Outreach share of the YouTube {bucket} quota is used up for today")
+            db.add_quota(key_bucket(bucket, i), 1)
 
-    params["key"] = config.YOUTUBE_API_KEY
-    url = f"{API}/{endpoint}?{urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, '')})}"
-    try:
-        return net.get_json(url, _limiter, on_attempt=charge)
-    except net.HttpError as e:
-        if e.status == 403 and ("quotaExceeded" in e.body or "dailyLimitExceeded" in e.body):
-            raise QuotaExhausted("YouTube says the daily quota is exceeded") from None
-        raise YouTubeError(f"YouTube {endpoint} {e}") from None
+        query = {**params, "key": key}
+        url = f"{API}/{endpoint}?{urllib.parse.urlencode({k: v for k, v in query.items() if v not in (None, '')})}"
+        try:
+            return net.get_json(url, _limiter, on_attempt=charge)
+        except net.HttpError as e:
+            if e.status == 403 and ("quotaExceeded" in e.body or "dailyLimitExceeded" in e.body):
+                # Google says it is out: count the key as full so the next call skips it until tomorrow
+                db.add_quota(key_bucket(bucket, i), key_limit(bucket, i, settings) - db.quota_used(key_bucket(bucket, i)))
+                continue
+            raise YouTubeError(f"YouTube {endpoint} {e}") from None
+    raise QuotaExhausted(f"Outreach share of the YouTube {bucket} quota is used up for today on every key")
 
 
 def _chunks(items: List[str], n: int) -> Iterable[List[str]]:
@@ -374,6 +399,52 @@ def shorts_for_link(link: Optional[str], settings: Dict[str, Any]) -> Optional[i
         return None
 
 
+def fan_shorts(lead: Dict[str, Any], settings: Dict[str, Any]) -> Tuple[int, int]:
+    """(matching Shorts, Shorts the search returned) about the streamer from other channels in the look-back
+    window: one search.list call.
+    ponytail: a name search, so common names over-count and clips that never write the name are missed, and
+    results stop at 50 (one page). Shown as approximate."""
+    names = [n for n in ((lead.get("name") or "").strip(), (lead.get("handle") or "").lstrip("@").strip()) if len(n) >= 3]
+    if not names:
+        return 0, 0
+    since = (datetime.now(timezone.utc) - timedelta(days=settings["lookback_days"])).strftime("%Y-%m-%dT%H:%M:%SZ")
+    res = call("search", settings, part="snippet", type="video", videoDuration="short", order="date", maxResults=50,
+               q=f'"{names[0]}"', publishedAfter=since)
+    mine = {n.casefold() for n in names}
+    rx = re.compile("|".join(rf"(?<!\w){re.escape(n)}(?!\w)" for n in names), re.I)
+    count = 0
+    for it in res.get("items", []):
+        sn = it.get("snippet", {})
+        if (sn.get("channelTitle") or "").strip().casefold() in mine:
+            continue  # the streamer's own channel
+        if rx.search(f"{sn.get('title', '')} {sn.get('description', '')}"):
+            count += 1
+    return count, len(res.get("items", []))
+
+
+def fill_fan_shorts(settings: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
+    """Count fan Shorts for every live lead that has no count (or no "of N") yet. Counted once, not refreshed nightly: that would
+    use a search call per lead per day. The number is dropped with the other API data after 30 days."""
+    settings = settings or db.get_settings()
+    out = {"counted": 0, "failed": 0}
+    marks = ",".join("?" * len(ACTIVITY_STATUSES))
+    with db.connect() as conn:
+        leads = [dict(r) for r in conn.execute(
+            f"SELECT id, name, handle FROM leads WHERE (fan_shorts_14d IS NULL OR fan_results_14d IS NULL) AND api_fetched_at IS NOT NULL "
+            f"AND status IN ({marks}) ORDER BY id", ACTIVITY_STATUSES)]
+    for lead in leads:
+        try:
+            count, total = fan_shorts(lead, settings)
+            db.update_lead(lead["id"], fan_shorts_14d=count, fan_results_14d=total)
+            out["counted"] += 1
+        except QuotaExhausted as e:
+            db.log(f"Fan Shorts stopped: {e}", "warning")
+            break
+        except YouTubeError:
+            out["failed"] += 1
+    return out
+
+
 # ── A lead added by hand (OUTREACH.md §6.5 "Add lead") ────────────────────────
 
 def resolve_channel(ref: Dict[str, Any], video_id: Optional[str], settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -530,7 +601,7 @@ def run_finder(settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
 # ── Nightly refresh and purge (Developer Policy III.E.4: 30 days) ─────────────
 
 ACTIVITY_STATUSES = ("found", "needs_contact", "approved", "replied", "clip_wanted")
-STAT_COLUMNS = ("streams_14d", "avg_stream_h", "last_stream_at", "shorts_14d", "vod_views")
+STAT_COLUMNS = ("streams_14d", "avg_stream_h", "last_stream_at", "shorts_14d", "fan_shorts_14d", "fan_results_14d", "vod_views")
 VOD_COLUMNS = ("vod_video_id", "vod_title", "vod_published_at", "vod_duration_s")
 
 

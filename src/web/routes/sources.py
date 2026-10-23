@@ -29,7 +29,7 @@ from src.db import (
 )
 from src.concepts import CONCEPT_LABELS, CONCEPTS, DEFAULT_AUTO_CONCEPTS
 from src.config import (
-    CREATOR_TYPES, HUMOR_STYLES, VIDEOS_DIR, YOUTUBE_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
+    CREATOR_TYPES, HUMOR_STYLES, VIDEOS_DIR, youtube_keys, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
 )
 from src.web.auth import get_current_user
 
@@ -51,7 +51,7 @@ def _get_json(url: str, headers: Dict[str, str] = None, data: bytes = None) -> D
 
 def _youtube_lookup(q: str) -> List[Dict[str, str]]:
     def call(endpoint: str, **params) -> Dict[str, Any]:
-        params["key"] = YOUTUBE_API_KEY
+        params["key"] = youtube_keys()[0]
         return _get_json(f"https://www.googleapis.com/youtube/v3/{endpoint}?{urllib.parse.urlencode(params)}")
 
     def row(channel_id: str, sn: Dict[str, Any]) -> Dict[str, str]:
@@ -142,7 +142,7 @@ def lookup_channel(
     q = q.strip()
     if kind not in ("youtube", "twitch") or not 2 <= len(q) <= 100:
         return {"results": []}
-    if kind == "youtube" and not YOUTUBE_API_KEY:
+    if kind == "youtube" and not youtube_keys():
         return {"results": [], "error": "YOUTUBE_API_KEY is not set."}
     if kind == "twitch" and not (TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET):
         return {"results": [], "error": "Twitch credentials are not set."}

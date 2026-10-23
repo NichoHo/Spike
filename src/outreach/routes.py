@@ -16,7 +16,7 @@ from starlette.status import HTTP_303_SEE_OTHER, HTTP_403_FORBIDDEN
 
 from src import config
 from src.db import list_review_clips
-from src.outreach import daemon, db, google, service, twitch
+from src.outreach import daemon, db, google, service, twitch, youtube
 from src.web.auth import get_current_user, require_admin
 
 router = APIRouter()
@@ -146,7 +146,7 @@ def _render(request: Request, user: Dict[str, Any], tab: str, notice: str = "", 
         ctx.update(
             searches=db.list_searches(), log=db.recent_log(20), oauth_configured=google.oauth_configured(),
             key_set=google.encryption_key_set(), redirect_uri=google.redirect_uri(),
-            quota={"search": db.quota_used("search"), "units": db.quota_used("units")},
+            quota=youtube.quota_totals(settings), youtube_keys=len(config.youtube_keys()),
             youtube_key=bool(config.YOUTUBE_API_KEY), template_keys=TEMPLATE_SETTINGS,
             twitch_searches=db.list_twitch_searches(), twitch_problem=twitch.credentials_problem(),
         )

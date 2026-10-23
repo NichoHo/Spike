@@ -137,6 +137,7 @@
               <th class="num">Views per stream</th>
               <th class="num">Long streams</th>
               <th class="num">Shorts</th>
+              <th class="num" title="Shorts about the streamer posted by other channels in the last {{ settings.lookback_days }} days. A name search, so approximate.">Fan Shorts</th>
               <th>Last stream</th>
               <th>Language</th>
               <th>Contact</th>
@@ -154,7 +155,8 @@
                 <td class="num" title="Streams of {{ settings.min_stream_hours }} hours or more in the last {{ settings.lookback_days }} days">
                   {{ l.streams_14d or 0 }}{% if l.avg_stream_h %}<span class="secondary-line">average {{ l.avg_stream_h }} hours</span>{% endif %}
                 </td>
-                <td class="num" title="YouTube videos of 3 minutes or less in the last {{ settings.lookback_days }} days. TikTok and Reels are not checked.">{% if l.platform == "youtube" %}{{ l.shorts_14d or 0 }}<span class="secondary-line">YouTube only</span>{% else %}{% if l.shorts_14d is not none %}{{ l.shorts_14d }}{% endif %}<span class="row"><input class="input cell-control" type="text" name="youtube" form="yt-{{ l.id }}" value="{{ l.youtube or '' }}" placeholder="YouTube channel" autocomplete="off" spellcheck="false" aria-label="YouTube channel for {{ l.name or l.channel_id }}">{{ ui.button("Save", variant="secondary", size="sm", type="submit", attrs={"form": "yt-" ~ l.id}) }}</span>{% endif %}</td>
+                <td class="num" title="YouTube videos of 3 minutes or less in the last {{ settings.lookback_days }} days. TikTok and Reels are not checked.">{% if l.platform == "youtube" %}{{ l.shorts_14d or 0 }}{% else %}{% if l.shorts_14d is not none %}{{ l.shorts_14d }}{% endif %}<span class="row"><input class="input cell-control" type="text" name="youtube" form="yt-{{ l.id }}" value="{{ l.youtube or '' }}" placeholder="YouTube channel" autocomplete="off" spellcheck="false" aria-label="YouTube channel for {{ l.name or l.channel_id }}">{{ ui.button("Save", variant="secondary", size="sm", type="submit", attrs={"form": "yt-" ~ l.id}) }}</span>{% endif %}</td>
+                <td class="num">{% if l.fan_shorts_14d is not none %}{{ l.fan_shorts_14d }}{% if l.fan_results_14d is not none %}<span class="secondary-line">of {{ l.fan_results_14d }} searches</span>{% endif %}{% endif %}</td>
                 <td>{% if l.last_stream_at %}<span title="{{ l.last_stream_at | local_time }}">{{ l.last_stream_at | relative_time }}</span>{% endif %}</td>
                 <td>{{ l.language | language if l.language else "" }}{% if l.whop_flag %} {{ ui.badge("Whop") }}{% endif %}</td>
                 <td class="contact-col">
@@ -694,7 +696,7 @@
       </div>
       {% if not ro %}
         <form method="post" action="/outreach/run-now" class="card__footer" data-requires="outreach_find">
-          <span class="card__footer-note">Today: {{ quota.search }} of {{ settings.search_calls_per_day }} YouTube searches used.</span>
+          <span class="card__footer-note">Today: {{ quota.search[0] }} of {{ quota.search[1] }} YouTube searches used{% if youtube_keys > 1 %} across {{ youtube_keys }} keys{% endif %}.</span>
           {% set busy = finder_state in ("starting", "running") %}
           {{ ui.button("Finding…" if busy else "Run finder now", variant="primary", type="submit", icon="magnifying-glass", disabled=busy or not ((settings.youtube_enabled and searches) or (settings.twitch_enabled and twitch_searches))) }}
         </form>

@@ -21,7 +21,7 @@ AWAITING_REPLY = ("sent", "followup_1", "followup_2")
 # Columns filled from YouTube API responses. Purged when api_fetched_at is older than 30 days.
 API_COLUMNS = (
     "name", "handle", "thumbnail", "language_api", "country", "subscribers_or_viewers",
-    "last_stream_at", "streams_14d", "avg_stream_h", "shorts_14d", "whop_flag",
+    "last_stream_at", "streams_14d", "avg_stream_h", "shorts_14d", "fan_shorts_14d", "fan_results_14d", "whop_flag",
     "vod_video_id", "vod_title", "vod_published_at", "vod_duration_s", "description_excerpt", "vod_views",
 )
 CONTACT_COLUMNS = ("email", "instagram", "x", "tiktok", "discord", "website", "twitch", "kick")
@@ -183,6 +183,8 @@ CREATE TABLE IF NOT EXISTS leads (
     streams_14d INTEGER,
     avg_stream_h REAL,
     shorts_14d INTEGER,
+    fan_shorts_14d INTEGER,  -- Shorts about the streamer from other channels, counted once by name search
+    fan_results_14d INTEGER,  -- videos the search returned, the "of N" for fan_shorts_14d
     youtube TEXT,  -- Twitch/Kick leads: the streamer's YouTube channel URL for the Shorts count (found in the bio or typed in)
     vod_views INTEGER,  -- median views per stream in the look-back window (streams over a day old)
     whop_flag INTEGER DEFAULT 0,
@@ -347,6 +349,8 @@ _MIGRATIONS = (
     "ALTER TABLE leads ADD COLUMN client_rate TEXT",
     "ALTER TABLE leads ADD COLUMN client_min_views INTEGER",
     "ALTER TABLE leads ADD COLUMN youtube TEXT",
+    "ALTER TABLE leads ADD COLUMN fan_shorts_14d INTEGER",
+    "ALTER TABLE leads ADD COLUMN fan_results_14d INTEGER",
     "ALTER TABLE messages ADD COLUMN reply_url TEXT",
 )
 

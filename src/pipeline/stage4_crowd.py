@@ -17,7 +17,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
-from src.config import YOUTUBE_API_KEY, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
+from src.config import youtube_keys, TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET
 
 
 TIMESTAMP_RE = re.compile(r'\b(?:(\d{1,2}):)?([0-5]?\d):([0-5]\d)\b')
@@ -35,7 +35,7 @@ def parse_timestamp_seconds(match: re.Match) -> float:
 
 def fetch_youtube_comments(video_id: str, max_pages: int = 10) -> List[Dict[str, Any]]:
     """Fetch top comment threads from YouTube Data API v3."""
-    if not YOUTUBE_API_KEY:
+    if not youtube_keys():
         print("  [stage 4] No YOUTUBE_API_KEY configured; skipping comments.")
         return []
 
@@ -47,7 +47,7 @@ def fetch_youtube_comments(video_id: str, max_pages: int = 10) -> List[Dict[str,
             "part": "snippet",
             "videoId": video_id,
             "maxResults": 100,
-            "key": YOUTUBE_API_KEY,
+            "key": youtube_keys()[0],
             "textFormat": "plainText",
             "order": "relevance",
         }

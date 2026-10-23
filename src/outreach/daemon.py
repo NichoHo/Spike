@@ -58,6 +58,7 @@ def run_finders(settings: Dict) -> None:
             db.log(f"{name} failed: {e}", "error")
             traceback.print_exc()
             errors.append(f"{name}: {e}")
+    _step("Fan Shorts", youtube.fill_fan_shorts, settings)  # after the finders: they get first call on the search quota
     db.set_settings({"finder_status": "failed" if errors else "done", "finder_error": "; ".join(errors)[:500],
                      "finder_finished_at": db.now_iso(), "run_now": 0})
 

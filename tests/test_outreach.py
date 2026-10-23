@@ -529,7 +529,26 @@ def test_youtube_call_maps_quota_errors(env, monkeypatch):
                         lambda req, timeout: (_ for _ in ()).throw(urllib.error.HTTPError("u", 403, "q", Message(), io.BytesIO(body))))
     with pytest.raises(youtube.QuotaExhausted):
         youtube.call("channels", db.get_settings(), id="UCx")
-    assert db.quota_used("units") == 1
+    assert not youtube._budget_ok("units", 1, db.get_settings())  # Google said it is out, so the key counts as full
+
+
+def test_second_key_takes_over_and_fan_shorts_counts_other_channels(env, monkeypatch):
+    monkeypatch.setattr(config, "YOUTUBE_API_KEY", "k1, k2")
+    settings = {**db.DEFAULT_SETTINGS, "search_calls_per_day": 1}
+    used = []
+    def get_json(url, limiter, on_attempt=None):
+        on_attempt()
+        used.append(url.split("key=")[1].split("&")[0])
+        return {"items": [{"snippet": {"channelTitle": "Rafi", "title": "Rafi own short"}},
+                          {"snippet": {"channelTitle": "Clips", "title": "Rafi rage moment", "description": ""}},
+                          {"snippet": {"channelTitle": "Other", "title": "Rafiq is unrelated"}}]}
+    monkeypatch.setattr(youtube.net, "get_json", get_json)
+    lead = {"name": "Rafi", "handle": "@rafilive"}
+    assert youtube.fan_shorts(lead, settings) == (1, 3) and youtube.fan_shorts(lead, settings) == (1, 3)
+    assert used == ["k1", "k2"]  # the first key's one search is spent, so the second answers
+    with pytest.raises(youtube.QuotaExhausted):
+        for _ in range(200):
+            youtube.fan_shorts(lead, settings)
 
 
 # ── Add lead by hand ──────────────────────────────────────────────────────────
