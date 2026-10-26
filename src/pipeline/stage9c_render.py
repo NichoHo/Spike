@@ -74,7 +74,8 @@ from src.music import (
 from src.pipeline.stage9a_face_track import (
     detect_facecam,
     get_video_dimensions,
-    run_face_track,
+    speaker_at,
+    track_faces,
 )
 from src.pipeline.stage9b_captions import _mask_profanity, generate_ass, write_ass_file
 from src.pipeline.title_card import render_title_card, strip_emoji
@@ -983,8 +984,17 @@ def render_single_vertical_clip(
     ]
     peak_t_in_trimmed = zooms_trimmed[0]["t"] if zooms_trimmed else effective_dur / 2.0  # thumbnail frame
 
+    # Face tracking runs before the captions: with two people on camera it also says who talks when,
+    # and each caption line takes that speaker's colour
+    raw_keyframes: List[Dict[str, Any]] = []
+    caption_words = words
+    if "face_track" in used:
+        raw_keyframes, speakers = track_faces(sec_file, effective_dur + 10, src_w, src_h)
+        if speakers:
+            caption_words = [{**w, "speaker": speaker_at(speakers, float(w.get("start", 0)) - sec_start)} for w in words]
+
     # Remap words for ASS captions
-    retimed_words = retime_words_for_cuts(words, clip_start, clip_end, cut_intervals)
+    retimed_words = retime_words_for_cuts(caption_words, clip_start, clip_end, cut_intervals)
 
     # 2. Generate ASS Captions
     ass_path = out_file.parent / f"{out_file.stem}.ass"
@@ -1008,9 +1018,7 @@ def render_single_vertical_clip(
     sc_rel: Optional[str] = None
 
     if "face_track" in used:
-        keyframes = _retime_keyframes(
-            run_face_track(sec_file, effective_dur + 10, src_w, src_h), sec_start, clip_start, cut_intervals
-        )
+        keyframes = _retime_keyframes(raw_keyframes, sec_start, clip_start, cut_intervals)
         sc_path = out_file.parent / f"sc_{out_file.stem}.txt"
         sendcmd_content = _build_sendcmd_file(keyframes, src_w, src_h)
         sc_path.write_text(sendcmd_content, encoding="utf-8")

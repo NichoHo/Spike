@@ -88,6 +88,10 @@ _STYLE_DEFS = {
 }
 OVERLAY_STYLES = ("pov", "rank_header", "rank_num", "rank_item", "callback", "card")
 _HIGHLIGHT = "&H0000FFFF&"  # ASS colours are BGR: this is yellow
+# Caption colour per speaker (0 = whoever talks first). The first stays white, the look a single speaker already has.
+# The others avoid yellow (the spoken-word highlight), red and green (they read as warnings), and stay light enough
+# for the black outline: soft cyan, then soft pink.
+_SPEAKER_COLORS = ("&H00FFFFFF&", "&H00FFE76E&", "&H00C78FFF&")
 
 _PROFANITY_LIST = [
     "fuck", "fucking", "fuckin", "fucked", "fucker", "fuckers", "motherfucker", "motherfucking",
@@ -178,6 +182,14 @@ def _group_words(
     return groups
 
 
+def _line_color(group_words: List[Dict[str, Any]]) -> str:
+    """Colour of a caption line: the speaker who said most of its words. White when no word has a speaker."""
+    speakers = [w["speaker"] for w in group_words if w.get("speaker") is not None]
+    if not speakers:
+        return _SPEAKER_COLORS[0]
+    return _SPEAKER_COLORS[max(set(speakers), key=speakers.count) % len(_SPEAKER_COLORS)]
+
+
 def _display_word(word: str, style: str, profanity_mask: bool) -> str:
     """Clean one word for display. bold_pop is UPPERCASE and drops trailing , and . like Shorts captions."""
     txt = word.strip()
@@ -206,7 +218,8 @@ def generate_ass(
     Generate ASS subtitle content for a clip.
 
     Args:
-        words: List of word dicts from faster-whisper: {word, start, end}
+        words: List of word dicts from faster-whisper: {word, start, end}. A word may carry "speaker" (0, 1, ...),
+            which colours its caption line per speaker
         clip_start_s: Clip start time in the original video seconds
         clip_end_s: Clip end time in the original video seconds
         style: One of 'bold_pop', 'clean', 'karaoke'
@@ -262,6 +275,9 @@ def generate_ass(
         gw = group["words"]
         shown = [_display_word(w.get("word", ""), style, profanity_mask) for w in gw]
         pos = f"\\pos(540,{int(1920 * y_at(group['start'] - clip_start_s))})"
+        col = _line_color(gw)
+        if col != _SPEAKER_COLORS[0]:
+            pos += f"\\c{col}"  # the line's base colour; the spoken-word highlight still shows yellow
 
         if style == "bold_pop":
             # One event per word so the spoken word lights up. The line pops in on its first word.
@@ -272,7 +288,7 @@ def generate_ass(
                     continue
                 pop = r"\fscx85\fscy85\t(0,90,\fscx100\fscy100)" if i == 0 else ""
                 txt = " ".join(
-                    f"{{\\c{_HIGHLIGHT}}}{t}{{\\c&H00FFFFFF&}}" if j == i else t
+                    f"{{\\c{_HIGHLIGHT}}}{t}{{\\c{col}}}" if j == i else t
                     for j, t in enumerate(shown)
                 )
                 lines.append(event(st, et, f"{{{pos}{pop}}}{txt}"))
