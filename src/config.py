@@ -157,7 +157,7 @@ CREATOR_PRESETS = {
 
 # Blend weights (§6.4)
 LLM_WEIGHT_WITHOUT_CHAT = 0.70
-LLM_WEIGHT_WITH_CHAT = 0.50
+LLM_WEIGHT_WITH_CHAT = 0.30  # 0.5 ranked worse on the 9-VOD eval set; chat activity carries more of the order
 MIN_RAW_LLM_SCORE = 65.0  # Floor to prevent dull VODs from passing
 AUTO_POST_MIN_LLM_SCORE = 70.0
 

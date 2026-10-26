@@ -44,6 +44,7 @@ from src.config import (
 from src.concepts import CONCEPT_LABELS, CONCEPTS, DEFAULT_AUTO_CONCEPTS
 from src.editor import REPEAT_REASON, SINGLE_LIKE, enforce_episode_rule, finalize_pov, run_editor
 from src.edges import compute_edges, split_into_phrases  # noqa: F401  (re-exported for tests)
+from src.pipeline.stage6_signals import chatters_per_second
 from src.models import LLMJudgeResponse, PairwiseCompareResponse, VideoVerdict
 from src import gemini_budget
 from src.db import get_json_column, insert_candidate
@@ -95,7 +96,7 @@ def claude_instead(contents: Any, config: Any, purpose: str, claude_model: str =
     from src.claude_cli import ClaudeError, run_claude
     if not isinstance(contents, str):
         return None
-    if not claude_fallback.ask(f"{purpose} (Claude {claude_model.capitalize()})", f"Gemini {DEFAULT_GEMINI_MODEL} is out of quota for today."):
+    if not claude_fallback.ask(f"{purpose} (Claude {claude_model.capitalize()})", f"Gemini {DEFAULT_GEMINI_MODEL} is out of quota for today.", DEFAULT_GEMINI_MODEL):
         print("  [claude] Fallback not approved; stopping as before.")
         return None
     system = getattr(config, "system_instruction", None) or "Follow the task and answer with the JSON it asks for."
@@ -1087,6 +1088,9 @@ def run_stage7_moments(
         yt_comments = crowd_data or []
 
     chat_comments = chat_data.get("comments", []) if chat_data else []
+    # With chat, a candidate's signal score is how busy chat was over its own window (plus chat lag). The peak's
+    # score it would inherit otherwise is 1.0 for every transcript-chunk proposal, so the ranking was mostly ties.
+    chat_curve = chatters_per_second(chat_comments, int(duration_s) + 1) if has_chat and chat_comments else None
 
     segments = split_into_phrases(transcript.get("segments", []))
     preset = (profile_ctx or {}).get("preset") or get_preset(None)
@@ -1160,7 +1164,8 @@ def run_stage7_moments(
             "payoff_t": round(edges["payoff_t"], 2),
             "origin": cand.get("origin", "signal"),
             "chat_mood": cand.get("chat_mood"),
-            "raw_signal_score": cand.get("signal_score_raw", 1.0),
+            "raw_signal_score": cand.get("signal_score_raw", 1.0) if chat_curve is None else
+                float(np.max(chat_curve[int(snapped_st):int(snapped_et + chat_offset_s) + 1], initial=0.0)),
             "raw_llm_score": float(raw_llm_score),
             "text_score": judge_res.score,  # uncapped, orders the video shortlist
             "contrast": contrast,
@@ -1208,9 +1213,14 @@ def run_stage7_moments(
             "Nothing was stored; re-run the job once the Gemini API is available."
         )
 
-    # Gemini watches the shortlist: the best distinct moments by the transcript judge's uncapped score
+    # Gemini watches the shortlist: the best distinct moments by the transcript judge's uncapped score blended with
+    # the signal score, the same weights as the final ranking
+    w_llm = LLM_WEIGHT_WITH_CHAT if has_chat else LLM_WEIGHT_WITHOUT_CHAT
+    blend = {id(c): w_llm * t + (1.0 - w_llm) * s for c, t, s in zip(
+        evaluated, percentile_avg_rank([c["text_score"] for c in evaluated]),
+        percentile_avg_rank([c["raw_signal_score"] for c in evaluated]))}
     watched = 0
-    shortlist, _ = dedupe(sorted(evaluated, key=lambda c: (c["crowd"], c["text_score"]), reverse=True))
+    shortlist, _ = dedupe(sorted(evaluated, key=lambda c: (c["crowd"], blend[id(c)]), reverse=True))
     for c in shortlist[:VIDEO_POOL]:
         key = f"video:{c['start_s']:.1f}-{c['end_s']:.1f}"
         if key in judge_cache:
@@ -1234,7 +1244,6 @@ def run_stage7_moments(
     selected: List[Dict[str, Any]] = []
     if evaluated:
         # Percentiles only order candidates (average rank for ties); the UI shows the raw score (§6.7)
-        w_llm = LLM_WEIGHT_WITH_CHAT if has_chat else LLM_WEIGHT_WITHOUT_CHAT
         llm_pcts = percentile_avg_rank([c["raw_llm_score"] for c in evaluated])
         sig_pcts = percentile_avg_rank([c["raw_signal_score"] for c in evaluated])
         for c, l_pct, s_pct in zip(evaluated, llm_pcts, sig_pcts):

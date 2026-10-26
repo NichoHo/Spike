@@ -138,18 +138,8 @@ def compute_chat_users_baseline(
     """
     if not comments:
         return []
-
-    bin_users = [set() for _ in range(duration_s)]
-    for c in comments:
-        t = int(c.get("content_offset_seconds", 0))
-        if 0 <= t < duration_s:
-            u = c.get("commenter", {}).get("display_name", "")
-            bin_users[t].add(u)
-
-    counts = np.array([len(u) for u in bin_users], dtype=np.float32)
-    # Smooth over 5s
-    kernel = np.ones(5) / 5.0
-    smoothed = np.convolve(counts, kernel, mode="same")
+    from src.pipeline.stage6_signals import chatters_per_second
+    smoothed = chatters_per_second(comments, duration_s)
 
     # Pick top k peaks at least 45s apart
     peaks = []

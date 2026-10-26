@@ -15,6 +15,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.pipeline.stage6_signals import (
+    chatters_per_second,
     clean_twitch_chat,
     compute_chat_signals,
     estimate_chat_lag,
@@ -146,6 +147,13 @@ class TestBaselineEvaluation(unittest.TestCase):
         # The peak candidate should cover t=50
         self.assertLessEqual(baseline[0]["start_s"], 50)
         self.assertGreaterEqual(baseline[0]["end_s"], 50)
+
+    def test_chatters_per_second_counts_people_not_messages(self):
+        spam = [{"commenter": {"display_name": "one"}, "content_offset_seconds": 10}] * 20
+        crowd = [{"commenter": {"display_name": f"u{i}"}, "content_offset_seconds": 40} for i in range(5)]
+        curve = chatters_per_second(spam + crowd, duration_s=60)
+        self.assertAlmostEqual(float(curve[10]), 1 / 5)  # one person, smoothed over 5 s
+        self.assertAlmostEqual(float(curve[40]), 5 / 5)
 
 
 if __name__ == "__main__":

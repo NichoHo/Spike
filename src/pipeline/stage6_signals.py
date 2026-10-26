@@ -295,6 +295,18 @@ def token_forms(tokens: Set[str]) -> Set[str]:
     return low | {q for t in low if not (len(q := squeeze(t)) == 1 and q.isascii())}
 
 
+def chatters_per_second(comments: List[Dict[str, Any]], duration_s: int) -> np.ndarray:
+    """Distinct chatters per second at raw chat time, smoothed over 5 s. Absolute, not z-scored against the
+    stream's own median: how busy chat is overall is what predicts viewer clips (reports/Eval baseline 9 Twitch
+    VODs.md), and a local z-score cancels exactly that."""
+    bins: List[Set[str]] = [set() for _ in range(duration_s)]
+    for c in comments:
+        t = int(c.get("content_offset_seconds", 0))
+        if 0 <= t < duration_s:
+            bins[t].add(c.get("commenter", {}).get("display_name", ""))
+    return np.convolve(np.array([len(b) for b in bins], dtype=np.float32), np.ones(5) / 5.0, mode="same")
+
+
 def compute_chat_signals(
     cleaned_comments: List[Dict[str, Any]],
     raid_windows: List[Tuple[int, int]],
