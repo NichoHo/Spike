@@ -51,3 +51,12 @@ def test_a_failed_video_check_ranks_under_every_clip_that_passed():
     assert ranking_score(100, True, False) <= ranking_score(0, False, False)
     assert ranking_score(50, False, True) > ranking_score(50, False, False)
     assert ranking_score(100, False, True) == 100
+
+
+def test_chat_peaks_are_the_busiest_moments_at_least_45_s_apart():
+    from src.pipeline.stage7_moments import chat_peak_proposals
+    people = lambda t, n: [{"commenter": {"display_name": f"u{t}_{i}"}, "content_offset_seconds": t} for i in range(n)]
+    comments = people(100, 9) + people(110, 8) + people(300, 5)   # 110 is a lesser peak 10 s from 100
+    seeds = chat_peak_proposals(comments, 600.0)
+    assert [s["origin"] for s in seeds] == ["chat_peak", "chat_peak"] and not any(s["crowd"] for s in seeds)
+    assert seeds[0]["clip_start"] < 100 < seeds[0]["clip_end"] and seeds[1]["clip_start"] < 300 < seeds[1]["clip_end"]

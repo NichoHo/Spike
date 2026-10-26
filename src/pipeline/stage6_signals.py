@@ -307,6 +307,19 @@ def chatters_per_second(comments: List[Dict[str, Any]], duration_s: int) -> np.n
     return np.convolve(np.array([len(b) for b in bins], dtype=np.float32), np.ones(5) / 5.0, mode="same")
 
 
+def busiest_chat_seconds(comments: List[Dict[str, Any]], duration_s: int, k: int = 10, gap_s: int = 45) -> List[Tuple[int, float]]:
+    """(second, distinct chatters) of the k busiest chat peaks at raw chat time, best first, at least gap_s apart."""
+    curve = chatters_per_second(comments, duration_s)
+    out: List[Tuple[int, float]] = []
+    for _ in range(k):
+        t = int(np.argmax(curve))
+        if curve[t] <= 0:
+            break
+        out.append((t, float(curve[t])))
+        curve[max(0, t - gap_s // 2):t + gap_s // 2 + 1] = -1.0
+    return out
+
+
 def compute_chat_signals(
     cleaned_comments: List[Dict[str, Any]],
     raid_windows: List[Tuple[int, int]],

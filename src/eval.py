@@ -138,30 +138,9 @@ def compute_chat_users_baseline(
     """
     if not comments:
         return []
-    from src.pipeline.stage6_signals import chatters_per_second
-    smoothed = chatters_per_second(comments, duration_s)
-
-    # Pick top k peaks at least 45s apart
-    peaks = []
-    used = np.zeros(duration_s, dtype=bool)
-
-    for _ in range(k):
-        avail = smoothed.copy()
-        avail[used] = -1.0
-        best_t = int(np.argmax(avail))
-        if avail[best_t] <= 0:
-            break
-        peaks.append({
-            "start_s": max(0.0, float(best_t - 20)),
-            "end_s": min(float(duration_s), float(best_t + 15)),
-            "final_score": int(smoothed[best_t] * 10),
-        })
-        # Mask out 45s around peak
-        m_start = max(0, best_t - 22)
-        m_end = min(duration_s, best_t + 23)
-        used[m_start:m_end] = True
-
-    return peaks
+    from src.pipeline.stage6_signals import busiest_chat_seconds
+    return [{"start_s": max(0.0, float(t - 20)), "end_s": min(float(duration_s), float(t + 15)), "final_score": int(v * 10)}
+            for t, v in busiest_chat_seconds(comments, duration_s, k)]
 
 
 # ── Stored candidates vs ground truth (§6.7) ─────────────────────────────────

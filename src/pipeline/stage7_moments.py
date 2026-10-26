@@ -46,7 +46,7 @@ from src.config import (
 from src.concepts import CONCEPT_LABELS, CONCEPTS, DEFAULT_AUTO_CONCEPTS
 from src.editor import REPEAT_REASON, SINGLE_LIKE, enforce_episode_rule, finalize_pov, run_editor
 from src.edges import compute_edges, split_into_phrases  # noqa: F401  (re-exported for tests)
-from src.pipeline.stage6_signals import chatters_per_second
+from src.pipeline.stage6_signals import busiest_chat_seconds, chatters_per_second
 from src.models import LLMJudgeResponse, PairwiseCompareResponse, VideoVerdict
 from src import gemini_budget
 from src.db import get_json_column, insert_candidate
@@ -489,6 +489,19 @@ def chat_laugh_proposals(chat_laugh: np.ndarray, video_duration: float) -> List[
     peaks, _ = find_peaks(chat_laugh, distance=60)
     top = sorted(peaks, key=lambda t: chat_laugh[t], reverse=True)[:CROWD_SEEDS]
     return [crowd_seed(max(0.0, t - 10.0), f"chat laughs ({chat_laugh[t]:.2f})", video_duration) for t in top]
+
+
+CHAT_PEAK_SEEDS = 10  # the eval's chat baseline picks this many
+
+
+def chat_peak_proposals(comments: List[Dict[str, Any]], video_duration: float) -> List[Dict[str, Any]]:
+    """The busiest moments of chat (distinct chatters per second, at least 45 s apart) as candidates. Chat is the
+    one cheap signal that finds moments the transcript scan never proposes: it beat Spike's own picks on the
+    eval set, and these peaks reach moments neither the signal peaks nor the transcript chunks do. Unlike crowd
+    seeds they go through the transcript judge and compete for the video shortlist on score."""
+    return [{**crowd_seed(max(0.0, t - 12.0), f"chat busiest ({v:.0f} chatters)", video_duration),
+             "crowd": False, "origin": "chat_peak", "signal_score_raw": 1.0}
+            for t, v in busiest_chat_seconds(comments, int(video_duration), CHAT_PEAK_SEEDS)]
 
 
 def crowd_seed(moment_s: float, topic: str, video_duration: float) -> Dict[str, Any]:
@@ -1088,9 +1101,11 @@ def run_stage7_moments(
     crowd_props = crowd_proposals(crowd_data.get("clips") or [], duration_s) if isinstance(crowd_data, dict) else []
     if not crowd_props and (video_dir / "signals.npz").exists():
         crowd_props = chat_laugh_proposals(np.load(video_dir / "signals.npz").get("chat_laugh", np.zeros(0)), duration_s)
-    all_candidates = merge_candidate_sources(signal_peaks, crowd_props + stream_props + chunk_props)
+    chat_props = chat_peak_proposals((chat_data or {}).get("comments", []), duration_s) if has_chat else []
+    all_candidates = merge_candidate_sources(signal_peaks, crowd_props + stream_props + chunk_props + chat_props)
     print(f"  [stage 7] Total candidate pool: {len(all_candidates)} ({len(crowd_props)} from community clips, "
-          f"{len(stream_props)} from the whole-stream read, {len(chunk_props)} from transcript chunks).")
+          f"{len(stream_props)} from the whole-stream read, {len(chunk_props)} from transcript chunks, "
+          f"{len(chat_props)} from the busiest chat peaks).")
 
     signals_npz_path = video_dir / "signals.npz"
     sig_archive = np.load(signals_npz_path) if signals_npz_path.exists() else {}
