@@ -158,6 +158,8 @@ CREATOR_PRESETS = {
 # Blend weights (§6.4)
 LLM_WEIGHT_WITHOUT_CHAT = 0.70
 LLM_WEIGHT_WITH_CHAT = 0.30  # 0.5 ranked worse on the 9-VOD eval set; chat activity carries more of the order
+PICK_SPACING_S = 45.0  # ranked picks sit at least this far apart, like the chat baseline's peaks: ten picks around one busy spot waste nine slots
+CHAT_RESCUE_PCT = 80.0  # a candidate the transcript judge threw out stays in the ranking when its chat activity is above this percentile of the VOD's candidates
 MIN_RAW_LLM_SCORE = 65.0  # Floor to prevent dull VODs from passing
 AUTO_POST_MIN_LLM_SCORE = 70.0
 

@@ -36,6 +36,8 @@ from src.config import (
     LLM_WEIGHT_WITHOUT_CHAT,
     LLM_WEIGHT_WITH_CHAT,
     MIN_RAW_LLM_SCORE,
+    PICK_SPACING_S,
+    CHAT_RESCUE_PCT,
     DEFAULT_CHAT_OFFSET_S,
     CHAT_LAUGH_TOKENS,
     CHAT_HYPE_TOKENS,
@@ -758,7 +760,8 @@ Respond with JSON in exactly this field order:
     return best_resp
 
 
-VIDEO_POOL = 12      # shortlisted candidates Gemini watches
+NEAR_REASON = "overlaps or is near a higher-ranked pick"
+VIDEO_POOL = 12     # shortlisted candidates Gemini watches
 GATED_SCORE = 40     # cap for clips that fail a video check (below MIN_RAW_LLM_SCORE, so they drop out)
 
 
@@ -844,13 +847,15 @@ def apply_video_verdict(rec: Dict[str, Any], v: VideoVerdict, baseline: List[str
     rec["why_funny"] = f"{rec.get('why_funny') or ''} Seen in the video: {v.what_happens} {v.why}".strip()
 
 
-def dedupe(cands: List[Dict[str, Any]], thr: float = 0.30) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """(kept, dropped): walking in order, a candidate overlapping a kept one by more than thr IoU is dropped."""
+def dedupe(cands: List[Dict[str, Any]], thr: float = 0.30, gap_s: float = 0.0) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """(kept, dropped): walking in order, a candidate overlapping a kept one by more than thr IoU, or whose
+    centre is within gap_s of a kept one's, is dropped."""
     kept, dropped = [], []
     for c in cands:
         hit = any(
             max(0.0, min(c["end_s"], k["end_s"]) - max(c["start_s"], k["start_s"]))
             / max(1.0, max(c["end_s"], k["end_s"]) - min(c["start_s"], k["start_s"])) > thr
+            or abs((c["start_s"] + c["end_s"]) - (k["start_s"] + k["end_s"])) / 2.0 < gap_s
             for k in kept)
         (dropped if hit else kept).append(c)
     return kept, dropped
@@ -1213,6 +1218,16 @@ def run_stage7_moments(
             "Nothing was stored; re-run the job once the Gemini API is available."
         )
 
+    # A moment the transcript judge threw out stays in the ranking when chat was unusually busy over it: a visual gag
+    # reads as nothing in a transcript. 21 of the 80 most-clipped moments in the 8-VOD eval died at this gate. The
+    # video judge decides for those that reach the shortlist.
+    if has_chat and judged:
+        for c, pct in zip(judged, percentile_avg_rank([c["raw_signal_score"] for c in judged])):
+            if (c.get("status") == "rejected" and c["status_reason"].startswith("judge:") and pct >= CHAT_RESCUE_PCT
+                    and preset["min_len"] <= (c["end_s"] - c["start_s"]) - sum(h - l for l, h in c["cuts"]) <= preset["max_len"]):
+                del c["status"], c["status_reason"]
+                evaluated.append(c)
+
     # Gemini watches the shortlist: the best distinct moments by the transcript judge's uncapped score blended with
     # the signal score, the same weights as the final ranking
     w_llm = LLM_WEIGHT_WITH_CHAT if has_chat else LLM_WEIGHT_WITHOUT_CHAT
@@ -1220,7 +1235,7 @@ def run_stage7_moments(
         evaluated, percentile_avg_rank([c["text_score"] for c in evaluated]),
         percentile_avg_rank([c["raw_signal_score"] for c in evaluated]))}
     watched = 0
-    shortlist, _ = dedupe(sorted(evaluated, key=lambda c: (c["crowd"], blend[id(c)]), reverse=True))
+    shortlist, _ = dedupe(sorted(evaluated, key=lambda c: (c["crowd"], blend[id(c)]), reverse=True), gap_s=PICK_SPACING_S)
     for c in shortlist[:VIDEO_POOL]:
         key = f"video:{c['start_s']:.1f}-{c['end_s']:.1f}"
         if key in judge_cache:
@@ -1261,9 +1276,9 @@ def run_stage7_moments(
         passed_floor.sort(key=lambda x: x["final_score"], reverse=True)
 
         # Deduplicate overlaps > 30% IoU
-        deduped, overlapping = dedupe(passed_floor)
+        deduped, overlapping = dedupe(passed_floor, gap_s=PICK_SPACING_S)
         for c in overlapping:
-            c["status_reason"] = "overlaps a higher-ranked pick"
+            c["status_reason"] = NEAR_REASON
 
         in_pool = {id(c) for c in deduped[:EDITOR_POOL]}
         reactions = sorted(
@@ -1288,7 +1303,7 @@ def run_stage7_moments(
         for c in evaluated:
             if c.get("status") == "selected" or (c.get("status_reason") or "").startswith("part of a"):
                 continue
-            if c["raw_llm_score"] < MIN_RAW_LLM_SCORE or c.get("status_reason") == "overlaps a higher-ranked pick":
+            if c["raw_llm_score"] < MIN_RAW_LLM_SCORE or c.get("status_reason") == NEAR_REASON:
                 continue  # already explained above
             if any(c is r for r in repeats) or key_of(c) in taken:
                 c["status_reason"] = REPEAT_REASON

@@ -21,7 +21,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.config import DATA_DIR
+from src.config import DATA_DIR, PICK_SPACING_S
 
 EVAL_DIR = DATA_DIR / "eval"
 SET_FILE = EVAL_DIR / "set.json"
@@ -114,16 +114,30 @@ def chat_preds(comments: List[Dict[str, Any]], duration_s: float) -> List[Tuple[
     return [(c["start_s"], c["end_s"]) for c in compute_chat_users_baseline(comments, int(duration_s), k=10)]
 
 
-def spike_preds(video_id: int) -> List[Tuple[float, float]]:
-    """Spike's ranking: selected clips by final score, then every other judged moment by final score.
-    Concept clips count by all their stretches; hubris lines are not moments."""
-    from src.eval import _intervals, load_db_candidates
-    cands = [c for c in load_db_candidates(video_id) if c.get("status") != "hubris"]
-    cands.sort(key=lambda c: (c.get("status") == "selected", c.get("final_score") or 0), reverse=True)
-    out: List[Tuple[float, float]] = []
+def rank_preds(cands: List[Dict[str, Any]], gap_s: Optional[float] = PICK_SPACING_S) -> List[Tuple[float, float]]:
+    """Spike's ranking: selected clips by final score, then every other judged moment by final score. A pick
+    within gap_s of a better one (centre to centre) moves behind all the spaced picks; gap_s None keeps the plain
+    order. Concept clips count by all their stretches; hubris lines are not moments."""
+    from src.eval import _intervals
+    cands = sorted((c for c in cands if c.get("status") != "hubris"),
+                   key=lambda c: (c.get("status") == "selected", c.get("final_score") or 0), reverse=True)
+    head: List[Tuple[float, float]] = []
+    tail: List[Tuple[float, float]] = []
+    centres: List[float] = []
     for c in cands:
-        out.extend(_intervals(c))
-    return out
+        ivs = _intervals(c)
+        mid = (min(a for a, _ in ivs) + max(b for _, b in ivs)) / 2.0
+        if gap_s is None or all(abs(mid - x) >= gap_s for x in centres):
+            centres.append(mid)
+            head.extend(ivs)
+        else:
+            tail.extend(ivs)
+    return head + tail
+
+
+def spike_preds(video_id: int, gap_s: Optional[float] = PICK_SPACING_S) -> List[Tuple[float, float]]:
+    from src.eval import load_db_candidates
+    return rank_preds(load_db_candidates(video_id), gap_s)
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
