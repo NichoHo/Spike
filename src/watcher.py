@@ -130,12 +130,13 @@ def twitch_channel_is_live(channel_name: str) -> bool:
         return not isinstance(e.exc_info[1], yt_dlp.utils.UserNotLive)
 
 
-def latest_finished_vod(kind: str, ext_id: str) -> Optional[Dict[str, str]]:
+def latest_finished_vod(kind: str, ext_id: str, vods: Optional[List[Dict[str, str]]] = None) -> Optional[Dict[str, str]]:
     """Newest finished broadcast or upload of a source, or None. A live Twitch stream's own archive is skipped,
-    like check_and_queue_sources does."""
+    like check_and_queue_sources does. Pass `vods` to reuse a listing already fetched."""
     if kind == "youtube":
-        return next((v for v in fetch_youtube_channel_rss(ext_id) if youtube_video_is_finished(v["url"])), None)
-    vods = fetch_twitch_latest_vods(ext_id, 2)
+        items = fetch_youtube_channel_rss(ext_id) if vods is None else vods
+        return next((v for v in items if youtube_video_is_finished(v["url"])), None)
+    vods = fetch_twitch_latest_vods(ext_id, 2) if vods is None else vods
     if vods and twitch_channel_is_live(ext_id):
         vods = vods[1:]
     return vods[0] if vods else None

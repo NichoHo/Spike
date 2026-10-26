@@ -113,22 +113,23 @@ def recent_vods(
     source_id: int,
     user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """Recent videos for a source, used to autofill the VOD field."""
+    """Recent videos for a source, used to autofill the VOD field, plus the one an empty field would pick."""
     src = get_source(source_id)
     if not src:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Source not found.")
 
     hit = _vod_cache.get(source_id)
     if hit and hit[0] > time.time():
-        return {"results": hit[1]}
+        return hit[1]
 
-    from src.watcher import fetch_youtube_channel_rss, fetch_twitch_latest_vods  # lazy: pulls in yt_dlp
+    from src.watcher import fetch_youtube_channel_rss, fetch_twitch_latest_vods, latest_finished_vod  # lazy: pulls in yt_dlp
 
     fetch = fetch_youtube_channel_rss if src["kind"] == "youtube" else fetch_twitch_latest_vods
     results = fetch(src["external_id"])[:10]
+    data = {"results": results, "latest": latest_finished_vod(src["kind"], src["external_id"], results) if results else None}
     if results:  # don't cache a failed/empty fetch
-        _vod_cache[source_id] = (time.time() + _VOD_TTL, results)
-    return {"results": results}
+        _vod_cache[source_id] = (time.time() + _VOD_TTL, data)
+    return data
 
 
 @router.post("/new/submit")

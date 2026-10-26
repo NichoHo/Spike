@@ -470,13 +470,26 @@ document.addEventListener("DOMContentLoaded", () => {
   const input = document.getElementById("field-vod-url");
   const list = document.getElementById("vod-results");
   const status = document.getElementById("vod-status");
+  const open = document.getElementById("vod-open");
   if (!select || !input || !list) return;
 
   const idleText = status.textContent;
+  const idlePlaceholder = input.placeholder;
   let vods = [];
+  let latest = null; // what an empty field submits, per the server
   let seq = 0;
 
   const hide = () => { list.hidden = true; };
+
+  // "Open video" goes to the typed/picked video, or to the latest when the field is empty.
+  function syncOpen() {
+    const v = input.value.trim();
+    const href = !v ? latest?.url : v.includes("://") ? v : vods.find((x) => x.id === v)?.url;
+    let ok = false;
+    try { ok = ["http:", "https:"].includes(new URL(href).protocol); } catch (_) { /* not a URL */ }
+    open.hidden = !ok;
+    if (ok) open.href = href;
+  }
 
   function render() {
     const q = input.value.trim().toLowerCase();
@@ -501,6 +514,7 @@ document.addEventListener("DOMContentLoaded", () => {
         input.value = v.url;
         input.dispatchEvent(new Event("change"));
         status.textContent = `Selected: ${v.title || v.id}`;
+        syncOpen();
         hide();
       });
       list.appendChild(li);
@@ -510,7 +524,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loadVods() {
     vods = [];
+    latest = null;
     hide();
+    input.placeholder = idlePlaceholder;
+    syncOpen();
     const id = select.value;
     if (!id) { status.textContent = idleText; return; }
     const mine = ++seq;
@@ -520,6 +537,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       if (mine !== seq) return; // source changed while loading
       vods = data.results || [];
+      latest = data.latest || null;
+      if (latest) input.placeholder = `Latest: ${latest.title || latest.id}`;
+      syncOpen();
       status.textContent = vods.length
         ? "Choose a recent video, or paste a link. Leave empty for the latest."
         : "No recent videos found. You can still paste a link.";
@@ -537,7 +557,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadVods();
   });
   input.addEventListener("focus", render);
-  input.addEventListener("input", render);
+  input.addEventListener("input", () => { render(); syncOpen(); });
   input.addEventListener("blur", hide);
   input.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
   if (select.value) loadVods();

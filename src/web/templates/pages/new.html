@@ -42,7 +42,7 @@
             <input type="text" name="vod_url" id="field-vod-url" class="input" placeholder="Leave empty to fetch the latest past broadcast" autocomplete="off">
             <ul class="lookup__list" id="vod-results" role="listbox" hidden></ul>
           </div>
-          <p class="field__help" id="vod-status">Pick a source, then choose one of its recent videos or paste a link.</p>
+          <p class="field__help"><span id="vod-status">Pick a source, then choose one of its recent videos or paste a link.</span> <a id="vod-open" target="_blank" rel="noopener" hidden>Open video ↗</a></p>
         </div>
       {% else %}
         <!-- Upload Tab (default) -->
@@ -59,7 +59,7 @@
         </div>
       {% endif %}
 
-      <!-- Optional settings. From a streamer they only show for a specific VOD; the latest broadcast follows the source's presets. -->
+      <!-- Optional settings. From a streamer they show once a source is picked, starting from its presets. -->
       {% set from_streamer = active_tab == 'streamer' or not active_tab %}
       <fieldset id="job-options" class="job-options"{% if from_streamer %} disabled hidden{% endif %}>
       <details class="disclosure">
@@ -85,26 +85,23 @@
     </div>
   </form>
   <script>
-    // From a streamer: the latest broadcast uses the source's presets as they are. A specific VOD shows the
-    // options, starting from those presets. Disabled fields are not sent, so the job then follows the source.
+    // From a streamer: once a source is picked, show the options starting from its presets.
+    // Disabled fields are not sent, so with no source the job has nothing to override.
     (() => {
       const sel = document.getElementById('field-source');
-      const vod = document.getElementById('field-vod-url');
-      if (!sel || !vod) return;
+      if (!sel) return;
       const opts = document.getElementById('job-options');
       const PRESETS = {{ source_presets | tojson }};
       const sync = () => {
         const p = PRESETS[sel.value];
-        const show = Boolean(p && vod.value.trim());
-        opts.hidden = opts.disabled = !show;
+        opts.hidden = opts.disabled = !p;
         if (p) {
           document.getElementById('job-presets').applyPresets(p);
           document.getElementById('presets-from').textContent = `(from ${sel.selectedOptions[0].textContent.replace(/ \(.*\)$/, '')})`;
         }
       };
       sel.addEventListener('change', sync);
-      vod.addEventListener('change', () => { opts.hidden = opts.disabled = !(PRESETS[sel.value] && vod.value.trim()); });
-      vod.addEventListener('input', () => { opts.hidden = opts.disabled = !(PRESETS[sel.value] && vod.value.trim()); });
+      document.addEventListener('DOMContentLoaded', sync);  // a source kept on Back; applyPresets is set up by then
     })();
   </script>
   <script>

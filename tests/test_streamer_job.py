@@ -26,6 +26,13 @@ def test_latest_finished_vod_youtube_skips_unfinished(monkeypatch):
     assert watcher.latest_finished_vod("youtube", "x") is None
 
 
+def test_latest_finished_vod_reuses_a_given_listing(monkeypatch):
+    monkeypatch.setattr(watcher, "fetch_youtube_channel_rss", lambda c: 1 / 0)  # must not refetch
+    monkeypatch.setattr(watcher, "youtube_video_is_finished", lambda u: u == "ub")
+    items = [{"id": "a", "url": "ua", "title": ""}, {"id": "b", "url": "ub", "title": ""}]
+    assert watcher.latest_finished_vod("youtube", "x", items)["id"] == "b"
+
+
 def test_resubmitting_a_cancelled_job_queues_it_again():
     from src.db import cancel_job, get_connection, register_video
     vid = register_video(origin="url", url_or_path="https://www.twitch.tv/videos/999001", external_id="999001")
