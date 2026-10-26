@@ -836,7 +836,8 @@ def apply_video_verdict(rec: Dict[str, Any], v: VideoVerdict, baseline: List[str
     happens, reading chat) caps it below the floor. A creator's routine behaviour is capped as before, unless
     the video shows it at a real peak (the biggest meltdown of the stream is a clip even for a creator who rages often)."""
     score = v.score
-    if not v.visible or not v.standalone or v.reaction in ("none", "reading_chat"):
+    rec["video_gated"] = not v.visible or not v.standalone or v.reaction in ("none", "reading_chat")
+    if rec["video_gated"]:
         score = min(score, GATED_SCORE)
     elif v.reaction != "peak":
         score = apply_baseline_cap(score, rec.get("humor_type", "other"), contrast, baseline)
@@ -845,6 +846,14 @@ def apply_video_verdict(rec: Dict[str, Any], v: VideoVerdict, baseline: List[str
     rec["video"] = v.model_dump()
     rec["reason"] = v.why or rec.get("reason")
     rec["why_funny"] = f"{rec.get('why_funny') or ''} Seen in the video: {v.what_happens} {v.why}".strip()
+
+
+def ranking_score(blend: float, video_gated: bool, peak: bool) -> int:
+    """0 to 100 order score from the transcript/chat blend (0 to 100). A clip that failed a video check lands in
+    0 to 40, under every clip that did not (40 to 100); a clip the video showed at a real peak gets a boost."""
+    if video_gated:
+        return int(round(0.4 * blend))
+    return int(round(min(100.0, 40.0 + 0.6 * (blend + (30.0 if peak else 0.0)))))
 
 
 def dedupe(cands: List[Dict[str, Any]], thr: float = 0.30, gap_s: float = 0.0) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -1258,13 +1267,17 @@ def run_stage7_moments(
 
     selected: List[Dict[str, Any]] = []
     if evaluated:
-        # Percentiles only order candidates (average rank for ties); the UI shows the raw score (§6.7)
-        llm_pcts = percentile_avg_rank([c["raw_llm_score"] for c in evaluated])
+        # Percentiles only order candidates (average rank for ties); the UI shows the raw score (§6.7).
+        # The order is the transcript score blended with chat. The video verdict only vetoes (a failed check puts the
+        # clip under every clip that passed) or boosts (a real peak): its own 0-100 score bunches under the floor
+        # (9 of the 13 watched top-10 moments scored 15 to 55), so as an order it threw real moments away.
+        txt_pcts = percentile_avg_rank([c["text_score"] for c in evaluated])
         sig_pcts = percentile_avg_rank([c["raw_signal_score"] for c in evaluated])
-        for c, l_pct, s_pct in zip(evaluated, llm_pcts, sig_pcts):
+        for c, t_pct, s_pct in zip(evaluated, txt_pcts, sig_pcts):
             c["llm_score"] = int(round(c["raw_llm_score"]))
             c["signal_score"] = int(round(s_pct))
-            c["final_score"] = int(round(w_llm * l_pct + (1.0 - w_llm) * s_pct))
+            c["final_score"] = ranking_score(w_llm * t_pct + (1.0 - w_llm) * s_pct, bool(c.get("video_gated")),
+                                             (c.get("video") or {}).get("reaction") == "peak")
             c["status"] = "low_score"
 
         passed_floor = [c for c in evaluated if c["raw_llm_score"] >= MIN_RAW_LLM_SCORE]

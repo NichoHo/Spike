@@ -44,3 +44,10 @@ def test_dedupe_drops_a_candidate_within_the_gap_of_a_kept_one():
     a, b, c = ({"start_s": s, "end_s": s + 20} for s in (100, 140, 300))   # a and b do not overlap, centres 40 s apart
     assert dedupe([a, b, c])[0] == [a, b, c]
     assert dedupe([a, b, c], gap_s=45.0) == ([a, c], [b])
+
+
+def test_a_failed_video_check_ranks_under_every_clip_that_passed():
+    from src.pipeline.stage7_moments import ranking_score
+    assert ranking_score(100, True, False) <= ranking_score(0, False, False)
+    assert ranking_score(50, False, True) > ranking_score(50, False, False)
+    assert ranking_score(100, False, True) == 100
