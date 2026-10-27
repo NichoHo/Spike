@@ -64,3 +64,66 @@ def test_bad_anime_fields_are_refused(client, field, value):
     data = {"tab": "url", "url": URL, "kind": "anime", "anime_audio": "sub", field: value}
     assert client.post("/new/submit", data=data, follow_redirects=False).status_code == 400
 
+
+# ---- From anime tab ----------------------------------------------------------------------------------------------
+
+def last_video():
+    with get_connection() as conn:
+        row = conn.execute("SELECT title, settings FROM videos ORDER BY id DESC LIMIT 1").fetchone()
+    return row[0], json.loads(row[1] or "{}")
+
+
+def test_anime_tab_has_picker_and_no_stream_presets(client):
+    html = client.get("/new?tab=anime").text
+    assert 'id="field-anime-search"' in html
+    assert 'name="anime_source"' not in html and 'id="field-file"' not in html     # the video source comes later
+    assert 'class="btn btn--primary btn--lg" disabled' in html                     # so the tab cannot start a job yet
+    assert 'id="kind-anime"' not in html                       # the tab itself says it is anime
+    assert 'id="render-presets" class="job-options" disabled hidden' in html
+
+
+def test_search_and_seasons_endpoints(client, monkeypatch):
+    from src import anilist
+    seen = {}
+    monkeypatch.setattr(anilist, "search", lambda q: seen.setdefault("q", q) and [{"id": 7, "title": "Show", "format": "TV", "episodes": 12, "year": 2020}])
+    monkeypatch.setattr(anilist, "seasons", lambda i: [{"id": i, "title": "Show", "format": "TV", "episodes": 12, "year": 2020}])
+    assert client.get("/new/anime/search", params={"q": "show"}).json()["results"][0]["id"] == 7
+    assert client.get("/new/anime/seasons", params={"id": 7}).json()["seasons"][0]["episodes"] == 12
+    assert client.get("/new/anime/seasons", params={"id": 0}).status_code == 400
+    assert client.get("/new/anime/seasons", params={"id": "x"}).status_code == 422
+
+    def down(*a):
+        raise OSError("offline")
+    monkeypatch.setattr(anilist, "search", down)
+    r = client.get("/new/anime/search", params={"q": "show"})
+    assert r.status_code == 502 and "AniList" in r.json()["detail"]
+
+
+def test_anime_tab_submit_by_link_stores_show_episode_and_title(client):
+    r = client.post("/new/submit", follow_redirects=False, data={
+        "tab": "anime", "anime_source": "url", "url": "https://www.youtube.com/watch?v=bbbbbbbbbbb",
+        "anime_id": "145064", "anime_episode": "5", "anime_audio": "sub",
+        "anime_label": "JUJUTSU KAISEN Season 2 episode 5\n\x00<b>x</b>"})
+    assert r.status_code == 303
+    title, s = last_video()
+    assert s["anime"]["anilist_id"] == 145064 and s["anime"]["episode"] == 5 and s["anime"]["audio_kind"] == "sub"
+    assert title == "JUJUTSU KAISEN Season 2 episode 5 <b>x</b>"       # one line, no control characters (the page escapes the rest)
+    assert "layout" not in s
+
+
+@pytest.mark.parametrize("data", [
+    {"anime_id": "", "anime_episode": "3"},                              # no season chosen
+    {"anime_id": "145064", "anime_episode": ""},                         # no episode
+    {"anime_id": "145064", "anime_episode": "3", "anime_source": "ftp"},
+    {"anime_id": "145064", "anime_episode": "-3"},
+    {"anime_id": "abc", "anime_episode": "3"},
+])
+def test_anime_tab_refuses_incomplete_picks(client, data):
+    body = {"tab": "anime", "anime_source": "url", "url": "https://www.youtube.com/watch?v=ccccccccccc", **data}
+    assert client.post("/new/submit", data=body, follow_redirects=False).status_code == 400
+
+
+def test_anime_tab_is_hidden_from_the_tab_bar_for_now(client):
+    for tab in ("streamer", "url", "upload", "anime"):
+        html = client.get(f"/new?tab={tab}").text
+        assert "From anime" not in html and 'href="/new?tab=anime"' not in html, tab

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Request, Depends, Form, UploadFile, File, HTTPExc
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
+from src import anilist
 from src.pipeline.stage1_anime import sanitize_anime_opts
 from src.config import (
     UPLOADS_DIR,
@@ -133,6 +134,33 @@ def build_anime_settings(audio: str, anilist_id: str, episode: str, hardsubbed: 
     return clean
 
 
+@router.get("/new/anime/search")
+async def anime_search(q: str, user: Dict[str, Any] = Depends(get_current_user)):
+    """Titles matching q, for the From anime tab."""
+    from starlette.concurrency import run_in_threadpool
+    try:
+        return {"results": await run_in_threadpool(anilist.search, q)}
+    except Exception:
+        raise HTTPException(status_code=502, detail="AniList did not answer. Try again in a moment.")
+
+
+@router.get("/new/anime/seasons")
+async def anime_seasons(id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    """The seasons of the show that title belongs to, each with its own AniList id and episode count."""
+    from starlette.concurrency import run_in_threadpool
+    if id < 1:
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid anime.")
+    try:
+        return {"seasons": await run_in_threadpool(anilist.seasons, id)}
+    except Exception:
+        raise HTTPException(status_code=502, detail="AniList did not answer. Try again in a moment.")
+
+
+def clean_label(text: str) -> str:
+    """A job title from the form: one line, no control characters, at most 120 characters."""
+    return " ".join("".join(c if c.isprintable() else " " for c in text).split())[:120]
+
+
 _VOD_TTL = 300
 _vod_cache: Dict[int, tuple] = {}
 
@@ -184,10 +212,20 @@ async def submit_new_job(
     anime_title_match: Optional[str] = Form(None),
     anime_youtube_url: str = Form(""),
     anime_youtube_offset: str = Form(""),
+    anime_source: str = Form("file"),   # From anime tab: where the video comes from, "file" or "url"
+    anime_label: str = Form(""),        # From anime tab: the job's title, such as "Show Season 2 E5"
     file: Optional[UploadFile] = File(None),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+    label = clean_label(anime_label) if tab == "anime" else ""
+    if tab == "anime":  # the picked show and episode, then the same upload or link handling as those two tabs
+        if anime_source not in ("file", "url"):
+            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid video choice.")
+        if not anime_id.strip() or not anime_episode.strip():
+            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Choose an anime, a season and an episode first.")
+        kind, tab = "anime", ("url" if anime_source == "url" else "upload")
 
     if (todo := requirements.missing("video", source_id=source_id if tab == "streamer" else None, url=url or "" if tab == "url" else "")):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Finish setup first: " + ", ".join(i["title"] for i in todo) + ".")
@@ -250,7 +288,7 @@ async def submit_new_job(
             origin="upload",
             url_or_path=str(dest_path),
             external_id=dest_name,
-            title=file.filename,
+            title=label or file.filename,
             submitted_by=user.get("id"),
             priority=10,  # Manual submissions beat watcher jobs
             settings=settings,
@@ -275,7 +313,7 @@ async def submit_new_job(
         video_id = register_video(
             origin="url",
             url_or_path=raw_url,
-            title=raw_url,
+            title=label or raw_url,
             submitted_by=user.get("id"),
             priority=10,
             settings=settings,

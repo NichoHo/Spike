@@ -1,0 +1,55 @@
+{# Anime details of a New job form. Variables: standalone (always shown and sent), show_ids (AniList ID and episode inputs), url_note ("", "always" or "toggle"). #}
+{% import "macros/ui.html" as ui %}
+<fieldset id="anime-fields" class="job-options"{% if not standalone %} disabled hidden{% endif %}>
+  <div class="stack">
+    <div class="field">
+      <span class="field__label" id="anime-lbl-audio">Audio</span>
+      <div class="segmented" role="radiogroup" aria-labelledby="anime-lbl-audio">
+        {%- for v, label in [("sub", "Japanese"), ("dub", "English dub"), ("abridged", "Abridged")] %}
+        <input type="radio" name="anime_audio" id="anime-audio-{{ v }}" value="{{ v }}" {% if v == 'sub' %}checked{% endif %}><label for="anime-audio-{{ v }}">{{ label }}</label>
+        {%- endfor %}
+      </div>
+      <p class="field__help">Japanese uses the file's English subtitles, or is transcribed and translated. Abridged is a parody dub.</p>
+    </div>
+
+    {% if show_ids %}
+    <div class="settings-grid">
+      <div class="field">
+        <label class="field__label" for="field-anime-id">AniList ID</label>
+        <input type="number" name="anime_id" id="field-anime-id" class="input input--short input--number" placeholder="Auto" min="1" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field__label" for="field-anime-episode">Episode</label>
+        <input type="number" name="anime_episode" id="field-anime-episode" class="input input--short input--number" placeholder="Auto" min="0" max="9999" autocomplete="off">
+      </div>
+      <p class="field__help settings-grid__wide">Empty: the show and episode are read from the file name.</p>
+    </div>
+    {% endif %}
+
+    <label class="switch-row">
+      <input type="checkbox" name="anime_hardsubbed" value="on" class="switch" role="switch">
+      <span class="field__label">Subtitles are burned into the picture</span>
+    </label>
+
+    <details class="disclosure">
+      <summary>{{ ui.icon("caret-right", 14) }} Popularity hints (optional)</summary>
+      <div class="stack disclosure__body">
+        <label class="switch-row">
+          <input type="checkbox" name="anime_title_match" value="on" class="switch" role="switch">
+          <span class="field__label">Use viral clip titles of this show</span>
+        </label>
+        <div class="field">
+          <label class="field__label" for="field-anime-yt">Official upload of this episode</label>
+          <input type="url" name="anime_youtube_url" id="field-anime-yt" class="input" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" spellcheck="false">
+          <p class="field__help">Timestamps in its comments mark the moments people liked. Both hints need a YouTube API key.</p>
+        </div>
+        <div class="field">
+          <label class="field__label" for="field-anime-offset">Time offset (seconds)</label>
+          <input type="number" name="anime_youtube_offset" id="field-anime-offset" class="input input--short input--number" placeholder="0" step="0.1" autocomplete="off">
+          <p class="field__help">The upload's opening start minus your file's, if they differ.</p>
+        </div>
+      </div>
+    </details>
+    {% if url_note %}<p class="field__help"{% if url_note == 'toggle' %} id="anime-url-note" hidden{% endif %}>A link has no subtitle track and no scene signals. Upload the file for better results.</p>{% endif %}
+  </div>
+</fieldset>
