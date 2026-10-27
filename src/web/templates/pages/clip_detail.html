@@ -846,7 +846,8 @@ function wirePop(pop, btn, onOpen, getList, setList) {
       return;
     }
     const r = btn.getBoundingClientRect();
-    pop.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - pop.offsetWidth - 16))}px`;
+    const col = $('rerender-form').getBoundingClientRect();  // centre on the right column, not under the button
+    pop.style.left = `${Math.max(16, Math.min(col.left + (col.width - pop.offsetWidth) / 2, window.innerWidth - pop.offsetWidth - 16))}px`;
     pop.style.top = `${Math.max(16, Math.min(r.bottom + 8, window.innerHeight - pop.offsetHeight - 16))}px`;
   });
 }
