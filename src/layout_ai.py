@@ -86,7 +86,7 @@ def _ask(frames: List[Tuple[str, bytes]], prompt: str, model_cls):
     from src import claude_fallback
     from src.claude_cli import require_all, run_claude
 
-    if not claude_fallback.ask("Auto layout (Claude Sonnet)", "Auto layout looks at video frames."):
+    if not claude_fallback.ask("Auto layout (Claude Sonnet)", "Auto layout looks at video frames.", config.LAYOUT_GEMINI_MODEL):
         raise RuntimeError("Claude fallback not approved")
     labels = "".join(f"f{i}.jpg = {label}\n" for i, (label, _) in enumerate(frames) if label)
     out = run_claude("You pick video framing layouts from frames.", labels + prompt, require_all(model_cls.model_json_schema()),

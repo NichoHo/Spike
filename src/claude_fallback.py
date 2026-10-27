@@ -52,9 +52,20 @@ def running() -> Optional[str]:
     return cur["label"] if cur and cur.get("until", 0) > time.time() else None
 
 
-def _notify(label: str) -> None:
+def _all_keys_out(model: Optional[str]) -> bool:
+    """True when every Gemini key is capped for the model today, or the model's whole budget is spent."""
+    if not model:
+        return True
+    from src import config, gemini_budget
+    keys = config.gemini_keys()
+    return gemini_budget.left(model) == 0 or (bool(keys) and all(gemini_budget.key_capped(model, k) for k in keys))
+
+
+def _notify(label: str, model: Optional[str]) -> None:
     from src.config import PUBLIC_URL
     from src.notify import _post_webhook, get_active_webhook_url
+    if not _all_keys_out(model):
+        return  # one key out is not "Gemini used up": the other keys still serve the call
     url = get_active_webhook_url()
     if url:
         try:
@@ -84,7 +95,7 @@ def answer(req_id: str, approve: bool, skip_today: bool) -> bool:
     return True
 
 
-def ask(label: str, detail: str) -> bool:
+def ask(label: str, detail: str, model: Optional[str] = None) -> bool:
     """Block until the user approves or denies one Claude call. True right away when today is skipped."""
     if paused():
         return False
@@ -93,7 +104,7 @@ def ask(label: str, detail: str) -> bool:
     req = {"id": uuid.uuid4().hex, "label": label, "detail": detail[:300], "status": "pending", "ts": time.time()}
     set_setting(REQUEST_KEY, json.dumps(req))
     print(f"  [claude] Waiting for your OK in the web app to run on Claude: {label}")
-    _notify(label)
+    _notify(label, model)
     deadline = time.time() + WAIT_S
     while time.time() < deadline:
         time.sleep(2)
