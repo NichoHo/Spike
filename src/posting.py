@@ -5,7 +5,7 @@ Blueprint §8, §9, §12, §13 (Phase 6).
 Rollout & Rules:
 1. TikTok upload-to-inbox: free, no audit, lands in creator's TikTok inbox.
 2. YouTube Shorts: private uploads until compliance audit passes.
-3. Instagram Reels: Graph API container upload & publish.
+3. Instagram Reels: resumable container upload, wait for processing, then publish.
 4. Permission = none is strictly BLOCKED in code (raises PermissionBlockedError).
 5. Auto-post rules (§8.3): permission check, score floor (final >= 80, raw LLM >= 70),
    daily cap (default 3/day), no needs_context.
@@ -18,13 +18,16 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from src import config
 from src.music import music_credit
+from src.platform_auth import IG_API, fresh_token
 from src.db import (
     get_connection,
     get_account,
@@ -119,12 +122,15 @@ def upload_to_tiktok_inbox(
     # Live TikTok Creator Share / Direct Post Init Endpoint
     url = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
     video_size = clip_path.stat().st_size
+    # TikTok takes one chunk up to 64 MB, else 10 MB chunks with the remainder added to the last one
+    chunk_size = video_size if video_size <= 64 * 1024 * 1024 else 10 * 1024 * 1024
+    chunk_count = video_size // chunk_size
     payload = {
         "source_info": {
             "source": "FILE_UPLOAD",
             "video_size": video_size,
-            "chunk_size": video_size,
-            "total_chunk_count": 1,
+            "chunk_size": chunk_size,
+            "total_chunk_count": chunk_count,
         }
     }
 
@@ -144,18 +150,22 @@ def upload_to_tiktok_inbox(
             publish_id = data.get("data", {}).get("publish_id", "")
             upload_url = data.get("data", {}).get("upload_url", "")
 
-            # Stream video content to upload_url
-            if upload_url:
+            if not upload_url:
+                raise RuntimeError(f"TikTok did not return an upload URL: {data.get('error')}")
+            video = clip_path.read_bytes()
+            for i in range(chunk_count):
+                start = i * chunk_size
+                end = video_size if i == chunk_count - 1 else start + chunk_size
                 put_req = urllib.request.Request(
                     upload_url,
-                    data=clip_path.read_bytes(),
+                    data=video[start:end],
                     headers={
                         "Content-Type": "video/mp4",
-                        "Content-Range": f"bytes 0-{video_size - 1}/{video_size}",
+                        "Content-Range": f"bytes {start}-{end - 1}/{video_size}",
                     },
                     method="PUT",
                 )
-                with urllib.request.urlopen(put_req, timeout=60):
+                with urllib.request.urlopen(put_req, timeout=120):
                     pass
 
             return {
@@ -207,7 +217,7 @@ def upload_to_youtube_shorts(
             "categoryId": "22",
         },
         "status": {
-            "privacyStatus": "private",  # Always private until verified
+            "privacyStatus": config.YOUTUBE_PRIVACY,
             "selfDeclaredMadeForKids": False,
         },
     }
@@ -247,7 +257,7 @@ def upload_to_youtube_shorts(
                     "platform_post_id": video_id,
                     "status": "posted",
                     "url": f"https://youtube.com/shorts/{video_id}",
-                    "privacy": "private",
+                    "privacy": config.YOUTUBE_PRIVACY,
                 }
     except Exception as e:
         logger.error(f"YouTube upload failed: {e}")
@@ -275,28 +285,37 @@ def upload_to_instagram_reels(
             "url": f"https://www.instagram.com/reel/{mock_id}/",
         }
 
-    # Meta Graph API Reels Container upload & publish
-    init_url = f"https://graph.facebook.com/v21.0/{ig_user_id}/media"
-    payload = {
-        "media_type": "REELS",
-        "caption": caption[:2200],
-        "access_token": access_token,
+    from src.outreach.google import _http
+
+    # Resumable upload sends the file itself, so Meta does not need a public URL to fetch it from
+    _, _, made = _http("POST", f"{IG_API}/{ig_user_id}/media", token=access_token,
+                       json_body={"media_type": "REELS", "upload_type": "resumable", "caption": caption[:2200]})
+    container_id = made["id"]
+    video = clip_path.read_bytes()
+    _http("POST", made["uri"], data=video, timeout=300,
+          headers={"Authorization": f"OAuth {access_token}", "offset": "0", "file_size": str(len(video))})
+
+    # Instagram processes the video before it can be published; usually under a minute
+    for _ in range(60):
+        _, _, st = _http("GET", f"{IG_API}/{container_id}?fields=status_code,status", token=access_token)
+        code = (st or {}).get("status_code")
+        if code == "FINISHED":
+            break
+        if code in ("ERROR", "EXPIRED"):
+            raise RuntimeError(f"Instagram could not process the video: {(st or {}).get('status')}")
+        time.sleep(5)
+    else:
+        raise RuntimeError("Instagram was still processing the video after 5 minutes.")
+
+    _, _, pub = _http("POST", f"{IG_API}/{ig_user_id}/media_publish", token=access_token,
+                      json_body={"creation_id": container_id})
+    media_id = pub["id"]
+    _, _, info = _http("GET", f"{IG_API}/{media_id}?fields=permalink", token=access_token)
+    return {
+        "platform_post_id": media_id,
+        "status": "posted",
+        "url": (info or {}).get("permalink", ""),
     }
-    # In live environments without public port, resumable upload or cloudflare tunnel is used
-    req = urllib.request.Request(
-        init_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        res = json.loads(resp.read().decode("utf-8"))
-        container_id = res.get("id", "")
-        return {
-            "platform_post_id": container_id,
-            "status": "posted",
-            "url": f"https://www.instagram.com/reel/{container_id}/",
-        }
 
 
 # ── Core Dispatch & Execution ─────────────────────────────────────────────────
@@ -322,12 +341,6 @@ def dispatch_post(post_id: int) -> Dict[str, Any]:
     if not account:
         raise ValueError(f"Account #{account_id} not found.")
 
-    access_token = account.get("access_token")
-    if not access_token:
-        err = "Account is not authenticated or access token is missing."
-        update_post_status(post_id, "failed", error=err)
-        raise ValueError(err)
-
     # 3. Locate clip media file
     clip_path = Path(post["clip_file_path"]) if post.get("clip_file_path") else None
     if not clip_path or not clip_path.exists():
@@ -349,6 +362,7 @@ def dispatch_post(post_id: int) -> Dict[str, Any]:
         full_caption = f"{full_caption}\n\n{credit}"
 
     try:
+        access_token = fresh_token(account)
         if platform == "tiktok":
             res = upload_to_tiktok_inbox(
                 clip_path=clip_path,
@@ -368,6 +382,7 @@ def dispatch_post(post_id: int) -> Dict[str, Any]:
                 clip_path=clip_path,
                 access_token=access_token,
                 caption=full_caption,
+                ig_user_id=account.get("platform_user_id") or "me",
             )
         else:
             raise ValueError(f"Unsupported platform: {platform}")

@@ -3,6 +3,7 @@ Spike: Settings & administration routes.
 Blueprint §10.6, §10.10 & DESIGN.md §10.10.
 """
 
+import urllib.parse
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -24,12 +25,12 @@ from src.db import (
     set_setting,
     list_review_clips,
     list_accounts,
-    create_account,
     delete_account,
 )
 from src.concepts import EMOTIONS
 from src.notify import get_active_webhook_url, verify_discord_webhook
 from src.pov import add_to_bank, delete_from_bank, load_bank
+from src import platform_auth
 from src.web.auth import get_current_user, require_admin
 
 
@@ -72,6 +73,9 @@ async def settings_page(
             "pov_bank": load_bank(),
             "emotions": EMOTIONS,
             "bank_status": request.query_params.get("bank", ""),
+            "connect_options": platform_auth.connect_options(),
+            "accounts_notice": request.query_params.get("notice", ""),
+            "accounts_error": request.query_params.get("error", ""),
         },
     )
 
@@ -96,27 +100,34 @@ async def delete_pov_caption_action(
     return RedirectResponse(url="/settings#pov-captions", status_code=HTTP_303_SEE_OTHER)
 
 
-@router.post("/settings/accounts/add")
-async def add_account_action(
-    platform: str = Form(...),
-    display_name: str = Form(...),
-    access_token: str = Form(...),
-    refresh_token: Optional[str] = Form(None),
-    user: Dict[str, Any] = Depends(require_admin),
-):
-    clean_platform = platform.strip().lower()
-    clean_name = display_name.strip()
-    clean_token = access_token.strip()
-    clean_ref = refresh_token.strip() if refresh_token else None
+def _accounts_back(notice: str = "", error: str = "") -> RedirectResponse:
+    q = urllib.parse.urlencode({k: v[:300] for k, v in (("notice", notice), ("error", error)) if v})
+    return RedirectResponse(url=f"/settings?{q}#accounts", status_code=HTTP_303_SEE_OTHER)
 
-    create_account(
-        platform=clean_platform,
-        display_name=clean_name,
-        access_token=clean_token,
-        refresh_token=clean_ref,
-        connected_by=user.get("id"),
-    )
-    return RedirectResponse(url="/settings", status_code=HTTP_303_SEE_OTHER)
+
+@router.get("/accounts/{platform}/connect")
+async def connect_account(platform: str, user: Dict[str, Any] = Depends(require_admin)):
+    if platform not in platform_auth.PLATFORMS:
+        raise HTTPException(status_code=404, detail="Unknown platform.")
+    if not platform_auth.configured(platform):
+        cid, secret = platform_auth.PLATFORMS[platform]["env"]
+        return _accounts_back(error=f"Set {cid} and {secret} in .env first, then restart Spike.")
+    return RedirectResponse(platform_auth.start_auth(platform, user.get("id")), status_code=HTTP_303_SEE_OTHER)
+
+
+@router.get("/accounts/{platform}/callback")
+async def connect_account_callback(platform: str, state: str = "", code: str = "", error: Optional[str] = None,
+                                   error_description: Optional[str] = None,
+                                   user: Dict[str, Any] = Depends(require_admin)):
+    if platform not in platform_auth.PLATFORMS:
+        raise HTTPException(status_code=404, detail="Unknown platform.")
+    if error or not code:
+        return _accounts_back(error=f"Sign-in was cancelled ({error_description or error or 'no code'}).")
+    try:
+        name = platform_auth.finish_auth(platform, state, code)
+    except platform_auth.PlatformError as e:
+        return _accounts_back(error=str(e))
+    return _accounts_back(notice=f"Connected {platform_auth.PLATFORMS[platform]['label']}: {name}.")
 
 
 @router.post("/settings/accounts/{account_id}/delete")

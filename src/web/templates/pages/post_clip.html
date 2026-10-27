@@ -53,22 +53,10 @@
     <form method="post" action="/clips/{{ clip.id }}/post" class="card">
       <div class="card__header">
         <h2 class="card__title">Publishing details</h2>
-        <p class="card__description">Select account, schedule slot, and caption metadata.</p>
+        <p class="card__description">Set the caption and timing, then pick the accounts to post to.</p>
       </div>
 
       <div class="card__body stack stack--md">
-        <!-- Target Platform Account -->
-        <div class="field">
-          <label class="field__label" for="field-account">Connected account</label>
-          <select name="account_id" id="field-account" class="select" required>
-            {% for a in accounts %}
-              <option value="{{ a.id }}">
-                {{ a.platform | upper }}: {{ a.display_name }}
-              </option>
-            {% endfor %}
-          </select>
-        </div>
-
         <!-- Posting Timing -->
         <div class="field">
           <label class="field__label">Post timing</label>
@@ -105,16 +93,61 @@
 
       <div class="card__footer">
         <a href="/clips/{{ clip.id }}" class="btn btn--secondary">Cancel</a>
-        <button type="submit" id="btn-submit-post" class="btn btn--primary" onclick="this.classList.add('is-loading')">
+        <button type="button" id="btn-submit-post" class="btn btn--primary" onclick="openAccountPicker()">
           {{ ui.icon("paper-plane-tilt", 16) }}
           <span id="btn-post-label">Post now</span>
         </button>
       </div>
+
+      <!-- Account picker: one upload per ticked account -->
+      <dialog id="post-accounts-dialog" class="dialog dialog--md" aria-labelledby="post-accounts-title">
+        <div class="dialog__body stack">
+          <h2 class="dialog__title" id="post-accounts-title">Post to which accounts?</h2>
+          <p class="dialog__text">Tick one or more. Each account gets its own upload.</p>
+          {% for key, label, note in [
+            ("youtube", "YouTube Shorts", "Private until Google audits the app"),
+            ("tiktok", "TikTok", "Lands in the TikTok app's inbox to finish posting"),
+            ("instagram", "Instagram Reels", ""),
+          ] %}
+            {% set group = accounts | selectattr("platform", "equalto", key) | list %}
+            {% if group %}
+              <fieldset class="account-group">
+                <legend class="account-group__label">{{ label }}{% if note %} <span class="account-group__note">· {{ note }}</span>{% endif %}</legend>
+                {% for a in group %}
+                  <label class="account-option">
+                    <input type="checkbox" class="check" name="account_ids" value="{{ a.id }}" onchange="updatePickerCount()">
+                    <span class="account-option__name">{{ a.display_name }}</span>
+                  </label>
+                {% endfor %}
+              </fieldset>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <div class="dialog__footer">
+          <button type="button" class="btn btn--secondary" data-close-dialog>Cancel</button>
+          <button type="submit" id="btn-confirm-post" class="btn btn--primary" disabled onclick="this.classList.add('is-loading')">Pick an account</button>
+        </div>
+      </dialog>
     </form>
   {% endif %}
 </div>
 
 <script>
+function openAccountPicker() {
+  const form = document.getElementById("btn-submit-post").form;
+  if (!form.reportValidity()) return;  // caption is required; say so before the picker opens
+  updatePickerCount();
+  document.getElementById("post-accounts-dialog").showModal();
+}
+
+function updatePickerCount() {
+  const n = document.querySelectorAll('#post-accounts-dialog input[name="account_ids"]:checked').length;
+  const verb = document.getElementById("timing-scheduled").checked ? "Schedule for" : "Post to";
+  const btn = document.getElementById("btn-confirm-post");
+  btn.disabled = n === 0;
+  btn.textContent = n === 0 ? "Pick an account" : `${verb} ${n} account${n === 1 ? "" : "s"}`;
+}
+
 function toggleTiming() {
   const isScheduled = document.getElementById("timing-scheduled").checked;
   const wrap = document.getElementById("field-scheduled-wrap");

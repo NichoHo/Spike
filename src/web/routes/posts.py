@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Request, Depends, Form, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_404_NOT_FOUND, HTTP_403_FORBIDDEN, HTTP_303_SEE_OTHER
 
@@ -125,10 +125,20 @@ async def post_clip_page(
     )
 
 
+def _dispatch_all(post_ids: List[int]) -> None:
+    """Upload one post after another; each failure is saved on its own post row."""
+    for post_id in post_ids:
+        try:
+            dispatch_post(post_id)
+        except Exception:
+            pass
+
+
 @router.post("/clips/{clip_id}/post")
 async def post_clip_action(
     clip_id: int,
-    account_id: int = Form(...),
+    background_tasks: BackgroundTasks,
+    account_ids: List[int] = Form(...),
     timing: str = Form("now"),
     scheduled_for: Optional[str] = Form(None),
     caption: str = Form(""),
@@ -141,8 +151,8 @@ async def post_clip_action(
     except PermissionBlockedError as e:
         raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail=str(e))
 
-    account = get_account(account_id, decrypt=False)
-    if not account:
+    account_ids = list(dict.fromkeys(account_ids))
+    if any(not get_account(a, decrypt=False) for a in account_ids):
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Platform account not found.")
 
     clean_caption = caption.strip()
@@ -151,46 +161,33 @@ async def post_clip_action(
 
     if timing == "now":
         slot_iso = now_utc_iso()
-        post_id = create_post(
-            clip_id=clip_id,
-            account_id=account_id,
-            status="uploading",
-            scheduled_for=slot_iso,
-            caption=clean_caption,
-            hashtags=hashtags_json,
-            posted_by=user.get("id"),
-        )
+    elif scheduled_for and scheduled_for.strip():
         try:
-            dispatch_post(post_id)
-            return RedirectResponse(url="/posts?tab=posted", status_code=HTTP_303_SEE_OTHER)
+            # Parse HTML datetime-local or ISO
+            slot_iso = datetime.fromisoformat(scheduled_for.strip()).astimezone(timezone.utc).isoformat()
         except Exception:
-            # Error recorded in DB post record
-            return RedirectResponse(url="/posts?tab=failed", status_code=HTTP_303_SEE_OTHER)
+            slot_iso = get_next_schedule_slot().astimezone(timezone.utc).isoformat()
     else:
-        # Scheduled post
-        if scheduled_for and scheduled_for.strip():
-            try:
-                # Parse HTML datetime-local or ISO
-                parsed_dt = datetime.fromisoformat(scheduled_for.strip())
-                slot_iso = parsed_dt.astimezone(timezone.utc).isoformat()
-            except Exception:
-                next_slot = get_next_schedule_slot()
-                slot_iso = next_slot.astimezone(timezone.utc).isoformat()
-        else:
-            next_slot = get_next_schedule_slot()
-            slot_iso = next_slot.astimezone(timezone.utc).isoformat()
+        slot_iso = get_next_schedule_slot().astimezone(timezone.utc).isoformat()
 
-        post_id = create_post(
+    post_ids = [
+        create_post(
             clip_id=clip_id,
             account_id=account_id,
-            status="scheduled",
+            status="uploading" if timing == "now" else "scheduled",
             scheduled_for=slot_iso,
             caption=clean_caption,
             hashtags=hashtags_json,
             posted_by=user.get("id"),
         )
-        log_event("info", f"Clip #{clip_id} scheduled for post #{post_id} at {slot_iso} by {user['login']}")
-        return RedirectResponse(url="/posts?tab=scheduled", status_code=HTTP_303_SEE_OTHER)
+        for account_id in account_ids
+    ]
+    if timing == "now":
+        # Uploads run after the response, so several accounts (and Instagram's processing wait) never hold the page
+        background_tasks.add_task(_dispatch_all, post_ids)
+    else:
+        log_event("info", f"Clip #{clip_id} scheduled to {len(post_ids)} account(s) at {slot_iso} by {user['login']}")
+    return RedirectResponse(url="/posts?tab=scheduled", status_code=HTTP_303_SEE_OTHER)
 
 
 @router.post("/posts/{post_id}/retry")

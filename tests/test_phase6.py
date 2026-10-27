@@ -207,7 +207,7 @@ def test_permission_none_permanently_blocked(dummy_media_file):
     resp = client.post(
         f"/clips/{clip_id}/post",
         data={
-            "account_id": acc_id,
+            "account_ids": [acc_id],
             "timing": "now",
             "caption": "Forbidden clip",
         },
@@ -408,22 +408,12 @@ def test_web_routes_for_posts_and_accounts(dummy_media_file):
     client = TestClient(app)
     headers = {"Tailscale-User-Login": "admin@local"}
 
-    # 1. Accounts in Settings
-    add_resp = client.post(
-        "/settings/accounts/add",
-        data={
-            "platform": "youtube",
-            "display_name": "@spike_official",
-            "access_token": "mock_token_123",
-        },
-        headers=headers,
-        follow_redirects=True,
-    )
-    assert add_resp.status_code == 200
-    assert "@spike_official" in add_resp.text
-
-    accounts = list_accounts(decrypt=False)
-    created_acc = next(a for a in accounts if a["display_name"] == "@spike_official")
+    # 1. Accounts in Settings (two on one platform)
+    acc_ids = [create_account(platform="youtube", display_name=n, access_token="mock_token_123")
+               for n in ("@spike_official", "@spike_second")]
+    settings_resp = client.get("/settings", headers=headers)
+    assert "@spike_official" in settings_resp.text and "@spike_second" in settings_resp.text
+    created_acc = {"id": acc_ids[0]}
 
     # 2. Posts monitoring screen
     posts_resp = client.get("/posts?tab=scheduled", headers=headers)
@@ -439,7 +429,7 @@ def test_web_routes_for_posts_and_accounts(dummy_media_file):
     post_submit_resp = client.post(
         f"/clips/{clip_id}/post",
         data={
-            "account_id": created_acc["id"],
+            "account_ids": acc_ids,
             "timing": "now",
             "caption": "Published via Spike Web UI",
             "hashtags": "#Spike #Shorts",
@@ -448,7 +438,11 @@ def test_web_routes_for_posts_and_accounts(dummy_media_file):
         follow_redirects=True,
     )
     assert post_submit_resp.status_code == 200
-    assert "Published via Spike Web UI" in post_submit_resp.text
+    # One upload per ticked account, run in the background after the redirect
+    posted = [p for p in list_posts() if p["clip_id"] == clip_id]
+    assert sorted(p["account_id"] for p in posted) == sorted(acc_ids)
+    assert all(p["status"] == "posted" for p in posted)
+    assert "Published via Spike Web UI" in client.get("/posts?tab=posted", headers=headers).text
 
     # 4. Delete account
     del_resp = client.post(
@@ -457,3 +451,33 @@ def test_web_routes_for_posts_and_accounts(dummy_media_file):
         follow_redirects=True,
     )
     assert del_resp.status_code == 200
+
+
+# ── Test 8: Account sign-in tokens ─────────────────────────────────────────────
+
+def test_signed_in_accounts_refresh_and_dedupe(monkeypatch):
+    """A near-expired token is refreshed and saved; signing in again as the same user updates, never duplicates."""
+    from src import platform_auth
+    from src.db import save_connected_account, get_account
+
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
+    acc_id = save_connected_account("tiktok", "open123", "Creator", "old_access", "refresh1", soon)
+    assert save_connected_account("tiktok", "open123", "Creator Renamed", "old_access", None, soon) == acc_id
+    assert get_account(acc_id)["refresh_token"] == "refresh1"  # kept when the sign-in sends none
+
+    calls = []
+
+    def fake_http(method, url, **kw):
+        calls.append(url)
+        return 200, {}, {"access_token": "new_access", "refresh_token": "refresh2", "expires_in": 86400}
+
+    monkeypatch.setattr(platform_auth, "_http", fake_http)
+    monkeypatch.setattr(platform_auth.config, "TIKTOK_CLIENT_KEY", "k")
+    monkeypatch.setattr(platform_auth.config, "TIKTOK_CLIENT_SECRET", "s")
+    assert platform_auth.fresh_token(get_account(acc_id)) == "new_access"
+    saved = get_account(acc_id)
+    assert (saved["access_token"], saved["refresh_token"], saved["display_name"]) == ("new_access", "refresh2", "Creator Renamed")
+
+    # Still valid: no network call
+    calls.clear()
+    assert platform_auth.fresh_token(saved) == "new_access" and not calls

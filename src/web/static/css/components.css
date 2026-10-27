@@ -371,6 +371,21 @@ input[type="checkbox"].switch:checked::after { transform: translateX(12px); back
 .alert--warning svg { color: var(--color-warning-text); }
 .alert--danger svg { color: var(--color-danger-text); }
 .alert--info svg { color: var(--color-accent-text); }
+.alert--success svg { color: var(--color-success-text); }
+
+/* Platform accounts: connect dialog rows and the post-to picker */
+.connect-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) 0; border-top: 1px solid var(--color-border); }
+.connect-row__text { min-width: 0; }
+.connect-row__name { font-weight: 500; }
+.connect-row__help { font-size: 13px; color: var(--color-text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.account-group { border: 0; padding: 0; margin: 0; min-width: 0; }
+.account-group__label { padding: 0; margin-bottom: var(--space-2); font-size: 13px; font-weight: 500; color: var(--color-text); }
+.account-group__note { font-weight: 400; color: var(--color-text-muted); }
+.account-option { display: flex; align-items: center; gap: var(--space-3); min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); cursor: pointer; transition: border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out); }
+.account-option + .account-option { margin-top: var(--space-2); }
+.account-option:hover { border-color: var(--color-border-hover); }
+.account-option:has(.check:checked) { border-color: var(--color-accent); background: var(--color-accent-subtle); }
+.account-option__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Toasts (DESIGN.md §9.13) */
 .toast-region {

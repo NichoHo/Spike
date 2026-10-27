@@ -50,6 +50,16 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 # Google OAuth client (Web application type) for Outreach Gmail + Drive. Redirect URI: <SPIKE_PUBLIC_URL>/outreach/google/callback
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
 GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+# Developer apps for the accounts clips are posted to. Redirect URI for each: <SPIKE_PUBLIC_URL>/accounts/<platform>/callback
+# YouTube quota is per Google Cloud project: a client in its own project keeps uploads off Outreach's quota.
+YOUTUBE_UPLOAD_CLIENT_ID = os.environ.get("YOUTUBE_UPLOAD_CLIENT_ID", "")
+YOUTUBE_UPLOAD_CLIENT_SECRET = os.environ.get("YOUTUBE_UPLOAD_CLIENT_SECRET", "")
+# Google locks uploads from an unaudited app to private; set to public once the audit passes
+YOUTUBE_PRIVACY = os.environ.get("SPIKE_YOUTUBE_PRIVACY", "private")
+TIKTOK_CLIENT_KEY = os.environ.get("TIKTOK_CLIENT_KEY", "")
+TIKTOK_CLIENT_SECRET = os.environ.get("TIKTOK_CLIENT_SECRET", "")
+INSTAGRAM_APP_ID = os.environ.get("INSTAGRAM_APP_ID", "")
+INSTAGRAM_APP_SECRET = os.environ.get("INSTAGRAM_APP_SECRET", "")
 
 # Web & Security settings (Blueprint §4, §8, §13)
 WEB_HOST = os.environ.get("SPIKE_HOST", "127.0.0.1")

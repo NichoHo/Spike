@@ -84,11 +84,22 @@
   </div>
 
   <!-- Connected Accounts Card (Blueprint §8, §9) -->
-  <div class="card">
+  {% if accounts_error %}
+    <div class="alert alert--danger" role="alert">
+      {{ ui.icon("warning-circle", 20) }}
+      <div><div class="alert__title">Account not connected</div><div class="alert__body">{{ accounts_error }}</div></div>
+    </div>
+  {% elif accounts_notice %}
+    <div class="alert alert--success" role="status">
+      {{ ui.icon("check-circle", 20) }}
+      <div><div class="alert__body">{{ accounts_notice }}</div></div>
+    </div>
+  {% endif %}
+  <div class="card" id="accounts">
     <div class="card__header row row--between">
       <div>
         <h2 class="card__title">Connected accounts</h2>
-        <p class="card__description">Platform targets for short-form video publishing. Tokens are encrypted at rest.</p>
+        <p class="card__description">Where clips get posted. Connect as many accounts per platform as you like. Tokens are encrypted at rest.</p>
       </div>
       <button type="button" class="btn btn--secondary btn--sm" onclick="document.getElementById('connect-account-dialog').showModal()">
         {{ ui.icon("plus", 14) }}
@@ -234,38 +245,31 @@
 </dialog>
 
 <!-- Connect Account Dialog (Blueprint §8, §9) -->
-<dialog id="connect-account-dialog" class="dialog">
-  <form method="post" action="/settings/accounts/add">
-    <div class="dialog__body stack">
-      <h2 class="dialog__title">Connect platform account</h2>
-      <p class="dialog__text">OAuth tokens are stored encrypted at rest using Fernet.</p>
-      <div class="field">
-        <label class="field__label" for="add-platform">Platform</label>
-        <select name="platform" id="add-platform" class="select" required>
-          <option value="tiktok">TikTok (Upload to inbox)</option>
-          <option value="youtube">YouTube Shorts (Private upload)</option>
-          <option value="instagram">Instagram Reels</option>
-        </select>
+<dialog id="connect-account-dialog" class="dialog dialog--md" aria-labelledby="connect-account-title">
+  <div class="dialog__body stack">
+    <h2 class="dialog__title" id="connect-account-title">Connect an account</h2>
+    <p class="dialog__text">You sign in on the platform's own page. Sign in again as another account to add more than one.</p>
+    {% for p in connect_options %}
+      <div class="connect-row">
+        <div class="connect-row__text">
+          <div class="connect-row__name">{{ p.label }}</div>
+          {% if p.configured %}
+            <div class="connect-row__help">Redirect URI: <code>{{ p.redirect_uri }}</code></div>
+          {% else %}
+            <div class="connect-row__help">Set <code>{{ p.env[0] }}</code> and <code>{{ p.env[1] }}</code> in .env, then restart Spike.</div>
+          {% endif %}
+        </div>
+        {% if p.configured %}
+          <a href="/accounts/{{ p.key }}/connect" class="btn btn--primary btn--sm">Sign in</a>
+        {% else %}
+          <button type="button" class="btn btn--secondary btn--sm" disabled>Not set up</button>
+        {% endif %}
       </div>
-      <div class="field">
-        <label class="field__label" for="add-display-name">Channel or account handle</label>
-        <input type="text" name="display_name" id="add-display-name" class="input" placeholder="@channel" required>
-      </div>
-      <div class="field">
-        <label class="field__label" for="add-access-token">Access token</label>
-        <input type="password" name="access_token" id="add-access-token" class="input input--mono" placeholder="Bearer / OAuth token or mock_token" required>
-        <p class="field__help">In testing/sandbox environments, use a <code>mock_</code> prefix token.</p>
-      </div>
-      <div class="field">
-        <label class="field__label" for="add-refresh-token">Refresh token (optional)</label>
-        <input type="password" name="refresh_token" id="add-refresh-token" class="input input--mono" placeholder="Optional OAuth refresh token">
-      </div>
-    </div>
-    <div class="dialog__footer">
-      <button type="button" class="btn btn--secondary" data-close-dialog>Cancel</button>
-      <button type="submit" class="btn btn--primary">Connect account</button>
-    </div>
-  </form>
+    {% endfor %}
+  </div>
+  <div class="dialog__footer">
+    <button type="button" class="btn btn--secondary" data-close-dialog>Close</button>
+  </div>
 </dialog>
 
 

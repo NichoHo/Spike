@@ -260,6 +260,7 @@ def init_db():
             "ALTER TABLE candidates ADD COLUMN segments TEXT",  # JSON [[start_s, end_s]] of a story clip (stream seconds)
             "ALTER TABLE candidates ADD COLUMN zooms TEXT",  # JSON [{t, scale, hold_s}]; t is clip time for stories
             "ALTER TABLE clips ADD COLUMN zooms TEXT",
+            "ALTER TABLE accounts ADD COLUMN platform_user_id TEXT",  # channel id / TikTok open_id / Instagram user id
             "ALTER TABLE clips ADD COLUMN silence_trim_s REAL",  # pause length that silence trim cuts; NULL is SILENCE_TRIM_S  # JSON [{t, scale, hold_s}]; an empty list means no zoom
             "ALTER TABLE candidates ADD COLUMN humor_type TEXT",
             "ALTER TABLE candidates ADD COLUMN why_funny TEXT",
@@ -1143,6 +1144,49 @@ def create_account(
             (platform, display_name, acc_enc, ref_enc, expires_at, connected_by, now)
         )
         return cur.fetchone()[0]
+
+
+def save_connected_account(
+    platform: str,
+    platform_user_id: str,
+    display_name: str,
+    access_token: str,
+    refresh_token: Optional[str],
+    expires_at: str,
+    connected_by: Optional[int] = None,
+) -> int:
+    """Save an account after sign-in. Signing in again as the same platform user refreshes its tokens instead of adding a copy."""
+    with get_connection() as conn:
+        row = conn.execute("SELECT id FROM accounts WHERE platform = ? AND platform_user_id = ?",
+                           (platform, platform_user_id)).fetchone()
+    if row:
+        update_account_tokens(row["id"], access_token, refresh_token, expires_at, display_name)
+        return row["id"]
+    acc_id = create_account(platform, display_name, access_token, refresh_token, expires_at, connected_by)
+    with get_connection() as conn:
+        conn.execute("UPDATE accounts SET platform_user_id = ? WHERE id = ?", (platform_user_id, acc_id))
+    return acc_id
+
+
+def update_account_tokens(
+    account_id: int,
+    access_token: str,
+    refresh_token: Optional[str] = None,
+    expires_at: Optional[str] = None,
+    display_name: Optional[str] = None,
+) -> None:
+    """Store refreshed tokens. A missing refresh token keeps the saved one (Google only sends it at sign-in)."""
+    from src.security import encrypt_token
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE accounts SET access_token_enc = ?, refresh_token_enc = COALESCE(?, refresh_token_enc),
+                expires_at = ?, display_name = COALESCE(?, display_name)
+            WHERE id = ?
+            """,
+            (encrypt_token(access_token), encrypt_token(refresh_token) if refresh_token else None,
+             expires_at, display_name, account_id),
+        )
 
 
 def get_account(account_id: int, decrypt: bool = True) -> Optional[Dict[str, Any]]:
