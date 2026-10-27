@@ -114,9 +114,10 @@ def run_stage3_chat(
     meta: Dict[str, Any],
     source_input: str,
     chat_file_override: Optional[Path] = None,
+    limit_s: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Run Stage 3: fetch_chat.
+    Run Stage 3: fetch_chat. limit_s: only the first N seconds of chat are downloaded (eval slices).
     Returns chat replay dict with 'comments' list, or None if skipped/unavailable.
     Resumes if chat.json already exists.
     """
@@ -163,6 +164,8 @@ def run_stage3_chat(
         "-o", str(chat_path),
         "--collision", "Overwrite"
     ]
+    if limit_s:
+        cmd += ["-e", str(int(limit_s))]
 
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)

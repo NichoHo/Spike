@@ -197,6 +197,10 @@ def run_pipeline(
                 video_id, video_dir, meta, transcript, signals_data, crowd_data, chat_data=chat_data, profile_ctx=profile_ctx
             )
 
+        if source_settings and source_settings.get("stop_after") == "moments":  # eval runs score the picks, they need no clips
+            finish_video(video_id, status="ready")
+            return {"video_id": video_id, "candidates": candidates}
+
         if not candidates:
             print("  [pipeline] No candidate moments met selection criteria.")
             finish_video(video_id, status="ready")

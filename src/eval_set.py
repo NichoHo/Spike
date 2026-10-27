@@ -161,7 +161,7 @@ def build() -> None:
                 continue
             labels.write_text(json.dumps(clips), encoding="utf-8")
         url = f"https://www.twitch.tv/videos/{v['vod']}"
-        run_stage3_chat(d, {"webpage_url": url}, url)
+        run_stage3_chat(d, {"webpage_url": url}, url, limit_s=v.get("slice_s"))
         n = len(label_moments(json.loads(labels.read_text(encoding="utf-8")), v.get("slice_s")))
         print(f"  {v['vod']} ({v['category']}): {n} labelled moments in the slice")
 
@@ -184,7 +184,7 @@ def run(only: Optional[str] = None) -> None:
     for i, v in enumerate(todo):
         chat = EVAL_DIR / v["vod"] / "chat.json"
         vid = register_video("url", f"https://www.twitch.tv/videos/{v['vod']}", priority=len(todo) - i, settings={
-            "max_process_s": v.get("slice_s"), "holdout_clips": True,
+            "max_process_s": v.get("slice_s"), "holdout_clips": True, "stop_after": "moments",
             **({"chat_file": str(chat)} if chat.exists() else {}),
         })
         print(f"  queued {v['vod']} ({v['category']}) as video {vid}")
