@@ -103,6 +103,21 @@ _PROFANITY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Bleeped in the audio. Slurs only: platforms remove clips for hate speech but only demonetize for swearing.
+_SLUR_LIST = frozenset({
+    "nigga", "niggas", "nigger", "niggers", "faggot", "faggots", "fag", "fags",
+    "tranny", "trannies", "kike", "kikes", "spic", "spics", "retard", "retards", "retarded",
+})
+
+
+def slur_intervals(words: List[Dict[str, Any]], clip_start: float, pad: float = 0.06) -> List[tuple]:
+    """(start, end) spans on the output timeline, one per slur word. The pad covers Whisper's loose word timing."""
+    return [
+        (max(0.0, float(w["start"]) - clip_start - pad), float(w["end"]) - clip_start + pad)
+        for w in words
+        if re.sub(r"[^a-z]", "", str(w.get("word", "")).lower()) in _SLUR_LIST
+    ]
+
 
 def _ts_to_ass(t_s: float) -> str:
     """Convert float seconds to ASS timestamp H:MM:SS.cc"""

@@ -77,7 +77,7 @@ from src.pipeline.stage9a_face_track import (
     speaker_at,
     track_faces,
 )
-from src.pipeline.stage9b_captions import _mask_profanity, generate_ass, write_ass_file
+from src.pipeline.stage9b_captions import _mask_profanity, generate_ass, slur_intervals, write_ass_file
 from src.pipeline.title_card import render_title_card, strip_emoji
 
 logger = logging.getLogger("spike.render")
@@ -551,6 +551,7 @@ def build_vertical_filtergraph(
     layout_segments: Optional[List[Tuple[float, str]]] = None,
     letterbox_style: str = "blur",
     title_input: Optional[int] = None,
+    bleeps: Optional[List[Tuple[float, float]]] = None,
 ) -> str:
     """
     Build complete native FFmpeg filtergraph:
@@ -633,11 +634,22 @@ def build_vertical_filtergraph(
     else:
         filters.append(f"[v_zoomed]ass={ass_rel}[vout]")
 
-    # 5. Audio Processing & Ducking
+    # 5. Bleep slurs: mute the word and lay a generated 1 kHz sine over it (synthesized, so no licensing to track)
+    a_in = "a_trimmed"
+    if bleeps:
+        gate = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in bleeps)
+        filters += [
+            f"[a_trimmed]volume=enable='{gate}':volume=0[a_muted]",
+            f"aevalsrc='0.3*sin(2*PI*1000*t)*min(1,{gate})':s=48000:d={effective_dur:.3f}[a_tone]",
+            "[a_muted][a_tone]amix=inputs=2:duration=first:normalize=0[a_bleeped]",
+        ]
+        a_in = "a_bleeped"
+
+    # 6. Audio Processing & Ducking
     if has_music:
         base_vol = 10.0 ** (MUSIC_UNDER_DB / 20.0)  # ~0.0794 (-22 dB)
         filters.append(f"[1:a]atrim=start=0:end={effective_dur:.3f},asetpts=PTS-STARTPTS,volume={base_vol:.4f}[bgm_base]")
-        filters.append(f"[a_trimmed]asplit=2[sp_main][sp_key]")
+        filters.append(f"[{a_in}]asplit=2[sp_main][sp_key]")
         filters.append(
             f"[bgm_base][sp_key]sidechaincompress=threshold={MUSIC_DUCK_THRESHOLD}:ratio={MUSIC_DUCK_RATIO}:"
             f"attack={MUSIC_DUCK_ATTACK_MS}:release={MUSIC_DUCK_RELEASE_MS}:detection=rms[bgm_duck]"
@@ -645,7 +657,7 @@ def build_vertical_filtergraph(
         filters.append(f"[sp_main][bgm_duck]amix=inputs=2:duration=first:dropout_transition=2[a_mixed]")
         filters.append(f"[a_mixed]loudnorm=I={OUTPUT_LOUDNESS_TARGET}:TP={OUTPUT_LOUDNESS_PEAK}:LRA=11,aresample=48000[aout]")
     else:
-        filters.append(f"[a_trimmed]loudnorm=I={OUTPUT_LOUDNESS_TARGET}:TP={OUTPUT_LOUDNESS_PEAK}:LRA=11,aresample=48000[aout]")
+        filters.append(f"[{a_in}]loudnorm=I={OUTPUT_LOUDNESS_TARGET}:TP={OUTPUT_LOUDNESS_PEAK}:LRA=11,aresample=48000[aout]")
 
     return ";".join(filters)
 
@@ -1045,6 +1057,7 @@ def render_single_vertical_clip(
         layout_segments=segments,
         letterbox_style=letterbox_style,
         title_input=(2 if has_music else 1) if title_png else None,
+        bleeps=[(a, b) for a, b in slur_intervals(retimed_words, clip_start) if b > 0 and a < effective_dur],
     )
 
     # 6. Execute FFmpeg Render Command (No Shell)
