@@ -15,6 +15,7 @@ from fastapi import APIRouter, Request, Depends, Form, UploadFile, File, HTTPExc
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
+from src.pipeline.stage1_anime import sanitize_anime_opts
 from src.config import (
     UPLOADS_DIR,
     MAX_UPLOAD_SIZE_BYTES,
@@ -105,6 +106,33 @@ def parse_presets(layout: str, captions: Optional[str], music: str, cut_pauses: 
     }
 
 
+def build_anime_settings(audio: str, anilist_id: str, episode: str, hardsubbed: Optional[str], title_match: Optional[str],
+                         youtube_url: str, youtube_offset: str) -> Dict[str, Any]:
+    """The job's `anime` settings from the New page, or a 400 that names the bad field. The runner validates again."""
+    def bad(field: str) -> HTTPException:
+        return HTTPException(status_code=HTTP_400_BAD_REQUEST, detail=f"Invalid anime option: {field}.")
+
+    opts: Dict[str, Any] = {"audio_kind": audio, "hardsubbed": hardsubbed not in (None, "off"), "title_match": title_match not in (None, "off")}
+    for key, raw, name in (("anilist_id", anilist_id, "AniList ID"), ("episode", episode, "episode")):
+        if raw.strip():
+            if not raw.strip().isdigit():
+                raise bad(name)
+            opts[key] = int(raw)
+    if youtube_offset.strip():
+        try:
+            opts["youtube_offset_s"] = float(youtube_offset)
+        except ValueError:
+            raise bad("time offset")
+    if youtube_url.strip():
+        opts["youtube_url"] = youtube_url.strip()
+    clean = sanitize_anime_opts(opts)
+    for key, name in (("audio_kind", "audio"), ("anilist_id", "AniList ID"), ("episode", "episode"),
+                      ("youtube_url", "YouTube link (use an https youtube.com or youtu.be link)"), ("youtube_offset_s", "time offset")):
+        if key in opts and key not in clean:
+            raise bad(name)
+    return clean
+
+
 _VOD_TTL = 300
 _vod_cache: Dict[int, tuple] = {}
 
@@ -148,6 +176,14 @@ async def submit_new_job(
     ai_cuts: Optional[str] = Form(None),  # switch: "on" when on
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     caption_style: str = Form("bold_pop"),
+    kind: str = Form("stream"),  # "stream" or "anime"; only the Paste URL and Upload tabs send it
+    anime_audio: str = Form("sub"),
+    anime_id: str = Form(""),
+    anime_episode: str = Form(""),
+    anime_hardsubbed: Optional[str] = Form(None),
+    anime_title_match: Optional[str] = Form(None),
+    anime_youtube_url: str = Form(""),
+    anime_youtube_offset: str = Form(""),
     file: Optional[UploadFile] = File(None),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -157,7 +193,14 @@ async def submit_new_job(
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Finish setup first: " + ", ".join(i["title"] for i in todo) + ".")
     if not (target_clips.strip() == "" or target_clips.strip().isdigit()):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid processing option.")
-    settings = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style, ai_cuts) if layout else {}
+    if kind not in ("stream", "anime"):
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid video type.")
+    anime = kind == "anime" and tab in ("url", "upload")
+    # Anime jobs ignore the stream render presets: the runner applies the anime defaults (letterbox, no added music, no pause cuts)
+    settings = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style, ai_cuts) if layout and not anime else {}
+    if anime:
+        settings["anime"] = build_anime_settings(anime_audio, anime_id, anime_episode, anime_hardsubbed, anime_title_match,
+                                                 anime_youtube_url, anime_youtube_offset)
     if target_clips.strip():
         settings["target_clips"] = max(1, min(MAX_TARGET_CLIPS, int(target_clips)))
 
