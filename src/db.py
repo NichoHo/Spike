@@ -695,7 +695,7 @@ def get_clip_with_details(clip_id: int) -> Optional[sqlite3.Row]:
                    cand.title as cand_title, cand.hook_text as cand_hook,
                    cand.punchline, cand.reason, cand.final_score, cand.signal_score,
                    cand.llm_score, cand.mood, cand.chat_mood, cand.features,
-                   cand.needs_context, cand.post_caption as cand_caption,
+                   cand.needs_context, cand.post_caption as cand_caption, cand.hashtags as cand_hashtags,
                    cand.start_s as orig_start_s, cand.end_s as orig_end_s, cand.payoff_t, cand.segments AS cand_segments,
                    v.id as video_id, v.title as video_title, v.url as video_url,
                    s.id as source_id, s.display_name as source_name, s.kind as source_kind,
@@ -1263,6 +1263,7 @@ def update_post_status(
     platform_post_id: Optional[str] = None,
     url: Optional[str] = None,
     error: Optional[str] = None,
+    caption: Optional[str] = None,
 ):
     now = now_utc_iso()
     with get_connection() as conn:
@@ -1270,11 +1271,11 @@ def update_post_status(
             """
             UPDATE posts
             SET status = ?, platform_post_id = COALESCE(?, platform_post_id),
-                url = COALESCE(?, url), error = ?,
+                url = COALESCE(?, url), error = ?, caption = COALESCE(?, caption),
                 posted_at = CASE WHEN ? IN ('posted', 'sent_to_inbox') THEN ? ELSE posted_at END
             WHERE id = ?
             """,
-            (status, platform_post_id, url, error, status, now, post_id)
+            (status, platform_post_id, url, error, caption, status, now, post_id)
         )
 
 

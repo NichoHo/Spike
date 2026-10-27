@@ -77,6 +77,37 @@ def verify_clip_posting_permission(clip_id: int) -> Dict[str, Any]:
     return clip
 
 
+# Hashtags per platform. Instagram allows 5; YouTube shows the first 3 above the title.
+HASHTAG_CAP = {"tiktok": 5, "instagram": 5, "youtube": 3}
+
+
+def parse_tags(raw: Any) -> List[str]:
+    """Tags from a JSON list column; anything else (empty, a features dict, bad JSON) is no tags."""
+    try:
+        tags = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return []
+    return [str(t).lstrip("#") for t in tags if str(t).strip("# ")] if isinstance(tags, list) else []
+
+
+def platform_caption(caption: str, tags: List[str], platform: str, credit: str = "") -> str:
+    """Caption plus the first tags up to the platform's cap. Tags are ordered most specific first.
+    #tags already in the caption count toward the cap and are not repeated."""
+    have = {t.lower() for t in re.findall(r"#(\w+)", caption)}
+    room = HASHTAG_CAP.get(platform, 5) - len(have)
+    extra: List[str] = []
+    for t in tags:
+        if len(extra) >= room:
+            break
+        if t.lower() not in have:
+            have.add(t.lower())
+            extra.append(t)
+    text = caption + (" " + " ".join(f"#{t}" for t in extra) if extra else "")
+    if credit and credit not in text:
+        text = f"{text}\n\n{credit}"
+    return text
+
+
 def get_next_schedule_slot(base_dt: Optional[datetime] = None) -> datetime:
     """
     Calculate next scheduled slot (Blueprint §8.4: default slots at 12:00 and 19:00 local).
@@ -192,10 +223,8 @@ def upload_to_youtube_shorts(
     if not clip_path.exists():
         raise FileNotFoundError(f"Clip file not found: {clip_path}")
 
-    # Ensure title contains #Shorts for vertical recognition
+    # No #Shorts: YouTube files vertical videos of 3 minutes or less as Shorts on its own
     clean_title = title.strip()
-    if "#Shorts" not in clean_title and "#shorts" not in clean_title:
-        clean_title = (clean_title[:85] + " #Shorts").strip()
 
     # Simulated / Test Mode
     if access_token.startswith("mock_") or access_token.startswith("test_") or "mock" in access_token:
@@ -213,7 +242,7 @@ def upload_to_youtube_shorts(
         "snippet": {
             "title": clean_title[:100],
             "description": description[:5000],
-            "tags": tags or ["Shorts", "Spike"],
+            "tags": tags or [],
             "categoryId": "22",
         },
         "status": {
@@ -353,13 +382,9 @@ def dispatch_post(post_id: int) -> Dict[str, Any]:
 
     platform = account["platform"]
     caption = post.get("caption") or post.get("cand_caption") or post.get("clip_title") or "Short video"
-    hashtags = post.get("hashtags") or post.get("cand_hashtags") or "[]"
-    tag_list = json.loads(hashtags) if isinstance(hashtags, str) and hashtags.startswith("[") else []
-    full_caption = caption + " " + " ".join(f"#{t.lstrip('#')}" for t in tag_list) if tag_list else caption
+    tag_list = parse_tags(post.get("hashtags")) or parse_tags(post.get("cand_hashtags"))
     # CC BY music must be credited on every post that uses it
-    credit = music_credit(post.get("clip_music_track"))
-    if credit and credit not in full_caption:
-        full_caption = f"{full_caption}\n\n{credit}"
+    full_caption = platform_caption(caption, tag_list, platform, music_credit(post.get("clip_music_track")))
 
     try:
         access_token = fresh_token(account)
@@ -396,6 +421,8 @@ def dispatch_post(post_id: int) -> Dict[str, Any]:
             status=final_status,
             platform_post_id=platform_post_id,
             url=post_url,
+            # The TikTok inbox API takes no caption: keep the text so the Posts page can copy it for the app
+            caption=full_caption if platform == "tiktok" else None,
         )
 
         log_event(
@@ -476,7 +503,7 @@ def evaluate_clip_autopost(
             status="scheduled",
             scheduled_for=slot_iso,
             caption=clip.get("cand_caption") or clip.get("cand_title"),
-            hashtags=clip.get("features"),
+            hashtags=clip.get("cand_hashtags"),
         )
         scheduled_post_ids.append(post_id)
         log_event("info", f"Auto-post scheduled clip #{clip_id} to {acc['platform']} for {slot_iso}")

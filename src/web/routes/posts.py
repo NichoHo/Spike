@@ -27,6 +27,7 @@ from src.posting import (
     verify_clip_posting_permission,
     dispatch_post,
     get_next_schedule_slot,
+    parse_tags,
     PermissionBlockedError,
 )
 from src.music import music_credit
@@ -99,13 +100,7 @@ async def post_clip_page(
     credit = music_credit(clip.get("music_track"))
     if credit:
         caption = f"{caption}\n\n{credit}"  # CC BY music credit; keep it when editing
-    features_json = clip.get("features") or "[]"
-    tags = []
-    if isinstance(features_json, str) and features_json.startswith("["):
-        try:
-            tags = json.loads(features_json)
-        except Exception:
-            tags = []
+    tags = parse_tags(clip.get("cand_hashtags"))
 
     return templates.TemplateResponse(
         request=request,
@@ -120,7 +115,7 @@ async def post_clip_page(
             "accounts": accounts,
             "next_slot": next_slot.strftime("%Y-%m-%d %H:%M"),
             "prefilled_caption": caption,
-            "prefilled_tags": " ".join(f"#{t.lstrip('#')}" for t in tags) if tags else "#Shorts",
+            "prefilled_tags": " ".join(f"#{t}" for t in tags),
         },
     )
 

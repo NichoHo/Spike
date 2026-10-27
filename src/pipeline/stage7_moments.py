@@ -635,6 +635,20 @@ def apply_baseline_cap(score: int, humor_type: str, contrast: bool, baseline: Li
     return score
 
 
+GENERIC_TAGS = {"fyp", "foryou", "foryoupage", "viral", "trending", "explore", "shorts", "reels", "clips"}
+
+
+def stream_hashtags(streamer: str, judged: List[str], twitch: bool = False) -> List[str]:
+    """Up to 6 tags, most specific first: the streamer, the judge's game and topic tags, then #twitchclips.
+    Posting cuts the list from the end per platform, so the broad tag is the first to go."""
+    tags: List[str] = []
+    for t in [streamer, *judged, "twitchclips" if twitch else ""]:
+        t = re.sub(r"[^a-z0-9]", "", str(t).lower())
+        if t and t not in tags and t not in GENERIC_TAGS:
+            tags.append(t)
+    return tags[:6]
+
+
 def call_llm_judge(
     formatted_lines: List[str],
     comments_excerpt: str,
@@ -714,6 +728,8 @@ Numbered transcript with audio markers:
 {transcript_text}
 </untrusted_transcript>
 
+hashtags: 2 to 4 tags without #, most specific first: the game or show, then the topic. Not the streamer's name, and no generic tags like fyp, viral or trending.
+
 Respond with JSON in exactly this field order:
 {{
   "keep": true,
@@ -729,8 +745,8 @@ Respond with JSON in exactly this field order:
   "punchline": "exact quote of punchline",
   "title": "Engaging short title",
   "hook_text": "3 to 8 word funny summary of the clip",
-  "post_caption": "Caption with context #tag",
-  "hashtags": ["gaming", "clips"],
+  "post_caption": "Caption with context, no hashtags",
+  "hashtags": ["minecraft", "speedrun"],
   "reason": "One line on the score.",
   "mood": "laugh",
   "pace": "tight",
@@ -1203,7 +1219,7 @@ def run_stage7_moments(
             "title": fix_streamer(judge_res.title, streamer),
             "hook_text": fix_streamer(judge_res.hook_text, streamer),
             "post_caption": fix_streamer(judge_res.post_caption, streamer),
-            "hashtags": judge_res.hashtags,
+            "hashtags": stream_hashtags(streamer, judge_res.hashtags, "twitch.tv" in (meta.get("webpage_url") or "")),
             "reason": fix_streamer(judge_res.why_funny or judge_res.reason, streamer),
             "why_funny": fix_streamer(judge_res.why_funny, streamer),
             "humor_type": judge_res.humor_type,

@@ -127,6 +127,10 @@
                     <span>Cancel</span>
                   </button>
                 </form>
+              {% elif p.status == 'sent_to_inbox' and p.caption %}
+                <button type="button" class="btn btn--ghost btn--sm" data-tooltip="TikTok drafts arrive without a caption. Paste this when you finish the post in the app." onclick='navigator.clipboard.writeText({{ p.caption|tojson }}); showToast("Caption copied");'>
+                  <span>Copy caption</span>
+                </button>
               {% else %}
                 <span class="muted">-</span>
               {% endif %}
