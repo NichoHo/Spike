@@ -148,13 +148,13 @@ function initShortcuts() {
       const nextLink = document.getElementById("nav-next-clip");
       if (nextLink) {
         e.preventDefault();
-        window.location.href = nextLink.href;
+        nextLink.click();  // a click, so the clip page can ask about unsaved edits first
       }
     } else if (key === "k") {
       const prevLink = document.getElementById("nav-prev-clip");
       if (prevLink) {
         e.preventDefault();
-        window.location.href = prevLink.href;
+        prevLink.click();
       }
     }
   });

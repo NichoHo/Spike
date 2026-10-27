@@ -136,6 +136,16 @@ async def music_preview(rel_path: str, user: Dict[str, Any] = Depends(get_curren
     return FileResponse(path=track["path"], content_disposition_type="inline")
 
 
+@router.get("/media/sfx/{sound_id}")
+def sfx_preview(sound_id: str, user: Dict[str, Any] = Depends(get_current_user)):
+    """A sound effect for the clip page's preview and live playback. Sync: the first request may fetch the file."""
+    from src.sfx import sound_path
+    path = sound_path(sound_id)
+    if not path:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Sound not found.")
+    return FileResponse(path=path, media_type="audio/mpeg", content_disposition_type="inline")
+
+
 @router.get("/media/clip/{clip_id}/thumb")
 async def get_clip_thumbnail(clip_id: int):
     """Serve thumbnail image for clip card."""
@@ -330,6 +340,7 @@ async def rerender_clip_action(
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     zooms: Optional[str] = Form(None),    # JSON [{t, scale, hold_s}]; absent keeps the stored list
     cuts: Optional[str] = Form(None),     # JSON [[start_s, end_s]]; absent keeps the stored cuts
+    sfx: Optional[str] = Form(None),      # JSON [{t, id}] meme sounds; absent keeps the stored ones
     concept: Optional[str] = Form(None),          # single, story, pov, top3, top5; absent keeps the clip's concept
     segments: Optional[str] = Form(None),         # JSON segments of a concept clip
     overlay: Optional[str] = Form(None),          # JSON {pov_text, skip_card, callback_quote, foreshadow, ...}
@@ -358,7 +369,7 @@ async def rerender_clip_action(
         start_s=start_s, end_s=end_s, layout=layout, caption_style=caption_style, hook_text=hook_text or "",
         show_hook=show_hook, music_enabled=music_enabled, music_track=music_track, silence_trim=silence_trim,
         silence_trim_s=min(5.0, max(0.5, silence_trim_s)), caption_text=caption_text, layout_changes=layout_changes, letterbox_style=letterbox_style,
-        zooms=_json_list(zooms), cuts=_json_list(cuts),
+        zooms=_json_list(zooms), cuts=_json_list(cuts), sfx=_json_list(sfx),
         concept=concept, segments=_json_list(segments), overlay=_json_dict(overlay), theme=theme,
         concept_source=concept_source if concept_source in ("ai", "user") else None,
     )
@@ -394,7 +405,7 @@ async def ai_edit_clip_action(
         hook_text=clip.get("cand_hook") or "", show_hook=clip.get("show_hook") == 1,
         music_enabled=bool(clip.get("music_track")), music_track=clip.get("music_track"),
         silence_trim=clip.get("silence_trim") == 1, silence_trim_s=clip.get("silence_trim_s"), caption_text=None, layout_changes=clip.get("layout_changes") or "",
-        letterbox_style=clip.get("letterbox_style") or "blur", zooms=None, cuts=None,
+        letterbox_style=clip.get("letterbox_style") or "blur", zooms=None, cuts=None, sfx=None,
     )
     set_clip_render_state(clip_id, "rendering")
     background_tasks.add_task(
@@ -430,6 +441,7 @@ def _ai_edit_prepare(clip: Dict[str, Any], p: Dict[str, Any], comment: str) -> D
     from src.pipeline.stage8_sections import refetch_section, section_bounds
     from src.pipeline.stage9c_render import default_zooms
     from src.profile import load_context, profile_block, record_feedback, streamer_name
+    from src.sfx import clean_sfx
 
     video_dir = VIDEOS_DIR / str(clip["video_id"])
     sec_file = _section_file(clip)
@@ -449,6 +461,7 @@ def _ai_edit_prepare(clip: Dict[str, Any], p: Dict[str, Any], comment: str) -> D
         "concept": cur, "start_s": start, "end_s": end, "title": clip.get("cand_title") or "",
         "cuts": json.loads(clip.get("cuts") or "[]") if cur == "single" else [], "zooms": stored_zooms, "layout": p["layout"],
         "segments": cur_segs, "overlay": cur_overlay, "theme": clip.get("theme") or "", "word_ranges": ranges,
+        "sfx": clean_sfx(clip.get("sfx"), start, end) if cur == "single" else [],
     }
     ctx = load_context(clip["video_id"], video_dir, meta)
     with get_connection() as conn:
@@ -469,7 +482,7 @@ def _ai_edit_prepare(clip: Dict[str, Any], p: Dict[str, Any], comment: str) -> D
         if lo is None or result["start_s"] < lo or result["end_s"] > hi:
             refetch_section(video_dir, meta, clip["candidate_id"], result["start_s"], result["end_s"])
         overrides = {"start_s": result["start_s"], "end_s": result["end_s"], "cuts": result["remove"], "zooms": result["zooms"],
-                     "concept": "single", "segments": [], "overlay": {}, "theme": ""}
+                     "sfx": result["sfx"], "concept": "single", "segments": [], "overlay": {}, "theme": ""}
     else:
         segs, overlay, theme = result["segments"], dict(result["overlay"]), result["theme"] or (clip.get("theme") or "")
         for k in ("pov_options", "emotion"):
@@ -549,6 +562,7 @@ def _rerender_job(
     including a new concept with its segments and overlay."""
     from src.edges import clean_cuts, clean_zooms
     from src.pipeline.stage8_sections import refetch_section
+    from src.sfx import clean_sfx
     from src.pipeline.stage9c_render import default_zooms, read_section_start
 
     clip_id, cand_id, video_id = clip["id"], clip["candidate_id"], clip["video_id"]
@@ -573,6 +587,7 @@ def _rerender_job(
             ok = True
             start_s, end_s = 0.0, concept_saved["duration"]
             cuts, zooms, switches, chosen_music_str, clean_hook = [], [], [], None, (p["hook_text"] or "").strip()
+            sfx = None  # concept clips have no sound effects yet; keep what is stored
             letterbox_style = p["letterbox_style"] if p["letterbox_style"] in ("title", "blur") else "blur"
         else:
             start_s, end_s = p["start_s"], p["end_s"]
@@ -625,6 +640,7 @@ def _rerender_job(
                 zooms = clean_zooms(json.loads(clip["zooms"]), start_s, end_s)
             else:
                 zooms = default_zooms(sec_file, start_s, end_s, clip.get("payoff_t"))
+            sfx = clean_sfx(p["sfx"] if p.get("sfx") is not None else clip.get("sfx"), start_s, end_s)
 
             ok = render_single_vertical_clip(
                 sec_file=sec_file,
@@ -646,6 +662,7 @@ def _rerender_job(
                 zooms=zooms,
                 payoff_t=clip.get("payoff_t"),
                 section_start_s=read_section_start(sec_file),
+                sfx=sfx,
             )
     except Exception as exc:
         ok = False
@@ -682,6 +699,7 @@ def _rerender_job(
         overlay=json.dumps(concept_saved["overlay"]) if is_concept else "{}",
         theme=concept_saved["theme"] if is_concept else "",
         concept_source=p.get("concept_source") or (clip.get("concept_source") or ("user" if p.get("concept") else None)),
+        sfx=json.dumps(sfx) if sfx is not None else None,
     )
     set_clip_layout_changes(clip_id, json.dumps(switches) if switches else None)
     # Drop the superseded version so re-renders don't pile up on disk

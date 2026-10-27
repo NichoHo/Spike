@@ -94,8 +94,10 @@ def test_other_moments_skip_rendered_and_run_earliest_first(clip):
 def test_clip_page_has_zoom_cut_and_editor_controls(clip):
     html = clip["client"].get(f"/clips/{clip['clip']}").text
     for needle in ('id="btn-zoom"', 'id="zoom-popover"', 'id="edit-strip"', "Cut this part", "Mark start", "Mark end",
-                   "Ask the editor", f'action="/clips/{clip["clip"]}/ai-edit"', "Use playhead", "Apply &amp; re-render", 't=105s'):
+                   "Ask the editor", f'action="/clips/{clip["clip"]}/ai-edit"', "Use playhead", "savePop('zoom-popover')", 't=105s',
+                   'id="sfx-popover"', 'name="sfx"', 'data-add="bonk"', 'id="leave-dialog"'):
         assert needle in html, needle
+    assert "Apply &amp; re-render" not in html and "Save and re-render" not in html   # only the form's own button re-renders
     assert "punch_in_zoom" not in html and "controls" not in html.split('id="main-clip-player"')[1].split(">")[0]
     assert '"t": 108' in html or '"t":108' in html   # the stored zoom reaches the page
 
@@ -174,6 +176,22 @@ def test_ask_the_editor_widens_the_section_when_the_edges_leave_it(clip, monkeyp
     monkeypatch.setattr("src.pipeline.stage8_sections.refetch_section", lambda *a, **k: calls.append(a[2:]) or None)
     clip["client"].post(f"/clips/{clip['clip']}/ai-edit", data={"comment": "start 15 s earlier"}, follow_redirects=False)
     assert calls and calls[0][1] == 90.0           # section 100 to 120 does not cover 90, so it is fetched again first
+
+
+def test_ask_the_editor_places_sounds_and_the_page_shows_them(clip, monkeypatch):
+    c, cid = clip["client"], clip["clip"]
+    monkeypatch.setattr("src.ai_edit.run_claude", lambda *a, **k: {
+        "start_s": 105.0, "end_s": 113.0, "remove": [], "zooms": [], "title": "", "explanation": "Added a bonk on the fail.",
+        "sounds": [{"t": 109.4, "id": "bonk"}, {"t": 110.0, "id": "not_a_sound"}]})
+    c.post(f"/clips/{cid}/ai-edit", data={"comment": "bonk when he fails"}, follow_redirects=False)
+    assert json.loads(get_clip(cid)["sfx"]) == [{"t": 109.4, "id": "bonk"}]   # unknown sound dropped
+    assert '"t": 109.4' in c.get(f"/clips/{cid}").text                         # the Sound effects list starts from it
+    # a later request that leaves sounds alone keeps them
+    monkeypatch.setattr("src.ai_edit.run_claude", lambda *a, **k: {
+        "start_s": 105.0, "end_s": 113.0, "remove": [], "zooms": [], "title": "", "explanation": "Retitled.",
+        "sounds": [{"t": 109.4, "id": "bonk"}]})
+    c.post(f"/clips/{cid}/ai-edit", data={"comment": "better title"}, follow_redirects=False)
+    assert json.loads(get_clip(cid)["sfx"]) == [{"t": 109.4, "id": "bonk"}]
 
 
 def test_ask_the_editor_failure_keeps_the_old_render_and_says_why(clip, monkeypatch):
