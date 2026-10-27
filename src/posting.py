@@ -54,6 +54,23 @@ class PermissionBlockedError(Exception):
     pass
 
 
+ANIME_ALLOWLIST = config.DATA_DIR / "anime_allowlist.json"
+
+
+def anime_post_allowed(anilist_id: Any, allowlist: Optional[Path] = None, today: Optional[str] = None) -> bool:
+    """True only for an AniList id with an unexpired entry in data/anime_allowlist.json:
+    [{"anilist_id": 813, "basis": "published_guideline", "evidence_url": "...", "expires": "2027-12-31"}].
+    No file, bad JSON, no match or a lapsed date all mean no. ponytail: platforms, max_clip_s and monetization_allowed
+    in an entry are not enforced yet."""
+    try:
+        entries = json.loads((allowlist or ANIME_ALLOWLIST).read_text(encoding="utf-8"))
+        today = today or datetime.now(timezone.utc).date().isoformat()
+        return any(isinstance(e, dict) and e.get("anilist_id") == anilist_id and anilist_id is not None
+                   and str(e.get("expires", "")) >= today and e.get("basis") for e in entries)
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def verify_clip_posting_permission(clip_id: int) -> Dict[str, Any]:
     """
     Verify that a clip is permitted to be posted.
@@ -73,6 +90,16 @@ def verify_clip_posting_permission(clip_id: int) -> Dict[str, Any]:
         )
         logger.warning(msg)
         raise PermissionBlockedError(msg)
+
+    if str(clip.get("cand_origin") or "").startswith("anime_"):  # every post path calls this: auto, scheduled, manual, retry
+        try:
+            anilist_id = json.loads(clip.get("features") or "{}").get("anilist_id")
+        except ValueError:
+            anilist_id = None
+        if not anime_post_allowed(anilist_id):
+            msg = f"Posting blocked: Clip #{clip_id} is anime footage and its show has no unexpired entry in {ANIME_ALLOWLIST.name}."
+            logger.warning(msg)
+            raise PermissionBlockedError(msg)
 
     return clip
 

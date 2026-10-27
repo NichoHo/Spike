@@ -68,11 +68,21 @@ def load_yamnet_classmap() -> Tuple[List[int], List[int]]:
     return laugh_indices, shout_indices
 
 
-def compute_yamnet_series(audio_path: Path, duration_s: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run YAMNet tflite inference; return per-second laugh, shout and loudness (dBFS) series."""
+def yamnet_indices(names: Set[str]) -> List[int]:
+    """Class indices whose display name equals one of names (lowercase)."""
+    with open(YAMNet_CLASSMAP_PATH, "r", encoding="utf-8") as f:
+        return [int(r["index"]) for r in csv.DictReader(f) if r["display_name"].lower() in names]
+
+
+def compute_yamnet_series(audio_path: Path, duration_s: int) -> Tuple[np.ndarray, ...]:
+    """Run YAMNet tflite inference; return per-second laugh, shout, loudness (dBFS), music, speech, scream and boom series."""
     import tensorflow as tf
 
     laugh_idxs, shout_idxs = load_yamnet_classmap()
+    music_idxs = yamnet_indices({"music"})
+    speech_idxs = yamnet_indices({"speech", "conversation", "narration, monologue"})
+    scream_idxs = yamnet_indices({"screaming", "yell", "bellow", "shout"})
+    boom_idxs = yamnet_indices({"explosion", "bang", "smash, crash"})
 
     # Decode to 16 kHz mono float32 straight into memory (no multi-hundred-MB temp file on disk)
     cmd = ["ffmpeg", "-v", "error", "-i", str(audio_path), "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"]
@@ -89,6 +99,10 @@ def compute_yamnet_series(audio_path: Path, duration_s: int) -> Tuple[np.ndarray
 
     laugh_max_per_sec = np.zeros(duration_s, dtype=np.float32)
     shout_max_per_sec = np.zeros(duration_s, dtype=np.float32)
+    music_max_per_sec = np.zeros(duration_s, dtype=np.float32)
+    speech_max_per_sec = np.zeros(duration_s, dtype=np.float32)
+    scream_max_per_sec = np.zeros(duration_s, dtype=np.float32)
+    boom_max_per_sec = np.zeros(duration_s, dtype=np.float32)
 
     for i in range(n_frames):
         start = i * hop_size
@@ -107,8 +121,13 @@ def compute_yamnet_series(audio_path: Path, duration_s: int) -> Tuple[np.ndarray
                 laugh_max_per_sec[t_sec] = l_prob
             if s_prob > shout_max_per_sec[t_sec]:
                 shout_max_per_sec[t_sec] = s_prob
+            music_max_per_sec[t_sec] = max(music_max_per_sec[t_sec], max(scores[idx] for idx in music_idxs))
+            speech_max_per_sec[t_sec] = max(speech_max_per_sec[t_sec], max(scores[idx] for idx in speech_idxs))
+            scream_max_per_sec[t_sec] = max(scream_max_per_sec[t_sec], max(scores[idx] for idx in scream_idxs))
+            boom_max_per_sec[t_sec] = max(boom_max_per_sec[t_sec], max(scores[idx] for idx in boom_idxs))
 
-    return laugh_max_per_sec, shout_max_per_sec, rms_db_per_second(waveform, duration_s)
+    return (laugh_max_per_sec, shout_max_per_sec, rms_db_per_second(waveform, duration_s),
+            music_max_per_sec, speech_max_per_sec, scream_max_per_sec, boom_max_per_sec)
 
 
 def relative_threshold(series: np.ndarray, top_pct: float = RELATIVE_TOP_PCT, floor: float = 0.05) -> float:
@@ -566,7 +585,7 @@ def run_stage6_signals(
 
     # 1. YAMNet audio events (laugh, shout)
     print("  [stage 6] Running YAMNet audio event detection...")
-    raw_laugh, shout, audio_loud = compute_yamnet_series(audio_path, duration_s)
+    raw_laugh, shout, audio_loud, music_p, speech_p, scream_p, boom_p = compute_yamnet_series(audio_path, duration_s)
     laugh = apply_laughter_gate(raw_laugh, all_words)
     laugh_thr = relative_threshold(raw_laugh)
     shout_thr = relative_threshold(shout)
@@ -757,6 +776,10 @@ def run_stage6_signals(
         laugh_thr=np.float32(laugh_thr),
         shout_thr=np.float32(shout_thr),
         jump_thr=np.float32(jump_thr),
+        music_p=music_p,        # not fused into hype; the anime skip mask reads them
+        speech_p=speech_p,
+        scream_p=scream_p,      # exact Screaming/Yell/Bellow/Shout classes; `shout` above is the looser fused series
+        boom_p=boom_p,
         **all_signals
     )
 

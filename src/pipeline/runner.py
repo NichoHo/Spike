@@ -4,6 +4,7 @@ Orchestrates Stages 1, 2, 4, 5, 6, 7, 8, 9, 9c with resume checkpoints.
 Blueprint §5 & §13 Phase 1 and Phase 2.
 """
 
+import json
 import os
 import sys
 import traceback
@@ -26,6 +27,13 @@ from src.db import (
 )
 from src import oversize_gate
 from src.notify import send_job_ready_notification, send_job_failed_notification
+from src.pipeline.anime_crowd import run_stage4_anime_crowd
+from src.pipeline.anime_moments import ANIME_RENDER_DEFAULTS, run_stage7_anime
+from src.pipeline.anime_asr import japanese_transcript, translate_transcript
+from src.pipeline.anime_visual import run_anime_signals
+from src.pipeline.anime_skip import build_skip, run_stage4_aniskip
+from src.pipeline.anime_text import run_stage2_subs, subtitle_transcript
+from src.pipeline.stage1_anime import run_stage1_anime, sanitize_anime_opts
 from src.pipeline.stage1_meta import run_stage1_meta
 from src.profile import ensure_profiles
 from src.pipeline.stage2_audio import run_stage2_audio
@@ -83,6 +91,8 @@ def run_pipeline(
 ) -> Dict[str, Any]:
     """Execute the full Spike pipeline (Phase 1, 2, 3) for a video file or URL."""
     init_db()
+    if source_settings and source_settings.get("anime") is not None:  # job settings are untrusted input
+        source_settings = {**source_settings, "anime": sanitize_anime_opts(source_settings["anime"])}
 
     print(f"\n==========================================")
     print(f"  Spike Pipeline: {source_input}")
@@ -108,10 +118,17 @@ def run_pipeline(
         meta = run_stage1_meta(video_dir, source_input, (source_settings or {}).get("max_process_s"))
         if meta.get("duration"):
             set_video_duration(video_id, meta["duration"])
+        anime = None
+        if source_settings and source_settings.get("anime") is not None:
+            anime = run_stage1_anime(video_dir, meta, source_settings["anime"] or {})
+            # Anime source defaults (report 5.6, 5.7): the studio already cut and scored the scene, so one continuous
+            # range and no added music. A setting the job or source already carries wins.
+            source_settings = {**ANIME_RENDER_DEFAULTS, **({"captions": False} if anime.get("hardsubbed") else {}), **source_settings}
 
         # Stage 2: fetch_audio
         enter_stage(video_id, "fetch_audio")
         audio_path = run_stage2_audio(video_dir, meta)
+        sub_tracks = run_stage2_subs(video_dir, meta) if anime else []
 
         # Stage 3: fetch_chat (Twitch VODs and finished YouTube streams; skipped for uploads)
         enter_stage(video_id, "fetch_chat")
@@ -121,14 +138,27 @@ def run_pipeline(
         # Stage 4: fetch_crowd (YouTube comments or Twitch emotes/clips)
         enter_stage(video_id, "fetch_crowd")
         crowd_data = run_stage4_crowd(video_dir, meta)
+        aniskip = run_stage4_aniskip(video_dir, meta, anime) if anime else []
+        if anime:  # opt-in crowd seeds; comment timestamps also feed comment_heat in stage 6
+            ac = run_stage4_anime_crowd(video_dir, anime, source_settings.get("anime") or {})
+            if ac.get("comments") and isinstance(crowd_data, dict):
+                crowd_data = {**crowd_data, "comments": list(crowd_data.get("comments") or []) + ac["comments"]}
         if source_settings and source_settings.get("holdout_clips") and isinstance(crowd_data, dict):
             crowd_data["clips"] = []  # eval runs: community clips are the answer key, so Spike must not see them
 
         # Stage 5: transcribe
         enter_stage(video_id, "transcribe")
-        transcript = run_stage5_transcribe(
-            video_dir, audio_path, on_progress=lambda f: set_stage_progress(video_id, f)
-        )
+        # anime: English subs, else anime-whisper on Japanese audio, else stock Whisper
+        transcript = (anime and subtitle_transcript(video_dir, anime, sub_tracks, meta.get("duration") or 0.0)) or (
+            anime and japanese_transcript(video_dir, audio_path, anime, meta.get("duration") or 0.0,
+                                          on_progress=lambda f: set_stage_progress(video_id, f))
+        ) or run_stage5_transcribe(video_dir, audio_path, on_progress=lambda f: set_stage_progress(video_id, f))
+        if anime and anime.get("audio_kind") == "sub" and transcript.get("language") != "en":
+            # Japanese audio with no English text track: captions and the judge need English
+            transcript = translate_transcript(video_dir, transcript, anime)
+            if transcript.get("language") != "en":
+                anime["needs_translation"] = True
+                (video_dir / "anime.json").write_text(json.dumps(anime, indent=2), encoding="utf-8")
 
         # Creator + session profile (needs the transcript; cached per source, so usually free)
         try:
@@ -146,6 +176,9 @@ def run_pipeline(
             video_dir, meta, audio_path, transcript, crowd_data, chat_data=chat_data,
             weight_mult=(profile_ctx or {}).get("preset", {}).get("weight_mult"),
         )
+        if anime:
+            run_anime_signals(video_dir, meta)
+            build_skip(video_dir, meta, anime, transcript, aniskip)
         if source_settings and source_settings.get("target_clips"):
             signals_data["target_clip_count"] = int(source_settings["target_clips"])
             signals_data["explicit_target"] = True
@@ -157,9 +190,12 @@ def run_pipeline(
 
         # Stage 7: moments (LLM judge + snapping + pairwise rerank)
         enter_stage(video_id, "moments")
-        candidates = run_stage7_moments(
-            video_id, video_dir, meta, transcript, signals_data, crowd_data, chat_data=chat_data, profile_ctx=profile_ctx
-        )
+        if anime:
+            candidates = run_stage7_anime(video_id, video_dir, meta, transcript, anime, signals_data)
+        else:
+            candidates = run_stage7_moments(
+                video_id, video_dir, meta, transcript, signals_data, crowd_data, chat_data=chat_data, profile_ctx=profile_ctx
+            )
 
         if not candidates:
             print("  [pipeline] No candidate moments met selection criteria.")
