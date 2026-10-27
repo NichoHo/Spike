@@ -13,6 +13,7 @@ from src.concepts import CONCEPT_LABELS, CONCEPTS
 from src.pov import load_bank
 from src.db import (
     enqueue_candidate_render,
+    get_candidate,
     get_clip_with_details,
     get_job,
     list_clip_ai_edits,
@@ -153,6 +154,7 @@ async def clip_detail(
             next_id = clip_ids[idx + 1]
 
     from src.music import list_all_tracks, music_credit
+    from src.sfx import clean_sfx, list_sounds
     music_tracks = list_all_tracks()
     caption = clip.get("cand_caption") or clip.get("cand_title") or ""
     credit = music_credit(clip.get("music_track"))
@@ -164,11 +166,13 @@ async def clip_detail(
     from src.pipeline.stage9c_render import default_zooms, merge_cut_intervals
     clip_start = clip.get("trim_start_s") or clip.get("orig_start_s") or 0
     clip_end = clip.get("trim_end_s") or clip.get("orig_end_s") or 0
-    silence_cuts = []
-    if clip.get("silence_trim") == 1:
-        words = _load_words(VIDEOS_DIR / str(clip["video_id"]), clip["candidate_id"])
-        silence_cuts = find_silence_cut_intervals(words, clip_start, clip_end, clip.get("silence_trim_s") or SILENCE_TRIM_S)
+    words = _load_words(VIDEOS_DIR / str(clip["video_id"]), clip["candidate_id"])
+    # What pause trim cuts at this clip's setting, on or off: the cut list tells a stored pause cut from a manual one
+    pause_all = find_silence_cut_intervals(words, clip_start, clip_end, clip.get("silence_trim_s") or SILENCE_TRIM_S)
+    silence_cuts = pause_all if clip.get("silence_trim") == 1 else []
     stored_cuts = json.loads(clip.get("cuts") or "[]")
+    cand = get_candidate(clip["candidate_id"])
+    ai_cuts = json.loads(cand["cuts"] or "[]") if cand else []  # the AI editor's picks; a stored cut that matches one is the AI's
     # Everything cut out of the video being played now: the page maps player time to source time through these
     cuts = merge_cut_intervals(silence_cuts, stored_cuts, clip_start=clip_start, clip_end=clip_end)
     sec_file = VIDEOS_DIR / str(clip["video_id"]) / "sections" / f"section_{clip['candidate_id']}.mp4"
@@ -189,11 +193,15 @@ async def clip_detail(
             "user": user,
             "clip": clip,
             "music_tracks": music_tracks,
+            "sfx_sounds": list_sounds(),
+            "sfx": clean_sfx(clip.get("sfx"), clip_start, clip_end),
             "copy_caption": f"{caption}\n\n{credit}" if credit else caption,
             "layout_changes": layout_changes,
             "cut_intervals": cuts,
             "manual_cuts": stored_cuts,
             "pause_cuts": silence_cuts,
+            "pause_all": pause_all,
+            "ai_cuts": ai_cuts,
             "silence_trim_s": clip.get("silence_trim_s") or SILENCE_TRIM_S,
             "zooms": zooms,
             "ai_edits": list_clip_ai_edits(clip_id),

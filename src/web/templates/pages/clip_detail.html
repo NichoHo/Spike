@@ -73,7 +73,7 @@
     <div class="edit-strip" id="edit-strip" role="slider" tabindex="0" aria-label="Zooms and cuts strip, click to seek" aria-valuemin="0" aria-valuenow="0">
       <span class="edit-strip__playhead" id="es-playhead"></span>
     </div>
-    <div class="strip-legend" aria-hidden="true"><span>Diamond: zoom</span><span>Hatched: pending cut</span><span>Dashed: applied cut</span></div>
+    <div class="strip-legend" aria-hidden="true"><span>Diamond: zoom</span><span>Orange tick: sound</span><span>Hatched: pending cut</span><span>Dashed: applied cut</span></div>
 
     <div class="player-bar">
       <button type="button" class="btn btn--secondary btn--sm" id="btn-play" onclick="togglePlay()" aria-label="Play">
@@ -131,7 +131,7 @@
     <form method="post" action="/clips/{{ clip.id }}/ai-edit" class="card" id="ai-edit-form">
       <div class="card__header">
         <h3 class="card__title">Ask the editor</h3>
-        <p class="card__description">Say what to change. The editor can move the start and end, cut parts out, add zooms, and retitle.</p>
+        <p class="card__description">Say what to change. The editor can move the start and end, cut parts out, add zooms and sound effects, and retitle.</p>
       </div>
       <div class="card__body stack">
         <div class="field">
@@ -246,23 +246,25 @@
           </div>
 
           <div class="field">
-            <span class="field__label">Pause trim</span>
-            <div class="row" style="gap: var(--space-2); flex-wrap: wrap;">
-              <label class="switch-row">
-                <input type="checkbox" name="silence_trim" class="switch" role="switch" value="1" id="switch-pause" {% if clip.silence_trim == 1 %}checked{% endif %}>
-                <span>Cut pauses longer than</span>
-              </label>
-              <input type="number" name="silence_trim_s" id="input-pause-s" class="input input--mono input--short" min="0.5" max="5" step="0.1" value="{{ '%.1f' % silence_trim_s }}" aria-label="Shortest pause to cut, in seconds">
-              <span class="small muted">s</span>
-            </div>
-            <p class="field__help">Removes dead air between words and keeps a short breath. Default 1.2 s; lower is snappier.</p>
-          </div>
-
-          <div class="field">
-            <div class="field-head">
+            <label class="switch-row">
+              <input type="checkbox" class="switch" role="switch" id="switch-cuts" onchange="cutsMaster(this)">
               <span class="field__label">Cuts</span>
-              <span class="small muted" id="cut-count"></span>
-              <button type="button" class="btn btn--secondary btn--sm" id="btn-cuts" popovertarget="cuts-popover">Edit cuts</button>
+            </label>
+            <p class="field__help">Turning Cuts off removes pause, AI and manual cuts.</p>
+            <div class="stack" style="gap: var(--space-3); margin-top: var(--space-2); padding-left: var(--space-4); border-left: 1px solid var(--color-border);">
+              <div class="row" style="gap: var(--space-2); flex-wrap: wrap;">
+                <label class="switch-row">
+                  <input type="checkbox" name="silence_trim" class="switch" role="switch" value="1" id="switch-pause" {% if clip.silence_trim == 1 %}checked{% endif %}>
+                  <span>Pause trim: cut pauses longer than</span>
+                </label>
+                <input type="number" name="silence_trim_s" id="input-pause-s" class="input input--mono input--short" min="0.5" max="5" step="0.1" value="{{ '%.1f' % silence_trim_s }}" aria-label="Shortest pause to cut, in seconds">
+                <span class="small muted">s</span>
+              </div>
+              <div class="field-head">
+                <span>Cut list</span>
+                <span class="small muted" id="cut-count"></span>
+                <button type="button" class="btn btn--secondary btn--sm" id="btn-cuts" popovertarget="cuts-popover">Edit cuts</button>
+              </div>
             </div>
           </div>
         </section>
@@ -347,10 +349,26 @@
           <audio id="music-preview" preload="none"></audio>
           <p class="field__help">Sits at -22 dB and ducks when someone talks. Tracks are CC BY; the credit is added to the copied caption.</p>
         </section>
+
+        <!-- Meme sound effects on the clip clock, picked and heard in a popover like the switch editor -->
+        <section class="edit-group" data-for="single" aria-labelledby="g-sfx">
+          <h4 class="edit-group__title" id="g-sfx">Sound effects</h4>
+          <div class="field">
+            <div class="field-head">
+              <span class="field__label">Sounds</span>
+              <span class="small muted" id="sfx-count"></span>
+              <button type="button" class="btn btn--secondary btn--sm" id="btn-sfx" popovertarget="sfx-popover">Edit sounds</button>
+            </div>
+            <p class="field__help">A bonk on a fail, a record scratch before a twist. New sounds play in the preview so you can check the timing.</p>
+            <input type="hidden" name="sfx" id="sfx-field">
+          </div>
+        </section>
       </div>
 
       <div class="card__footer">
-        <span class="card__footer-note">Version {{ clip.version or 1 }} · {% if clip.status == 'rendering' %}Rendering in the background. You can leave this page.{% else %}Renders in about a minute.{% endif %}</span>
+        <span class="card__footer-note">
+          <span class="dirty-note" id="dirty-note" role="status" hidden>Unsaved changes. Re-render to apply them.</span>
+          Version {{ clip.version or 1 }} · {% if clip.status == 'rendering' %}Rendering in the background. You can leave this page.{% else %}Renders in about a minute.{% endif %}</span>
         <button type="submit" class="btn btn--primary" {% if clip.status == 'rendering' %}disabled{% endif %} onclick="this.classList.add('is-loading')">
           {{ ui.icon("arrow-clockwise", 16) }}
           <span>Re-render clip</span>
@@ -383,8 +401,44 @@
       </div>
       <ol class="switch-list" id="switch-list"></ol>
       <div class="zoom-pop__foot" style="margin-top: var(--space-4);">
-        <button type="button" class="btn btn--secondary" popovertarget="switches-popover" popovertargetaction="hide">Done</button>
-        <button type="button" class="btn btn--primary" onclick="applyPop('switches-popover')">Apply &amp; re-render</button>
+        <span class="small muted">Applies when you re-render.</span>
+        <div class="row" style="gap: var(--space-2);">
+          <button type="button" class="btn btn--secondary" popovertarget="switches-popover" popovertargetaction="hide">Cancel</button>
+          <button type="button" class="btn btn--primary" onclick="savePop('switches-popover')">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sound effect editor. Same shape as the switch editor: playhead, pick a sound, add it here. -->
+    <div id="sfx-popover" class="zoom-pop zoom-pop--wide" popover="manual" role="dialog" aria-labelledby="sfx-pop-title">
+      <div class="zoom-pop__head">
+        <h3 class="zoom-pop__title" id="sfx-pop-title">Sound effects</h3>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm" popovertarget="sfx-popover" popovertargetaction="hide" aria-label="Close sound editor">{{ ui.icon("x", 14) }}</button>
+      </div>
+      <p class="field__help">Play or scrub the clip to the moment. Press play on a sound to hear it, then Add to put it at the playhead.</p>
+      <div class="switch-add__time" style="margin-top: var(--space-2);">
+        <span class="small muted">Playhead</span>
+        <span class="timecode-lg" id="sfx-playhead-tc" aria-live="off">0:00.0</span>
+      </div>
+      <ul class="sfx-pads" aria-label="Sounds">
+        {%- for s in sfx_sounds %}
+        <li class="sfx-pad">
+          <button type="button" class="btn btn--ghost btn--icon btn--sm" data-hear="{{ s.id }}" aria-pressed="false" aria-label="Hear {{ s.title }}">
+            <span class="js-mplay">{{ ui.icon("play", 14) }}</span><span class="js-mpause" hidden>{{ ui.icon("pause", 14) }}</span>
+          </button>
+          <span class="sfx-pad__name">{{ s.title }}</span>
+          <button type="button" class="btn btn--secondary btn--sm" data-add="{{ s.id }}" aria-label="Add {{ s.title }} at the playhead">{{ ui.icon("plus", 14) }}<span>Add</span></button>
+        </li>
+        {%- endfor %}
+      </ul>
+      <h4 class="edit-group__title" style="margin-top: var(--space-4);">In this clip</h4>
+      <ol class="switch-list" id="sfx-list" style="margin-top: 0;"></ol>
+      <div class="zoom-pop__foot" style="margin-top: var(--space-4);">
+        <span class="small muted">Applies when you re-render.</span>
+        <div class="row" style="gap: var(--space-2);">
+          <button type="button" class="btn btn--secondary" popovertarget="sfx-popover" popovertargetaction="hide">Cancel</button>
+          <button type="button" class="btn btn--primary" onclick="savePop('sfx-popover')">Save</button>
+        </div>
       </div>
     </div>
 
@@ -394,7 +448,7 @@
         <h3 class="zoom-pop__title" id="cuts-pop-title">Cuts</h3>
         <button type="button" class="btn btn--ghost btn--icon btn--sm" popovertarget="cuts-popover" popovertargetaction="hide" aria-label="Close cut editor">{{ ui.icon("x", 14) }}</button>
       </div>
-      <p class="field__help">Parts removed from the clip. Times count from the clip start as if nothing were cut. The preview skips new cuts; re-render to apply them.</p>
+      <p class="field__help">Every part removed from the clip: pause cuts, the AI editor's cuts and your own. Change or delete any of them; editing a pause cut turns it into a plain cut and pause trim off. Times count from the clip start as if nothing were cut. The preview skips new cuts; re-render to apply them.</p>
       <div class="cut-marks">
         <div class="cut-marks__readout"><span class="small muted">Start</span><span class="timecode-lg" id="mark-start-tc">-</span></div>
         <button type="button" class="btn btn--secondary btn--sm" onclick="markCut('start')">Mark start</button>
@@ -403,12 +457,12 @@
         <button type="button" class="btn btn--primary btn--sm" id="btn-cut" onclick="cutThis()" disabled>Cut this part</button>
       </div>
       <ul class="zoom-list" id="cut-rows" aria-live="polite"></ul>
-      <h4 class="edit-group__title">Pause cuts</h4>
-      <p class="field__help" id="pause-note"></p>
-      <ul class="pause-list" id="pause-rows"></ul>
       <div class="zoom-pop__foot" style="margin-top: var(--space-4);">
-        <button type="button" class="btn btn--secondary" popovertarget="cuts-popover" popovertargetaction="hide">Done</button>
-        <button type="button" class="btn btn--primary" onclick="applyPop('cuts-popover')">Apply &amp; re-render</button>
+        <span class="small muted">Applies when you re-render.</span>
+        <div class="row" style="gap: var(--space-2);">
+          <button type="button" class="btn btn--secondary" popovertarget="cuts-popover" popovertargetaction="hide">Cancel</button>
+          <button type="button" class="btn btn--primary" onclick="savePop('cuts-popover')">Save</button>
+        </div>
       </div>
     </div>
 
@@ -422,32 +476,35 @@
       <ul class="zoom-list" id="zoom-rows"></ul>
       <button type="button" class="btn btn--secondary btn--sm" onclick="zoomAdd()">{{ ui.icon("plus", 14) }}<span>Add zoom at playhead</span></button>
       <div class="zoom-pop__foot" style="margin-top: var(--space-4);">
-        <span class="small muted">Re-renders the whole clip.</span>
-        <button type="button" class="btn btn--primary" onclick="applyPop('zoom-popover')">Apply &amp; re-render</button>
+        <span class="small muted">Applies when you re-render.</span>
+        <div class="row" style="gap: var(--space-2);">
+          <button type="button" class="btn btn--secondary" popovertarget="zoom-popover" popovertargetaction="hide">Cancel</button>
+          <button type="button" class="btn btn--primary" onclick="savePop('zoom-popover')">Save</button>
+        </div>
       </div>
     </div>
 
-    <!-- Caption text editor: hides every other inspector section while open. Save copies the text into the re-render form and submits it. -->
+    <!-- Caption text editor: hides every other inspector section while open. Save copies the text into the re-render form. -->
     <style>.inspector > [hidden] { display: none !important; } /* .inspector-section's display:flex would otherwise beat [hidden] */
     #captions-panel:not([hidden]) { display: flex; flex-direction: column; min-height: calc(100vh - 160px); }</style>
     <section id="captions-panel" class="card" hidden>
       <div class="card__header">
         <h3 class="card__title">Edit caption text</h3>
-        <p class="card__description">Fix words below while the clip plays on the left. Saving re-renders the clip with this text.</p>
+        <p class="card__description">Fix words below while the clip plays on the left. The new text applies when you re-render.</p>
       </div>
       <div class="card__body" style="flex: 1; display: flex;">
         <textarea id="captions-textarea" class="input" style="flex: 1; width: 100%; min-height: 360px; font-size: 16px; line-height: 26px; resize: none;" aria-label="Caption text"></textarea>
       </div>
       <div class="card__footer">
         <button type="button" class="btn btn--secondary" onclick="setCaptionPanel(false)">Cancel</button>
-        <button type="button" class="btn btn--primary" onclick="saveCaptions()">Save and re-render</button>
+        <button type="button" class="btn btn--primary" onclick="saveCaptions()">Save</button>
       </div>
     </section>
   </div>
 </div>
 
 {% if clip.status == 'rendering' %}
-<script>setTimeout(function () { location.reload(); }, 4000);</script>
+<script>setTimeout(function tick() { if (isDirty()) setTimeout(tick, 4000); else location.reload(); }, 4000);  // never drop edits made while it renders</script>
 {% endif %}
 
 <footer style="margin-top: var(--space-8); padding-top: var(--space-4); border-top: 1px solid var(--color-border); font-size: 13px; color: var(--color-text-muted);">
@@ -466,6 +523,19 @@
       <button type="submit" class="btn btn--danger">Reject clip</button>
     </div>
   </form>
+</dialog>
+
+<!-- Asked when a link would leave the page with edits that were never re-rendered -->
+<dialog id="leave-dialog" class="dialog" aria-labelledby="leave-title">
+  <div class="dialog__body">
+    <h2 class="dialog__title" id="leave-title">Leave without re-rendering?</h2>
+    <p class="dialog__text">You changed this clip's settings but did not re-render it. If you leave now, those changes are lost.</p>
+  </div>
+  <div class="dialog__footer">
+    <button type="button" class="btn btn--secondary" data-close-dialog>Stay</button>
+    <button type="button" class="btn btn--danger" id="leave-anyway">Leave anyway</button>
+    <button type="button" class="btn btn--primary" id="leave-rerender">Re-render clip</button>
+  </div>
 </dialog>
 
 <!-- POV caption bank, filtered by the clip's emotion -->
@@ -500,19 +570,23 @@ async function openCaptionEditor() {
     const r = await fetch(`/clips/{{ clip.id }}/captions?start_s=${s}&end_s=${e}`);
     if (!r.ok) throw new Error();
     captionsOriginal = (await r.json()).text;
-    ta.value = captionsOriginal;
+    const saved = document.getElementById('caption-text-field');
+    ta.value = saved.disabled ? captionsOriginal : saved.value;   // text saved earlier, not re-rendered yet
   } catch (_) {
     ta.value = '';
     showToast('Could not load captions');
   }
 }
+// Save keeps the text in the re-render form; the Re-render button at the bottom applies it
 function saveCaptions() {
   const text = document.getElementById('captions-textarea').value.trim();
-  if (!text || text === captionsOriginal) { setCaptionPanel(false); return; }
   const f = document.getElementById('caption-text-field');
-  f.value = text;
-  f.disabled = false;
-  f.form.requestSubmit();
+  const changed = Boolean(text) && text !== captionsOriginal;
+  f.value = changed ? text : '';
+  f.disabled = !changed;
+  setCaptionPanel(false);
+  updateDirty();
+  if (changed) showToast('Caption text saved. Re-render to apply it.');
 }
 // Layout switches are stored in source seconds; the page shows them as clip player time.
 // CUTS are the pauses removed from the current render, so the two timelines differ.
@@ -614,17 +688,24 @@ const $ = (id) => document.getElementById(id);
 const BAKED_ZOOMS = {{ zooms | tojson }};
 const BAKED_CUTS = {{ manual_cuts | tojson }};
 const PAUSE_CUTS = {{ pause_cuts | tojson }};
-const PAUSE_ON = {{ (clip.silence_trim == 1) | tojson }}, PAUSE_S = {{ silence_trim_s | tojson }};
+const PAUSE_ALL = {{ pause_all | tojson }}, AI_CUTS = {{ ai_cuts | tojson }};  // what pause trim and the AI editor cut, to name a stored cut
 const CLIP_END = {{ (clip.trim_end_s or clip.orig_end_s or 30) | tojson }};
 let zooms = BAKED_ZOOMS.map((z) => ({ ...z }));
 let cuts = BAKED_CUTS.map((c) => [...c]);
 let markS = null, markE = null;
+// Sound effects: [{t, id}] at source seconds, like zooms. Ones not in the current render play live in the preview.
+const BAKED_SFX = {{ sfx | tojson }};
+const SFX_NAMES = Object.fromEntries({{ sfx_sounds | tojson }}.map((s) => [s.id, s.title]));
+let sfx = BAKED_SFX.map((s) => ({ ...s }));
+let lastTp = 0;
 const ZOOM_IN = 0.2, ZOOM_OUT = 0.5, ZOOM_MAX = 1.5;
 const STRENGTHS = [['Subtle', 1.10], ['Medium', 1.20], ['Strong', 1.35]];
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const r2 = (x) => Math.round(x * 100) / 100;
 const sameCut = (a, b) => a[0] === b[0] && a[1] === b[1];
-const isBaked = (c) => BAKED_CUTS.some((b) => sameCut(b, c));
+const isBaked = (c) => BAKED_CUTS.some((b) => sameCut(b, c)) || PAUSE_CUTS.some((b) => sameCut(b, c));
+const kindOf = (c) => (AI_CUTS.some((a) => sameCut(a, c)) ? 'ai' : PAUSE_ALL.some((p) => sameCut(p, c)) ? 'pause' : 'manual');
+const KIND_LABEL = { pause: 'Pause', ai: 'AI', manual: 'Manual' };
 
 function smooth(x) { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); }
 function zoomAt(list, tp) {
@@ -649,6 +730,8 @@ function preview() {
   for (const [a, b] of pendingCuts()) {
     if (tp >= a && tp < b - 0.02) { player.currentTime = b; break; }
   }
+  playDueSfx(tp);
+  $('sfx-playhead-tc').textContent = tc(tp);
   const f = reduceMotion ? 1 : zoomAt(zooms, tp) / zoomAt(BAKED_ZOOMS, tp);
   player.style.transformOrigin = baseLayout() === 'split' ? '50% 25%' : '50% 40%';
   player.style.transform = f > 1.002 || f < 0.998 ? `scale(${f.toFixed(4)})` : '';
@@ -700,6 +783,11 @@ function drawStrip() {
     mk.setAttribute('aria-label', `Zoom ${i + 1} at ${tc(t)}. Press to jump there.`);
     mk.addEventListener('click', (e) => { e.stopPropagation(); player.currentTime = t; });
   });
+  sfx.forEach((s) => {
+    const el = add('span', 'edit-strip__sfx');
+    el.style.left = pct(toClip(s.t));
+    el.title = `${SFX_NAMES[s.id]} at ${tc(toClip(s.t))}`;
+  });
 }
 $('edit-strip').addEventListener('click', (e) => {
   const r = e.currentTarget.getBoundingClientRect();
@@ -743,20 +831,29 @@ function zoomUsePlayhead(i) { zooms[i].t = toSource(player.currentTime || 0); re
 function zoomDelete(i) { zooms.splice(i, 1); renderZoomRows(); }
 function zoomStrength(i, v) { zooms[i].scale = v; syncZooms(); }
 function zoomHold(i, el) { zooms[i].hold_s = r2(parseFloat(el.value)); el.nextElementSibling.textContent = `${zooms[i].hold_s.toFixed(1)} s`; syncZooms(); }
-function applyPop(id) { $(id).hidePopover(); $('rerender-form').requestSubmit(); }
-// Zoom and cut editors open under their button, kept inside the window once their real size is known
-function wirePop(pop, btn, onOpen) {
-  pop.addEventListener('beforetoggle', (e) => { if (e.newState === 'open') onOpen(); });
+// Popover editors work on the page's list. Save keeps the edits (Re-render applies them); Cancel, the X and
+// Escape put back the list as it was when the popover opened.
+function savePop(id) { $(id).dataset.saved = '1'; $(id).hidePopover(); updateDirty(); }
+// Editors open under their button, kept inside the window once their real size is known
+function wirePop(pop, btn, onOpen, getList, setList) {
+  let before = null;
+  pop.addEventListener('beforetoggle', (e) => {
+    if (e.newState === 'open') { before = JSON.stringify(getList()); delete pop.dataset.saved; onOpen(); }
+  });
   pop.addEventListener('toggle', (e) => {
-    if (e.newState !== 'open') return;
+    if (e.newState !== 'open') {
+      if (!pop.dataset.saved && before !== null && before !== JSON.stringify(getList())) setList(JSON.parse(before));
+      return;
+    }
     const r = btn.getBoundingClientRect();
     pop.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - pop.offsetWidth - 16))}px`;
     pop.style.top = `${Math.max(16, Math.min(r.bottom + 8, window.innerHeight - pop.offsetHeight - 16))}px`;
   });
 }
-wirePop($('zoom-popover'), $('btn-zoom'), renderZoomRows);
-wirePop($('cuts-popover'), $('btn-cuts'), renderCuts);
-wirePop($('switches-popover'), $('btn-switches'), renderSwitches);
+wirePop($('zoom-popover'), $('btn-zoom'), renderZoomRows, () => zooms, (v) => { zooms = v; renderZoomRows(); });
+wirePop($('cuts-popover'), $('btn-cuts'), renderCuts, () => [cuts, $('switch-pause').checked],
+  (v) => { cuts = v[0]; $('switch-pause').checked = v[1]; markS = markE = null; renderCuts(); });
+wirePop($('switches-popover'), $('btn-switches'), renderSwitches, () => switches, (v) => { switches = v; renderSwitches(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('.zoom-pop:popover-open').forEach((p) => p.hidePopover()); });
 
 // Cuts
@@ -778,9 +875,34 @@ function cutThis() {
   mergeCuts();
   renderCuts();
 }
-function cutDelete(i) { cuts.splice(i, 1); renderCuts(); }
+// The list shows pause cuts (while pause trim is on), the AI's and manual ones together. Pause cuts are not stored,
+// so touching one first turns them all into plain cuts and switches pause trim off; the rest keep applying.
+let rowsNow = [];
+function cutRows() {
+  const live = $('switch-pause').checked ? PAUSE_CUTS.map((c) => ({ c, kind: 'pause', live: true })) : [];
+  return [...live, ...cuts.map((c, i) => ({ c, kind: kindOf(c), i }))].sort((a, b) => a.c[0] - b.c[0]);
+}
+function cutIndex(n) {
+  const r = rowsNow[n];
+  if (!r.live) return r.i;
+  cuts.push(...PAUSE_CUTS.map((c) => [...c]));
+  $('switch-pause').checked = false;
+  mergeCuts();
+  updateDirty();
+  return cuts.findIndex((c) => c[0] <= r.c[0] && c[1] >= r.c[1]);
+}
+// The big switch: off removes every cut (pause, AI and manual), on turns pause trim back on
+function cutsMaster(el) {
+  if (el.checked) $('switch-pause').checked = true;
+  else { cuts = []; markS = markE = null; $('switch-pause').checked = false; }
+  renderCuts();
+  updateDirty();
+}
+function cutDelete(n) { const i = cutIndex(n); if (i >= 0) cuts.splice(i, 1); renderCuts(); }
 // Typed times are seconds from the clip start, before any cut
-function cutEdit(i, k, el) {
+function cutEdit(n, k, el) {
+  const i = cutIndex(n);
+  if (i < 0) { renderCuts(); return; }
   const c = [...cuts[i]], v = parseFloat(el.value);
   if (!Number.isNaN(v)) c[k] = r2(CLIP_START + v);
   if (Number.isNaN(v) || c[0] < CLIP_START || c[1] > CLIP_END || c[1] - c[0] < 0.2) {
@@ -792,35 +914,30 @@ function cutEdit(i, k, el) {
   mergeCuts();
   renderCuts();
 }
-function cutJump(i) { player.currentTime = Math.max(0, toClip(cuts[i][0]) - 1); player.play(); }
+function cutJump(n) { player.currentTime = Math.max(0, toClip(rowsNow[n].c[0]) - 1); player.play(); }
 const secs = (t) => `${(t - CLIP_START).toFixed(1)}`;
 function renderCuts() {
   $('cuts-field').value = JSON.stringify(cuts);
   $('mark-start-tc').textContent = markS === null ? '-' : tc(markS - CLIP_START);
   $('mark-end-tc').textContent = markE === null ? '-' : tc(markE - CLIP_START);
   $('btn-cut').disabled = markS === null || markE === null;
-  const removed = cuts.reduce((a, c) => a + c[1] - c[0], 0);
-  $('cut-count').textContent = [
-    cuts.length ? `${cuts.length} cut${cuts.length > 1 ? 's' : ''}, ${removed.toFixed(1)} s` : 'No cuts',
-    PAUSE_CUTS.length ? `${PAUSE_CUTS.length} pause cut${PAUSE_CUTS.length > 1 ? 's' : ''}` : '',
-  ].filter(Boolean).join(' · ');
-  $('cut-rows').innerHTML = cuts.length ? cuts.map((c, i) => `
+  rowsNow = cutRows();
+  const removed = rowsNow.reduce((a, r) => a + r.c[1] - r.c[0], 0);
+  $('cut-count').textContent = rowsNow.length ? `${rowsNow.length} cut${rowsNow.length > 1 ? 's' : ''}, ${removed.toFixed(1)} s` : 'No cuts';
+  $('switch-cuts').checked = $('switch-pause').checked || cuts.length > 0;
+  $('cut-rows').innerHTML = rowsNow.length ? rowsNow.map(({ c, kind }, n) => `
     <li class="cut-row">
-      <button type="button" class="btn btn--ghost btn--icon btn--sm" onclick="cutJump(${i})" aria-label="Play from just before cut ${i + 1}">{{ ui.icon('play', 14) }}</button>
-      <label class="cut-row__t"><span class="small muted">From</span><input type="number" step="0.1" class="input input--mono input--short" value="${secs(c[0])}" onchange="cutEdit(${i}, 0, this)" aria-label="Cut ${i + 1} start, seconds from clip start"></label>
-      <label class="cut-row__t"><span class="small muted">To</span><input type="number" step="0.1" class="input input--mono input--short" value="${secs(c[1])}" onchange="cutEdit(${i}, 1, this)" aria-label="Cut ${i + 1} end, seconds from clip start"></label>
+      <button type="button" class="btn btn--ghost btn--icon btn--sm" onclick="cutJump(${n})" aria-label="Play from just before cut ${n + 1}">{{ ui.icon('play', 14) }}</button>
+      <label class="cut-row__t"><span class="small muted">From</span><input type="number" step="0.1" class="input input--mono input--short" value="${secs(c[0])}" onchange="cutEdit(${n}, 0, this)" aria-label="Cut ${n + 1} start, seconds from clip start"></label>
+      <label class="cut-row__t"><span class="small muted">To</span><input type="number" step="0.1" class="input input--mono input--short" value="${secs(c[1])}" onchange="cutEdit(${n}, 1, this)" aria-label="Cut ${n + 1} end, seconds from clip start"></label>
       <span class="cut-row__len">${(c[1] - c[0]).toFixed(1)} s</span>
-      ${isBaked(c) ? '<span></span>' : '<span class="badge badge--accent">New</span>'}
-      <button type="button" class="btn btn--ghost btn--icon btn--sm" onclick="cutDelete(${i})" aria-label="Delete cut ${i + 1}">{{ ui.icon('trash', 14) }}</button>
-    </li>`).join('') : '<li class="zoom-empty">No cuts yet. Play the clip, mark a start and an end, then cut it.</li>';
+      <span class="badge ${isBaked(c) ? '' : 'badge--accent'}">${KIND_LABEL[kind]}${isBaked(c) ? '' : ', new'}</span>
+      <button type="button" class="btn btn--ghost btn--icon btn--sm" onclick="cutDelete(${n})" aria-label="Delete cut ${n + 1}">{{ ui.icon('trash', 14) }}</button>
+    </li>`).join('') : '<li class="zoom-empty">No cuts. Play the clip, mark a start and an end, then cut it.</li>';
   drawStrip();
   preview();
 }
-// Pause cuts come from pause trim in the current render. They are listed here, and change only through that setting.
-$('pause-note').textContent = !PAUSE_ON ? 'Pause trim is off for this render.'
-  : `Made by pause trim (longer than ${PAUSE_S.toFixed(1)} s). Change that setting in Timing to change these.`;
-$('pause-rows').innerHTML = PAUSE_CUTS.map((c) =>
-  `<li class="pause-row"><span>${secs(c[0])} to ${secs(c[1])} s</span><span>${(c[1] - c[0]).toFixed(1)} s</span></li>`).join('');
+$('switch-pause').addEventListener('change', renderCuts);
 renderCuts();
 renderZoomRows();
 setPlayUi();
@@ -1013,6 +1130,75 @@ music.addEventListener('play', () => setMusicBtn(true));
 music.addEventListener('pause', () => setMusicBtn(false));
 player.addEventListener('play', () => music.pause());
 
+// ── Sound effects ────────────────────────────────────────────────────────────
+const sfxCache = {};
+// Sounds added since the last render play live while the clip plays; rendered ones are already in the video
+function playDueSfx(tp) {
+  if (!player.paused && !player.muted && tp > lastTp && tp - lastTp < 0.5) {
+    for (const s of sfx) {
+      const at = toClip(s.t);
+      if (at > lastTp && at <= tp && !BAKED_SFX.some((b) => b.id === s.id && b.t === s.t)) {
+        (sfxCache[s.id] ||= new Audio(`/media/sfx/${s.id}`)).cloneNode().play().catch(() => {});
+      }
+    }
+  }
+  lastTp = tp;
+}
+function renderSfx() {
+  sfx.sort((a, b) => a.t - b.t);
+  $('sfx-field').value = JSON.stringify(sfx);
+  $('sfx-count').textContent = sfx.length ? `${sfx.length} sound${sfx.length > 1 ? 's' : ''}` : 'No sounds';
+  $('sfx-list').innerHTML = sfx.length ? sfx.map((s, i) => {
+    const at = tc(toClip(s.t)), name = esc(SFX_NAMES[s.id]);
+    return `<li class="switch-list__row">
+      <button type="button" class="timecode-lg timecode-btn" data-jump="${i}" aria-label="Jump to ${at}">${at}</button>
+      <span>${name}</span>
+      <span class="row" style="gap: var(--space-1);">
+        <button type="button" class="btn btn--ghost btn--sm" data-try="${i}" aria-label="Play the clip around ${name} at ${at}">Play here</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-remove="${i}" aria-label="Remove ${name} at ${at}">Remove</button>
+      </span></li>`;
+  }).join('') : '<li class="zoom-empty">No sounds yet. Move the playhead, then press Add on a sound.</li>';
+  drawStrip();
+}
+const hear = new Audio();
+let hearBtn = null;
+function setHearBtn(on) {
+  if (!hearBtn) return;
+  hearBtn.querySelector('.js-mplay').hidden = on;
+  hearBtn.querySelector('.js-mpause').hidden = !on;
+  hearBtn.setAttribute('aria-pressed', String(on));
+}
+hear.addEventListener('play', () => setHearBtn(true));
+['pause', 'ended'].forEach((ev) => hear.addEventListener(ev, () => setHearBtn(false)));
+document.querySelector('.sfx-pads').addEventListener('click', (e) => {
+  const h = e.target.closest('[data-hear]'), add = e.target.closest('[data-add]');
+  if (h) {
+    if (h === hearBtn && !hear.paused) { hear.pause(); return; }
+    setHearBtn(false);
+    hearBtn = h;
+    hear.src = `/media/sfx/${h.dataset.hear}`;
+    player.pause();
+    hear.play().catch(() => showToast('Could not play this sound'));
+  } else if (add) {
+    const t = r2(toSource(player.currentTime || 0)), id = add.dataset.add;
+    sfx = sfx.filter((s) => !(s.id === id && Math.abs(s.t - t) < 0.05)).concat([{ t, id }]);
+    renderSfx();
+    showToast(`${SFX_NAMES[id]} added at ${tc(player.currentTime || 0)}`);
+  }
+});
+$('sfx-list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-jump], [data-try], [data-remove]');
+  if (!b) return;
+  if (b.dataset.remove !== undefined) { sfx.splice(Number(b.dataset.remove), 1); renderSfx(); return; }
+  const at = toClip(sfx[Number(b.dataset.jump ?? b.dataset.try)].t);
+  if (b.dataset.try !== undefined) { player.currentTime = Math.max(0, at - 1.5); lastTp = player.currentTime; player.play(); }
+  else player.currentTime = at;
+});
+wirePop($('sfx-popover'), $('btn-sfx'), renderSfx, () => sfx, (v) => { sfx = v; renderSfx(); });
+$('sfx-popover').addEventListener('toggle', (e) => { if (e.newState !== 'open') hear.pause(); });
+player.addEventListener('play', () => hear.pause());
+renderSfx();
+
 function toggleTitleEdit(on) {
   document.getElementById('title-form').style.display = on ? 'flex' : 'none';
   document.getElementById('clip-title').parentElement.style.display = on ? 'none' : '';
@@ -1044,5 +1230,32 @@ document.querySelectorAll('[data-ts-for]').forEach((el) => {
     el.value = fmtTs(parseFloat(field.value) || 0);
   });
 });
+
+// ── Unsaved changes ──────────────────────────────────────────────────────────
+// The re-render form as the page loaded it. Anything different was changed here and is lost unless re-rendered.
+const rerenderForm = $('rerender-form');
+const formState = () => new URLSearchParams(new FormData(rerenderForm)).toString();
+const cleanState = formState();
+let leaving = false, leaveTo = null;
+function isDirty() { return !leaving && formState() !== cleanState; }
+function updateDirty() { $('dirty-note').hidden = !isDirty(); }
+['input', 'change'].forEach((ev) => rerenderForm.addEventListener(ev, updateDirty));
+rerenderForm.addEventListener('submit', () => { leaving = true; });
+window.addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
+// Links inside the app ask with the page's own dialog, which can also re-render from there
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href]');
+  if (!a || a.target === '_blank' || e.ctrlKey || e.metaKey || e.shiftKey || !isDirty()) return;
+  if (a.pathname.endsWith('/download')) {   // a download does not leave the page
+    leaving = true;
+    setTimeout(() => { leaving = false; }, 1000);
+    return;
+  }
+  e.preventDefault();
+  leaveTo = a.href;
+  $('leave-dialog').showModal();
+});
+$('leave-anyway').addEventListener('click', () => { leaving = true; location.href = leaveTo; });
+$('leave-rerender').addEventListener('click', () => { $('leave-dialog').close(); rerenderForm.requestSubmit(); });
 </script>
 {% endblock %}

@@ -18,7 +18,7 @@ Effects (§7.4):
   Hook title    – optional, manual edits only (hook_text shown for the first 2.5 s at the top)
   Punch-in zoom – 1.0x to 1.15x over 0.3 s at the peak second, back out over 1 s. Once per clip.
   Loudness      – loudnorm to -14 LUFS, true peak -1.5 dBTP
-  Pause cuts    – natural (>1.2 s) or tight (>0.6 s); every other segment zoomed 1.08x to hide jump cuts
+  Pause cuts    – on (>1.5 s) or off; every other segment zoomed 1.08x to hide jump cuts
   Music ducking – music sits at -22 dB, sidechaincompress ducks it further while speech is active
 
 Output: data/videos/<id>/renders/clip_<cand_id>.mp4 (1080×1920, H.264, AAC 160k)
@@ -55,10 +55,9 @@ from src.config import (
     OUTPUT_VIDEO_CRF,
     OUTPUT_VIDEO_PRESET,
     OUTPUT_WIDTH,
+    SFX_GAIN_DB,
     SILENCE_TRIM_BREATH_S,
     SILENCE_TRIM_S,
-    SILENCE_TRIM_TIGHT_BREATH_S,
-    SILENCE_TRIM_TIGHT_S,
     SPLIT_FACECAM_H,
     SPLIT_GAMEPLAY_H,
     ZOOM_FACTOR,
@@ -79,6 +78,7 @@ from src.pipeline.stage9a_face_track import (
 )
 from src.pipeline.stage9b_captions import _mask_profanity, generate_ass, slur_intervals, write_ass_file
 from src.pipeline.title_card import render_title_card, strip_emoji
+from src.sfx import sound_path
 
 logger = logging.getLogger("spike.render")
 
@@ -106,7 +106,7 @@ def find_silence_cut_intervals(
     keep_breath_s: Optional[float] = None,
 ) -> List[Tuple[float, float]]:
     """
-    Find internal pauses between consecutive words longer than threshold_s (1.2 s).
+    Find internal pauses between consecutive words longer than threshold_s (1.5 s).
     Returns list of (cut_start_s, cut_end_s) in absolute video timeline seconds.
     Leaves keep_breath_s natural breath duration after speech finishes: 0.4 s, or a third of a shorter threshold.
     """
@@ -552,6 +552,7 @@ def build_vertical_filtergraph(
     letterbox_style: str = "blur",
     title_input: Optional[int] = None,
     bleeps: Optional[List[Tuple[float, float]]] = None,
+    sfx_at: Optional[List[Tuple[int, float]]] = None,
 ) -> str:
     """
     Build complete native FFmpeg filtergraph:
@@ -559,7 +560,7 @@ def build_vertical_filtergraph(
     2. Layout transformation (face_track, split, center, letterbox)
     3. Punch-in zooms (eased pulses from the clip's zoom list, inside the layout step)
     4. ASS captions overlay (including hook title event)
-    5. Speech-ducked music mix (at -22 dB baseline, ducked via sidechaincompress)
+    5. Sound effects (sfx_at: [(ffmpeg input index, output second)]), then speech-ducked music mix (at -22 dB baseline, ducked via sidechaincompress)
     6. EBU R128 loudness normalization (-14 LUFS, -1.5 dBTP)
     """
     filters: List[str] = []
@@ -644,6 +645,17 @@ def build_vertical_filtergraph(
             "[a_muted][a_tone]amix=inputs=2:duration=first:normalize=0[a_bleeped]",
         ]
         a_in = "a_bleeped"
+
+    # Sound effects: each one delayed to its spot and laid over the speech, before the music so it ducks under them too
+    if sfx_at:
+        gain = 10.0 ** (SFX_GAIN_DB / 20.0)
+        fmt = "aformat=sample_rates=48000:channel_layouts=stereo"
+        for k, (idx, t) in enumerate(sfx_at):
+            filters.append(f"[{idx}:a]{fmt},volume={gain:.3f},adelay=delays={int(t * 1000)}:all=1[sfx_{k}]")
+        filters.append(f"[{a_in}]{fmt}[a_sp]")
+        filters.append("[a_sp]" + "".join(f"[sfx_{k}]" for k in range(len(sfx_at)))
+                       + f"amix=inputs={len(sfx_at) + 1}:duration=first:normalize=0[a_sfx]")
+        a_in = "a_sfx"
 
     # 6. Audio Processing & Ducking
     if has_music:
@@ -741,7 +753,7 @@ def run_stage9c_render(
     Phase 2 & Phase 5 vertical render:
     - 9:16 reframing (auto, face_track, split, center, letterbox)
     - Word-by-word captions (optional)
-    - Pause cutting: off, natural (>1.2 s) or tight (>0.6 s)
+    - Pause cutting: off or on (>1.5 s)
     - Speech-activated audio ducking for background music (-22 dB baseline)
     - Two-pass or integrated EBU R128 loudness normalization (-14 LUFS)
 
@@ -768,7 +780,8 @@ def run_stage9c_render(
     elif "silence_trim" in src_settings:
         cut_setting = "natural" if src_settings["silence_trim"] else "off"
     else:
-        cut_setting = "auto"
+        cut_setting = "off"
+    ai_cuts = bool(src_settings.get("ai_cuts", False))  # the AI editor's cuts, apart from pause cutting
     letterbox_style = src_settings.get("letterbox_style", "title")
 
     all_words = []
@@ -804,6 +817,8 @@ def run_stage9c_render(
         clip_end = float(cand["end_s"])
         cand_words = all_words
         cand["trim_start_s"], cand["trim_end_s"] = clip_start, clip_end
+        if not ai_cuts:
+            cand["cuts"] = []
         # Per-clip choices: an explicit setting wins, "auto" follows the judge
         # "auto" plans the layout per moment: the opening layout plus mid-clip switches (a streamer who goes
         # from a facecam overlay to full-screen). A failed plan falls back to the face-size heuristic.
@@ -865,7 +880,7 @@ def run_stage9c_render(
                     trim_end_s=clip_end,
                     music_track=music_str,
                     silence_trim=0 if pace == "off" else 1,
-                    silence_trim_s=SILENCE_TRIM_TIGHT_S if pace == "tight" else None,
+                    silence_trim_s=None,
                     status="ready",
                     letterbox_style=letterbox_style,
                     cuts=json.dumps(cand.get("cuts") or []),
@@ -916,16 +931,18 @@ def render_single_vertical_clip(
     payoff_t: Optional[float] = None,
     section_start_s: Optional[float] = None,
     overlay_events: Optional[List[Dict[str, Any]]] = None,
+    sfx: Optional[List[Dict[str, Any]]] = None,
 ) -> bool:
     """
     Renders a single vertical clip from a downloaded section video file.
     Supports interactive adjustments to trims, layout, captions, music, silence trim, and zoom.
-    silence_trim: False/"off", True/"natural" (cut pauses > 1.2 s, or > silence_trim_s) or "tight" (> 0.6 s).
+    silence_trim: False/"off", True/"natural" (cut pauses > 1.5 s, or > silence_trim_s).
     caption_y: None places captions on the split seam, or at 68% height for other layouts.
     layout_changes: [{t, layout}] switches at source seconds, for streams that change
     mid-clip (e.g. a reaction ends and the streamer goes full-cam).
     letterbox_style: "title" draws title_text above the video on white bars while
     letterbox shows; "blur" keeps the blurred fill. The title card replaces the 2.5 s hook.
+    sfx: [{t, id}] meme sounds at source seconds (src/sfx.py); ones inside a cut are dropped.
     """
     if not sec_file.exists():
         print(f"  [stage 9c] Error: section file {sec_file} does not exist.")
@@ -946,11 +963,7 @@ def render_single_vertical_clip(
     # 1. Silence trimming calculation
     pace = {True: "natural", False: "off"}.get(silence_trim, silence_trim)
     cut_intervals: List[Tuple[float, float]] = []
-    if pace == "tight":
-        cut_intervals = find_silence_cut_intervals(
-            words, clip_start, clip_end, SILENCE_TRIM_TIGHT_S, SILENCE_TRIM_TIGHT_BREATH_S
-        )
-    elif pace == "natural":
+    if pace != "off":  # "natural", or a legacy "tight" from older settings
         cut_intervals = find_silence_cut_intervals(words, clip_start, clip_end, silence_trim_s or SILENCE_TRIM_S)
 
     # Editor cuts and manual cuts join the silence cuts, then everything goes through one keep-interval path
@@ -1040,6 +1053,16 @@ def render_single_vertical_clip(
     resolved_music = resolve_music_path(music_track) if music_track else None
     has_music = bool(resolved_music and resolved_music.exists())
 
+    # Sound effects come after the section, the music and the title card in ffmpeg's inputs
+    sfx_files: List[Path] = []
+    sfx_at: List[Tuple[int, float]] = []
+    first_sfx_input = 1 + int(has_music) + int(bool(title_png))
+    for s in sfx or []:
+        path = sound_path(s["id"])
+        if path and clip_start <= s["t"] < clip_end and not any(a <= s["t"] < b for a, b in cut_intervals):
+            sfx_at.append((first_sfx_input + len(sfx_files), map_timestamp_to_trimmed(s["t"], clip_start, cut_intervals)))
+            sfx_files.append(path)
+
     # 5. Build Unified Filtergraph
     filtergraph = build_vertical_filtergraph(
         sec_start=sec_start,
@@ -1058,6 +1081,7 @@ def render_single_vertical_clip(
         letterbox_style=letterbox_style,
         title_input=(2 if has_music else 1) if title_png else None,
         bleeps=[(a, b) for a, b in slur_intervals(retimed_words, clip_start) if b > 0 and a < effective_dur],
+        sfx_at=sfx_at,
     )
 
     # 6. Execute FFmpeg Render Command (No Shell)
@@ -1069,6 +1093,8 @@ def render_single_vertical_clip(
         cmd.extend(["-stream_loop", "-1", "-i", str(resolved_music)])
     if title_png:
         cmd.extend(["-i", str(title_png)])  # one still frame; overlay holds it for the whole clip
+    for path in sfx_files:
+        cmd.extend(["-i", str(path)])
 
     cmd.extend([
         "-filter_complex", filtergraph,

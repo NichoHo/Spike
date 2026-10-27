@@ -34,7 +34,7 @@ class LLMJudgeResponse(BaseModel):
     )
     pace: str = Field(
         default="natural",
-        description="'tight' to jump-cut every pause, 'natural' to cut only long dead air",
+        description="'natural' to cut long dead air, 'off' to keep every pause",
     )
     music: bool = Field(default=True, description="True if a quiet background music bed helps the clip")
     music_track: str = Field(default="", description="Track id from the music catalogue that best fits, or empty")
@@ -106,3 +106,43 @@ class Candidate(BaseModel):
     mood: Optional[str] = None
     needs_context: bool = False
     status: Literal["proposed", "selected", "low_score", "rejected", "hubris", "dropped"] = "proposed"
+
+
+ANIME_ARCHETYPES = ("comedy_beat", "iconic_line", "fight_sakuga", "transformation", "emotional",
+                    "twist_reveal", "romance_wholesome", "cringe_reaction")
+
+
+class AnimeScores(BaseModel):
+    self_contained: int = Field(ge=0, le=10)
+    payoff: int = Field(ge=0, le=10)
+    setup_present: int = Field(ge=0, le=10)
+    delivery: int = Field(ge=0, le=10)
+    quotability: int = Field(ge=0, le=10)
+
+
+class AnimeCandidate(BaseModel):
+    """One anime moment from the whole-episode text judge. `why` comes before `scores` so the model explains first."""
+    start: str = Field(default="", description="MM:SS, informational; the line numbers decide the edges")
+    end: str = Field(default="", description="MM:SS, informational")
+    setup_line_idx: List[int] = Field(default_factory=list, description="Lines a stranger needs before the punchline")
+    punchline_line_idx: int = Field(description="The punchline or peak line")
+    archetype: str = Field(description="One of ANIME_ARCHETYPES")
+    why: str = Field(default="", description="One sentence: why a stranger laughs or cares")
+    scores: AnimeScores
+    needs_prior_context: bool = False
+    spoiler: bool = False
+    hook_line_idx: Optional[int] = None
+    hook_text: str = Field(default="", description="3 to 8 word question or observation for a stranger, not a quote")
+    title: str = Field(default="", description="5 to 12 words: name the main character and say what happens")
+    hashtags: List[str] = Field(default_factory=list, description="Genre and show tags without #")
+    seed_ids: List[str] = Field(default_factory=list)
+
+    @field_validator("archetype", mode="before")
+    @classmethod
+    def _archetype(cls, v):
+        v = str(v or "").strip().lower()
+        return v if v in ANIME_ARCHETYPES else "comedy_beat"
+
+
+class AnimeJudgeResponse(BaseModel):
+    candidates: List[AnimeCandidate] = Field(default_factory=list)

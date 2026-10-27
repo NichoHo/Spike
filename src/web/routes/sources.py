@@ -224,14 +224,15 @@ async def create_source_action(
     caption_style: str = Form("bold_pop"),
     music: str = Form("auto"),
     default_music_mood: str = Form("chill"),
-    cut_pauses: str = Form("auto"),
+    cut_pauses: str = Form("off"),
+    ai_cuts: Optional[str] = Form(None),
     style_notes: str = Form(""),
     auto_concepts: List[str] = Form(default_factory=list),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     if (todo := requirements.missing("source", kind=kind)):
         raise HTTPException(status_code=400, detail="Finish setup first: " + ", ".join(i["title"] for i in todo) + ".")
-    p = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style) if layout else dict(DEFAULT_PRESETS)
+    p = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style, ai_cuts) if layout else dict(DEFAULT_PRESETS)
     data = {
         "kind": kind,
         "external_id": external_id.strip(),
@@ -370,7 +371,8 @@ async def update_source_action(
     caption_style: str = Form("bold_pop"),
     music: str = Form("auto"),
     default_music_mood: str = Form("chill"),
-    cut_pauses: str = Form("auto"),
+    cut_pauses: str = Form("off"),
+    ai_cuts: Optional[str] = Form(None),
     style_notes: str = Form(""),
     auto_concepts: List[str] = Form(default_factory=list),
     user: Dict[str, Any] = Depends(get_current_user),
@@ -379,7 +381,7 @@ async def update_source_action(
     if not src_row:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Source not found.")
 
-    p = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style) if layout else dict(DEFAULT_PRESETS)
+    p = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style, ai_cuts) if layout else dict(DEFAULT_PRESETS)
     data = {
         "display_name": display_name.strip(),
         "permission": permission,

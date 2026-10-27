@@ -268,6 +268,7 @@ def init_db():
             "ALTER TABLE sources ADD COLUMN creator_profile TEXT",  # JSON, see src/profile.py
             "ALTER TABLE sources ADD COLUMN learned_prefs TEXT",  # JSON list of up to 10 strings
             "ALTER TABLE sources ADD COLUMN letterbox_style TEXT DEFAULT 'title'",  # "title" (white bars + title) or "blur"
+            "ALTER TABLE clips ADD COLUMN sfx TEXT",  # JSON [{t, id}] meme sounds at source seconds, see src/sfx.py
         ]
         for stmt in migration_statements:
             try:
@@ -636,8 +637,9 @@ def create_or_update_clip(
     overlay: Optional[str] = None,
     theme: Optional[str] = None,
     concept_source: Optional[str] = None,
+    sfx: Optional[str] = None,
 ) -> int:
-    """Insert or update a clip for a candidate. `cuts` is JSON [[start_s, end_s]]; None keeps the stored cuts."""
+    """Insert or update a clip for a candidate. `cuts` is JSON [[start_s, end_s]]; None keeps the stored cuts (and sfx)."""
     now = now_utc_iso()
     with get_connection() as conn:
         cur = conn.cursor()
@@ -653,13 +655,13 @@ def create_or_update_clip(
                     music_track = ?, silence_trim = ?, silence_trim_s = ?, punch_in_zoom = ?, show_hook = ?,
                     letterbox_style = ?, file_path = ?, thumb_path = ?, status = ?, cuts = COALESCE(?, cuts), zooms = COALESCE(?, zooms),
                     concept = COALESCE(?, concept), segments = COALESCE(?, segments), overlay = COALESCE(?, overlay),
-                    theme = COALESCE(?, theme), concept_source = COALESCE(?, concept_source)
+                    theme = COALESCE(?, theme), concept_source = COALESCE(?, concept_source), sfx = COALESCE(?, sfx)
                 WHERE id = ?
                 """,
                 (
                     new_version, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, cuts, zooms, concept, segments, overlay, theme, concept_source, clip_id
+                    file_path, thumb_path, status, cuts, zooms, concept, segments, overlay, theme, concept_source, sfx, clip_id
                 )
             )
             return clip_id
@@ -669,14 +671,14 @@ def create_or_update_clip(
                 INSERT INTO clips (
                     candidate_id, version, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, created_at, cuts, zooms, concept, segments, overlay, theme, concept_source
-                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    file_path, thumb_path, status, created_at, cuts, zooms, concept, segments, overlay, theme, concept_source, sfx
+                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
                     candidate_id, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, now, cuts, zooms, concept or "single", segments, overlay, theme, concept_source
+                    file_path, thumb_path, status, now, cuts, zooms, concept or "single", segments, overlay, theme, concept_source, sfx
                 )
             )
             return cur.fetchone()[0]
@@ -695,7 +697,7 @@ def get_clip_with_details(clip_id: int) -> Optional[sqlite3.Row]:
                    cand.title as cand_title, cand.hook_text as cand_hook,
                    cand.punchline, cand.reason, cand.final_score, cand.signal_score,
                    cand.llm_score, cand.mood, cand.chat_mood, cand.features,
-                   cand.needs_context, cand.post_caption as cand_caption, cand.hashtags as cand_hashtags,
+                   cand.needs_context, cand.post_caption as cand_caption, cand.hashtags as cand_hashtags, cand.origin as cand_origin,
                    cand.start_s as orig_start_s, cand.end_s as orig_end_s, cand.payoff_t, cand.segments AS cand_segments,
                    v.id as video_id, v.title as video_title, v.url as video_url,
                    s.id as source_id, s.display_name as source_name, s.kind as source_kind,
@@ -858,7 +860,7 @@ def create_source(data: Dict[str, Any]) -> int:
                 data.get("caption_y", 0.85),
                 1 if data.get("music") else 0,
                 data.get("default_music_mood", "chill"),
-                1 if data.get("silence_trim", 1) else 0,
+                1 if data.get("silence_trim", 0) else 0,
                 1 if data.get("punch_in_zoom", 1) else 0,
                 data.get("chat_offset_s", 12.0),
                 data.get("letterbox_style", "title"),

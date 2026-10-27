@@ -263,11 +263,19 @@
     <div class="field">
       <span class="field__label" id="{{ prefix }}-lbl-cuts">Cut pauses</span>
       <div class="segmented" role="radiogroup" aria-labelledby="{{ prefix }}-lbl-cuts">
-        {%- for v, label in [("auto", "Auto"), ("tight", "Tight, over 0.6 s"), ("natural", "Natural, over 1.2 s"), ("off", "Off")] %}
+        {%- for v, label in [("auto", "Auto"), ("natural", "On, over 1.5 s"), ("off", "Off")] %}
         <input type="radio" name="cut_pauses" id="{{ prefix }}-cut-{{ v }}" value="{{ v }}" {% if p.cut_pauses == v %}checked{% endif %}><label for="{{ prefix }}-cut-{{ v }}">{{ label }}</label>
         {%- endfor %}
       </div>
-      <p class="field__help">Auto lets the AI pick per clip. Each clip can be set to any length in review.</p>
+      <p class="field__help">Auto lets the AI choose on or off per clip. Each clip can be set to any length in review.</p>
+    </div>
+
+    <div class="field">
+      <label class="switch-row">
+        <input type="checkbox" name="ai_cuts" value="on" class="switch" role="switch" {% if p.ai_cuts %}checked{% endif %}>
+        <span class="field__label">AI cuts</span>
+      </label>
+      <p class="field__help">Lets the AI editor cut filler lines out of a clip. Off keeps every line. Cuts you make by hand in review always apply.</p>
     </div>
   </div>
   <script>
@@ -287,6 +295,7 @@
         pick('layout', p.layout); pick('caption_style', p.caption_style); pick('cut_pauses', p.cut_pauses);
         pick('music', p.music === 'auto' ? 'auto' : p.music ? 'on' : 'off');
         root.querySelector('input[name="captions"]').checked = Boolean(p.captions);
+        root.querySelector('input[name="ai_cuts"]').checked = Boolean(p.ai_cuts);
         root.querySelector('input[name="letterbox_style"]').checked = p.letterbox_style === 'title';
         sync();
       };

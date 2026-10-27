@@ -163,6 +163,8 @@ CREATOR_PRESETS = {
                     "weight_mult": {"laugh": 1.2, "voice_jump": 0.7, "rage_words": 0.5}, "zoom_scale": 1.10},
     "other": {"min_len": 12, "max_len": 60, "setup_pad_s": 5, "end_extend_max_s": 4,
               "weight_mult": {}, "zoom_scale": 1.15},
+    "anime": {"min_len": 12, "max_len": 60, "setup_pad_s": 1, "end_extend_max_s": 3,
+              "weight_mult": {}, "zoom_scale": 1.0},
 }
 
 # Blend weights (§6.4)
@@ -213,11 +215,8 @@ ZOOM_MAX = 1.5            # overlapping pulses never zoom past this
 HOOK_DURATION_S = 2.5
 
 # Internal silence trim threshold (§7.4, optional per-source)
-SILENCE_TRIM_S = 1.2
+SILENCE_TRIM_S = 1.5
 SILENCE_TRIM_BREATH_S = 0.4  # Natural breath duration retained when trimming pauses
-# "tight" pace: cut every pause longer than this, keep a shorter breath (jump-cut style)
-SILENCE_TRIM_TIGHT_S = 0.6
-SILENCE_TRIM_TIGHT_BREATH_S = 0.2
 JUMP_CUT_ZOOM = 1.08  # alternate segments are zoomed by this to hide jump cuts
 
 # Music folder & ducking (§7.3)
@@ -228,6 +227,10 @@ MUSIC_DUCK_THRESHOLD = 0.03  # detection threshold for speech sidechain
 MUSIC_DUCK_RATIO = 5.0       # compression ratio when speech active
 MUSIC_DUCK_ATTACK_MS = 15    # fast attack
 MUSIC_DUCK_RELEASE_MS = 250  # smooth release back to baseline
+
+# Meme sound effects (src/sfx.py). Fetched on first use, not in git.
+SFX_DIR = DATA_DIR / "sfx"
+SFX_GAIN_DB = -4.0  # sound effects sit a little under the speech before loudnorm
 
 # ─── Phase 3: Streams, Chat & Watcher Settings (Blueprint §5, §6.1, §13) ────
 TOOLS_DIR = ROOT_DIR / "tools"

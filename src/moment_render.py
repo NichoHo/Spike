@@ -15,7 +15,8 @@ from src.pipeline.stage9c_render import run_stage9c_render
 # What a job uses when neither the source nor the New page says otherwise. Same keys as a job's settings.
 DEFAULT_PRESETS: Dict[str, Any] = {
     "layout": "auto", "letterbox_style": "title", "captions": True, "caption_style": "bold_pop",
-    "profanity_mask": True, "music": "auto", "cut_pauses": "auto",
+    "profanity_mask": True, "music": "auto", "cut_pauses": "off",
+    "ai_cuts": False,
 }
 
 

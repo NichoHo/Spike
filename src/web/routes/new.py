@@ -83,13 +83,13 @@ async def new_job_page(
 
 
 def parse_presets(layout: str, captions: Optional[str], music: str, cut_pauses: str, letterbox_style: str,
-                  caption_style: str) -> Dict[str, Any]:
+                  caption_style: str, ai_cuts: Optional[str] = None) -> Dict[str, Any]:
     """Render options from the New page or the source form, in the shape a job's settings use.
     Switches send their value when on and nothing when off. Profanity is always masked."""
     if (
         layout not in VALID_LAYOUTS
         or music not in ("auto", "on", "off")
-        or cut_pauses not in ("auto", "tight", "natural", "off")
+        or cut_pauses not in ("auto", "natural", "off")
         or caption_style not in ("bold_pop", "karaoke", "clean")
     ):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid processing option.")
@@ -101,6 +101,7 @@ def parse_presets(layout: str, captions: Optional[str], music: str, cut_pauses: 
         "profanity_mask": True,
         "music": "auto" if music == "auto" else music == "on",
         "cut_pauses": cut_pauses,
+        "ai_cuts": ai_cuts not in (None, "off"),
     }
 
 
@@ -143,7 +144,8 @@ async def submit_new_job(
     layout: Optional[str] = Form(None),  # absent when the options are hidden: the job follows the source's presets
     captions: Optional[str] = Form(None),  # switch: "on" when on
     music: str = Form("auto"),
-    cut_pauses: str = Form("auto"),
+    cut_pauses: str = Form("off"),
+    ai_cuts: Optional[str] = Form(None),  # switch: "on" when on
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     caption_style: str = Form("bold_pop"),
     file: Optional[UploadFile] = File(None),
@@ -155,7 +157,7 @@ async def submit_new_job(
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Finish setup first: " + ", ".join(i["title"] for i in todo) + ".")
     if not (target_clips.strip() == "" or target_clips.strip().isdigit()):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid processing option.")
-    settings = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style) if layout else {}
+    settings = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style, ai_cuts) if layout else {}
     if target_clips.strip():
         settings["target_clips"] = max(1, min(MAX_TARGET_CLIPS, int(target_clips)))
 
