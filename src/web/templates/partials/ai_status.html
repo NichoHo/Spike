@@ -24,6 +24,8 @@
     </div>
   {% endfor %}
 
+  {{ ui.button("Key usage", size="sm", icon="chart-line", href="/ai-usage", attrs={"data-tooltip": "Calls today for each Gemini key"}) }}
+
   {% if user and user.role == 'admin' %}
     {% if ai.paused %}
       {{ ui.button("Resume Claude", size="sm", icon="play", attrs={"data-claude-pause": "0"}) }}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+
+{% block content %}
+<header class="page-header">
+  <div class="page-header__left">
+    <h1 class="page-header__title">Gemini key usage</h1>
+    <p class="page-header__description">Calls made today with each key in GEMINI_API_KEY. Gemini does not report remaining quota, so these are Spike's own counts. The limit is learned from Google's limit errors. Quotas reset at {{ resets_at }} (midnight Pacific).</p>
+  </div>
+</header>
+
+{% if not rows %}
+  {{ ui.empty_state("warning", "No Gemini key found", "Add GEMINI_API_KEY to the .env file (key1,key2,key3 for several), then restart Spike.") }}
+{% else %}
+  <p class="ai-status__note">Spike sees {{ rows | length }} key{{ "s" if rows | length != 1 }}. Add more with commas in .env: GEMINI_API_KEY=key1,key2,key3</p>
+  {% if duplicates %}
+    <p class="ai-status__note">{{ duplicates }} key{{ "s are" if duplicates != 1 else " is" }} listed more than once. A repeated key shares one quota, so it adds nothing.</p>
+  {% endif %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Key</th>
+          {% for m in models %}<th class="num">{{ m | replace("gemini-", "") }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>Key {{ r.n }} <span class="ai-status__note">…{{ r.tail }}</span></td>
+            {% for g in r.models %}
+              <td class="num tabular">
+                {{ g.used }} / {{ g.limit }}
+                {% if g.capped %}{{ ui.badge("Out for today", "danger") }}{% endif %}
+                <meter min="0" max="{{ g.limit }}" value="{{ g.used }}" low="{{ (g.limit * 0.7) | round }}" high="{{ (g.limit * 0.9) | round }}" optimum="0"
+                       aria-label="Key {{ r.n }}, {{ g.model }}: {{ g.used }} of {{ g.limit }} calls today"></meter>
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

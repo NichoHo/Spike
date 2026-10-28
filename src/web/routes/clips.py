@@ -84,6 +84,36 @@ def ai_status() -> Dict[str, Any]:
     }
 
 
+@router.get("/ai-usage", response_class=HTMLResponse)
+async def ai_usage_page(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+    """Gemini calls today for each key in GEMINI_API_KEY, per model. Keys are shown by position and last 4 characters only."""
+    from datetime import datetime
+    from src import config
+    keys = config.gemini_keys()
+    models = list(dict.fromkeys([config.DEFAULT_GEMINI_MODEL, config.JUDGE_GEMINI_MODEL]))
+    rows = []
+    for i, k in enumerate(keys, 1):
+        per_model = []
+        for m in models:
+            capped = gemini_budget.key_capped(m, k)
+            limit = gemini_budget.per_key_limit(m)
+            per_model.append({"model": m, "used": limit if capped else gemini_budget.key_used(m, k), "limit": limit, "capped": capped})
+        rows.append({"n": i, "tail": k[-4:], "models": per_model})
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/ai_usage.html",
+        context={
+            "page_title": "Gemini key usage",
+            "active_nav": "settings",
+            "user": user,
+            "rows": rows,
+            "models": models,
+            "duplicates": len(keys) - len(set(keys)),
+            "resets_at": datetime.fromtimestamp(gemini_budget.reset_at()).strftime("%a %H:%M"),
+        },
+    )
+
+
 @router.get("/partials/ai-status", response_class=HTMLResponse)
 async def ai_status_partial(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     """The sidebar panel, re-rendered for app.js to swap in."""
