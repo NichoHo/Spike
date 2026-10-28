@@ -960,7 +960,7 @@ def list_clip_ai_edits(clip_id: int) -> List[Dict[str, Any]]:
 # ── Other moments: render a stored candidate on demand ───────────────────────
 
 def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[Dict[str, Any]]]:
-    """low_score and rejected candidates per video with their render job state, earliest first.
+    """low_score and rejected candidates (source "spike") and the chat picks (source "chat") per video with their render job state, earliest first.
     Moments that mostly overlap an already rendered clip of the same video are left out (same moment, other title).
     video_ids=None means every video."""
     if video_ids is not None and not video_ids:
@@ -971,10 +971,11 @@ def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[
         rows = conn.execute(
             f"""
             SELECT c.id, c.video_id, c.title, c.start_s, c.end_s, c.llm_score, c.status, c.status_reason, c.humor_type,
+                   CASE c.status WHEN 'chat_pick' THEN 'chat' ELSE 'spike' END AS source,
                    r.status AS render_status, r.error AS render_error
             FROM candidates c
             LEFT JOIN candidate_renders r ON r.candidate_id = c.id
-            WHERE {where_video}c.status IN ('low_score', 'rejected')
+            WHERE {where_video}c.status IN ('low_score', 'rejected', 'chat_pick')
               AND NOT EXISTS (
                   SELECT 1 FROM clips k JOIN candidates kc ON kc.id = k.candidate_id
                   WHERE kc.video_id = c.video_id AND kc.id != c.id
@@ -989,7 +990,7 @@ def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[
     kept: Dict[int, List[Dict[str, Any]]] = {}
     for r in sorted(map(dict, rows), key=lambda m: (m["render_status"] is None, -(m["llm_score"] or 0), m["start_s"])):
         same = kept.setdefault(r["video_id"], [])
-        if not any(min(k["end_s"], r["end_s"]) - max(k["start_s"], r["start_s"])
+        if not any(k["source"] == r["source"] and min(k["end_s"], r["end_s"]) - max(k["start_s"], r["start_s"])
                    > 0.5 * min(k["end_s"] - k["start_s"], r["end_s"] - r["start_s"]) for k in same):
             same.append(r)
     return {vid: sorted(ms, key=lambda m: m["start_s"]) for vid, ms in kept.items()}

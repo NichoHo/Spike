@@ -146,14 +146,14 @@ def compute_chat_users_baseline(
 # ── Stored candidates vs ground truth (§6.7) ─────────────────────────────────
 
 def load_db_candidates(video_id: int) -> List[Dict[str, Any]]:
-    """All stored candidates of a video, whatever their status (selected, low_score, rejected, hubris)."""
+    """Spike's stored candidates of a video, whatever their status (selected, low_score, rejected, hubris). Chat picks are the baseline, not Spike."""
     from src.db import get_connection, init_db
 
     init_db()  # adds columns older databases lack (segments); safe to repeat
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT id, start_s, end_s, status, llm_score, final_score, title, humor_type, segments, concept, concept_spec "
-            "FROM candidates WHERE video_id = ?",
+            "FROM candidates WHERE video_id = ? AND status != 'chat_pick'",
             (video_id,),
         ).fetchall()
     out = []

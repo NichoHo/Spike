@@ -713,6 +713,10 @@ a.time-chip:focus-visible { outline: 2px solid var(--color-focus); outline-offse
 .moments > summary svg { transition: transform var(--duration-fast) var(--ease-out); }
 .moments[open] > summary svg { transform: rotate(90deg); }
 .moments[open] > summary { border-bottom: 1px solid var(--color-border); }
+.moments .tabs--inline { margin: 0; padding: 0 var(--space-4); border-bottom: 1px solid var(--color-border); }
+.moments .tab { background: none; border: 0; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.moments .tab:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+.moments__note { margin: 0; padding: var(--space-3) var(--space-4); font-size: 13px; line-height: 18px; color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); }
 .moment-row {
   display: grid; grid-template-columns: 150px minmax(0, 1fr) auto auto; align-items: center; justify-items: start;
   gap: var(--space-3); min-height: 52px; padding: var(--space-2) var(--space-4);

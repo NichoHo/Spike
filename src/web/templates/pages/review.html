@@ -73,27 +73,40 @@
         </div>
 
         {% if group.moments %}
+        {% set spike_moments = group.moments | selectattr('source', 'equalto', 'spike') | list %}
+        {% set chat_moments = group.moments | selectattr('source', 'equalto', 'chat') | list %}
         <details class="moments">
           <summary>
             {{ ui.icon("caret-right", 14) }}
             <span>Other moments ({{ group.moments | length }})</span>
           </summary>
-          {% for m in group.moments %}
-          <div class="moment-row">
-            {{ ui.time_chip(group.video.url, m.start_s, end=m.end_s) }}
-            <div class="moment-row__title">
-              {{ m.title or 'Untitled moment' }}
-              {% if m.status_reason %}<span class="moment-row__why">{{ m.status_reason }}</span>{% endif %}
+          {% if chat_moments %}
+          <div class="tabs tabs--inline" role="tablist" aria-label="Other moments by source">
+            <button type="button" class="tab is-active" role="tab" aria-selected="true" data-moment-tab="spike">Spike picks ({{ spike_moments | length }})</button>
+            <button type="button" class="tab" role="tab" aria-selected="false" data-moment-tab="chat">Chat picks ({{ chat_moments | length }})</button>
+          </div>
+          {% endif %}
+          {% for source, moments in (('spike', spike_moments), ('chat', chat_moments)) if moments or source == 'spike' %}
+          <div role="tabpanel" data-moment-panel="{{ source }}"{% if source == 'chat' %} hidden{% endif %}>
+            {% if source == 'chat' %}<p class="moments__note">The busiest moments of the stream's chat, at least 45 seconds apart. Spike did not choose these.</p>{% endif %}
+            {% for m in moments %}
+            <div class="moment-row">
+              {{ ui.time_chip(group.video.url, m.start_s, end=m.end_s) }}
+              <div class="moment-row__title">
+                {{ m.title or 'Untitled moment' }}
+                {% if m.status_reason %}<span class="moment-row__why">{{ m.status_reason }}</span>{% endif %}
+              </div>
+              {% if source == 'chat' %}<span class="badge badge--muted">Chat</span>{% else %}{{ ui.score(m.llm_score) }}{% endif %}
+              {% if m.render_status in ('queued', 'running') %}
+                <span class="badge badge--accent">{{ 'Rendering' if m.render_status == 'running' else 'Queued' }}</span>
+              {% else %}
+                <form method="post" action="/candidates/{{ m.id }}/render">
+                  <button type="submit" class="btn btn--secondary btn--sm">{{ 'Try again' if m.render_status == 'failed' else 'Render' }}</button>
+                </form>
+                {% if m.render_status == 'failed' %}<span class="moment-row__why" style="grid-column: 2 / -1; color: var(--color-danger-text);">{{ m.render_error or 'The render failed.' }}</span>{% endif %}
+              {% endif %}
             </div>
-            {{ ui.score(m.llm_score) }}
-            {% if m.render_status in ('queued', 'running') %}
-              <span class="badge badge--accent">{{ 'Rendering' if m.render_status == 'running' else 'Queued' }}</span>
-            {% else %}
-              <form method="post" action="/candidates/{{ m.id }}/render">
-                <button type="submit" class="btn btn--secondary btn--sm">{{ 'Try again' if m.render_status == 'failed' else 'Render' }}</button>
-              </form>
-              {% if m.render_status == 'failed' %}<span class="moment-row__why" style="grid-column: 2 / -1; color: var(--color-danger-text);">{{ m.render_error or 'The render failed.' }}</span>{% endif %}
-            {% endif %}
+            {% endfor %}
           </div>
           {% endfor %}
         </details>
@@ -103,6 +116,31 @@
   </div>
 {% endif %}
 {% include "partials/moment_picker.html" %}
+<script>
+  // Other moments: switch between Spike's picks and the chat picks; the choice survives the auto reload.
+  (function () {
+    var KEY = "spike.momentTab";
+    function show(box, name) {
+      box.querySelectorAll("[data-moment-tab]").forEach(function (t) {
+        var on = t.dataset.momentTab === name;
+        t.classList.toggle("is-active", on);
+        t.setAttribute("aria-selected", on);
+      });
+      box.querySelectorAll("[data-moment-panel]").forEach(function (p) { p.hidden = p.dataset.momentPanel !== name; });
+    }
+    var saved = null;
+    try { saved = sessionStorage.getItem(KEY); } catch (e) {}
+    document.querySelectorAll(".moments").forEach(function (box) {
+      if (saved && box.querySelector('[data-moment-tab="' + saved + '"]')) show(box, saved);
+      box.addEventListener("click", function (e) {
+        var t = e.target.closest("[data-moment-tab]");
+        if (!t) return;
+        show(box, t.dataset.momentTab);
+        try { sessionStorage.setItem(KEY, t.dataset.momentTab); } catch (err) {}
+      });
+    });
+  })();
+</script>
 <script>
   // Reload when a finished job or rerender changes the queue.
   (function () {

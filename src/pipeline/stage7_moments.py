@@ -507,6 +507,21 @@ def chat_peak_proposals(comments: List[Dict[str, Any]], video_duration: float) -
             for t, v in busiest_chat_seconds(comments, int(video_duration), CHAT_PEAK_SEEDS)]
 
 
+def store_chat_picks(video_id: int, comments: List[Dict[str, Any]], video_duration: float) -> int:
+    """Keep the busiest-chat moments (the eval's chat baseline) as 'chat_pick' candidates, so the review page can
+    list them next to Spike's own picks and render any of them on demand. Replaces a video's earlier chat picks."""
+    from src.db import get_connection
+    with get_connection() as conn:
+        conn.execute("DELETE FROM candidates WHERE video_id = ? AND status = 'chat_pick'", (video_id,))
+    picks = busiest_chat_seconds(comments, int(video_duration), CHAT_PEAK_SEEDS)
+    for t, v in picks:
+        insert_candidate(video_id, {
+            "peak_t": t, "start_s": max(0.0, t - 20.0), "end_s": min(video_duration, t + 15.0), "origin": "chat_pick",
+            "title": f"Busiest chat moment ({v:.0f} chatters)", "status": "chat_pick", "humor_type": "chat",
+        })
+    return len(picks)
+
+
 def crowd_seed(moment_s: float, topic: str, video_duration: float) -> Dict[str, Any]:
     st = max(0.0, moment_s - 10.0)  # some setup before the moment; the judge sets the real edges
     et = min(video_duration, st + 45.0)
@@ -1386,4 +1401,6 @@ def run_stage7_moments(
     n_rej = sum(1 for c in judged if c.get("status") == "rejected")
     print(f"  [stage 7] Selected {len(selected)} moments (scores: {[c['llm_score'] for c in selected]}); "
           f"stored {n_low} low_score, {n_rej} rejected, {len(hubris_props)} hubris.")
+    if has_chat and chat_comments:
+        print(f"  [stage 7] Stored {store_chat_picks(video_id, chat_comments, duration_s)} chat picks.")
     return selected
