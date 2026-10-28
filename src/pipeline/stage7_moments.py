@@ -507,6 +507,16 @@ def chat_peak_proposals(comments: List[Dict[str, Any]], video_duration: float) -
             for t, v in busiest_chat_seconds(comments, int(video_duration), CHAT_PEAK_SEEDS)]
 
 
+CHAT_PEAK_BOOST = 20.0  # blend points (0 to 100) for a clip that holds one of the chat's 10 busiest moments
+CHAT_PEAK_LAG_S = 10.0  # chat reacts after the moment, so a peak this soon after the clip ends still counts
+
+
+def chat_peak_boost(c: Dict[str, Any], peaks: List[int]) -> float:
+    """Spike's pick and one of chat's picks agreeing is the best evidence of a good clip: chat alone beat Spike on
+    the eval. The clip keeps its own edges; only its rank rises."""
+    return CHAT_PEAK_BOOST if any(c["start_s"] <= t <= c["end_s"] + CHAT_PEAK_LAG_S for t in peaks) else 0.0
+
+
 def store_chat_picks(video_id: int, comments: List[Dict[str, Any]], video_duration: float) -> int:
     """Keep the busiest-chat moments (the eval's chat baseline) as 'chat_pick' candidates, so the review page can
     list them next to Spike's own picks and render any of them on demand. Replaces a video's earlier chat picks."""
@@ -1154,6 +1164,7 @@ def run_stage7_moments(
     # With chat, a candidate's signal score is how busy chat was over its own window (plus chat lag). The peak's
     # score it would inherit otherwise is 1.0 for every transcript-chunk proposal, so the ranking was mostly ties.
     chat_curve = chatters_per_second(chat_comments, int(duration_s) + 1) if has_chat and chat_comments else None
+    chat_peaks = [t for t, _ in busiest_chat_seconds(chat_comments, int(duration_s), CHAT_PEAK_SEEDS)] if chat_curve is not None else []
 
     segments = split_into_phrases(transcript.get("segments", []))
     preset = (profile_ctx or {}).get("preset") or get_preset(None)
@@ -1289,7 +1300,7 @@ def run_stage7_moments(
     # Gemini watches the shortlist: the best distinct moments by the transcript judge's uncapped score blended with
     # the signal score, the same weights as the final ranking
     w_llm = LLM_WEIGHT_WITH_CHAT if has_chat else LLM_WEIGHT_WITHOUT_CHAT
-    blend = {id(c): w_llm * t + (1.0 - w_llm) * s for c, t, s in zip(
+    blend = {id(c): w_llm * t + (1.0 - w_llm) * s + chat_peak_boost(c, chat_peaks) for c, t, s in zip(
         evaluated, percentile_avg_rank([c["text_score"] for c in evaluated]),
         percentile_avg_rank([c["raw_signal_score"] for c in evaluated]))}
     watched = 0
@@ -1325,7 +1336,7 @@ def run_stage7_moments(
         for c, t_pct, s_pct in zip(evaluated, txt_pcts, sig_pcts):
             c["llm_score"] = int(round(c["raw_llm_score"]))
             c["signal_score"] = int(round(s_pct))
-            c["final_score"] = ranking_score(w_llm * t_pct + (1.0 - w_llm) * s_pct, bool(c.get("video_gated")),
+            c["final_score"] = ranking_score(w_llm * t_pct + (1.0 - w_llm) * s_pct + chat_peak_boost(c, chat_peaks), bool(c.get("video_gated")),
                                              (c.get("video") or {}).get("reaction") == "peak")
             c["status"] = "low_score"
 

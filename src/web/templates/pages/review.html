@@ -88,7 +88,9 @@
           {% endif %}
           {% for source, moments in (('spike', spike_moments), ('chat', chat_moments)) if moments or source == 'spike' %}
           <div role="tabpanel" data-moment-panel="{{ source }}"{% if source == 'chat' %} hidden{% endif %}>
-            {% if source == 'chat' %}<p class="moments__note">The busiest moments of the stream's chat, at least 45 seconds apart. Spike did not choose these.</p>{% endif %}
+            {# Accuracy: recall@10, loose tolerance, 9-VOD eval (scripts/eval_stage7.py, 2026-10-27). Update after each eval run. #}
+            {% if source == 'chat' %}<p class="moments__note">The busiest moments of the stream's chat, at least 45 seconds apart. Spike did not choose these. Accuracy: on 9 test streams, chat's top 10 caught 22% of the 10 moments viewers clipped most.</p>
+            {% else %}<p class="moments__note">Spike's next 10 best moments that it did not render. Chat agrees marks the ones chat picked too: the best ones to render anyway. Accuracy: on 9 test streams, Spike's top 10 caught 20% of the 10 moments viewers clipped most.</p>{% endif %}
             {% for m in moments %}
             <div class="moment-row">
               {{ ui.time_chip(group.video.url, m.start_s, end=m.end_s) }}
@@ -96,6 +98,7 @@
                 {{ m.title or 'Untitled moment' }}
                 {% if m.status_reason %}<span class="moment-row__why">{{ m.status_reason }}</span>{% endif %}
               </div>
+              {% if m.chat_agrees %}<span class="badge badge--success" title="One of chat's 10 busiest moments falls in this clip">Chat agrees</span>{% endif %}
               {% if source == 'chat' %}<span class="badge badge--muted">Chat</span>{% else %}{{ ui.score(m.llm_score) }}{% endif %}
               {% if m.render_status in ('queued', 'running') %}
                 <span class="badge badge--accent">{{ 'Rendering' if m.render_status == 'running' else 'Queued' }}</span>

@@ -91,6 +91,26 @@ def test_other_moments_skip_rendered_and_run_earliest_first(clip):
     assert ids == [twin, near, clip["low"]]     # mostly overlapping collapses to the higher score; a small overlap stays
 
 
+def test_other_moments_keep_only_spikes_best_ten(clip):
+    from src.db import OTHER_SPIKE_MOMENTS, list_other_moments
+    base = dict(origin="llm_chunk", punchline="p", hook_text="h", post_caption="c", mood="laugh", status="low_score", llm_score=60)
+    ids = [insert_candidate(clip["video"], {**base, "start_s": 2000.0 + 60 * i, "end_s": 2030.0 + 60 * i,
+                                            "final_score": 70 + i, "title": f"m{i}"}) for i in range(15)]
+    kept = [m["id"] for m in list_other_moments([clip["video"]])[clip["video"]]]
+    assert len(kept) == OTHER_SPIKE_MOMENTS and set(kept) == set(ids[-OTHER_SPIKE_MOMENTS:])   # the 10 best ranked
+
+
+def test_a_spike_moment_holding_a_chat_peak_is_marked_chat_agrees(clip):
+    from src.db import list_other_moments
+    base = dict(origin="llm_chunk", punchline="p", hook_text="h", post_caption="c", mood="laugh", status="low_score", llm_score=60)
+    both = insert_candidate(clip["video"], {**base, "start_s": 2000.0, "end_s": 2030.0, "title": "both"})
+    insert_candidate(clip["video"], {**base, "peak_t": 2035.0, "start_s": 2015.0, "end_s": 2050.0, "status": "chat_pick", "title": "chat"})
+    agrees = {m["id"]: m["chat_agrees"] for m in list_other_moments([clip["video"]])[clip["video"]]}
+    assert agrees[both] and not agrees[clip["low"]]
+    html = clip["client"].get("/").text
+    assert "Chat agrees</span>" in html
+
+
 def test_clip_page_has_zoom_cut_and_editor_controls(clip):
     html = clip["client"].get(f"/clips/{clip['clip']}").text
     for needle in ('id="btn-zoom"', 'id="zoom-popover"', 'id="edit-strip"', "Cut this part", "Mark start", "Mark end",

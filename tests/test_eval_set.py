@@ -60,3 +60,10 @@ def test_chat_peaks_are_the_busiest_moments_at_least_45_s_apart():
     seeds = chat_peak_proposals(comments, 600.0)
     assert [s["origin"] for s in seeds] == ["chat_peak", "chat_peak"] and not any(s["crowd"] for s in seeds)
     assert seeds[0]["clip_start"] < 100 < seeds[0]["clip_end"] and seeds[1]["clip_start"] < 300 < seeds[1]["clip_end"]
+
+
+def test_a_spike_pick_holding_a_chat_peak_ranks_higher():
+    from src.pipeline.stage7_moments import chat_peak_boost
+    clip = {"start_s": 100.0, "end_s": 130.0}
+    assert chat_peak_boost(clip, [120]) > 0 and chat_peak_boost(clip, [138]) > 0   # chat lags the moment
+    assert chat_peak_boost(clip, [90]) == 0 and chat_peak_boost(clip, [150]) == 0 and chat_peak_boost(clip, []) == 0

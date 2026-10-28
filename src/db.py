@@ -959,9 +959,13 @@ def list_clip_ai_edits(clip_id: int) -> List[Dict[str, Any]]:
 
 # ── Other moments: render a stored candidate on demand ───────────────────────
 
+OTHER_SPIKE_MOMENTS = 10  # nobody reads 50 near misses; the chat tab shows 10 too
+
+
 def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[Dict[str, Any]]]:
     """low_score and rejected candidates (source "spike") and the chat picks (source "chat") per video with their render job state, earliest first.
     Moments that mostly overlap an already rendered clip of the same video are left out (same moment, other title).
+    Spike's list keeps its OTHER_SPIKE_MOMENTS best by rank (plus any with a render job), like the chat's 10 picks.
     video_ids=None means every video."""
     if video_ids is not None and not video_ids:
         return {}
@@ -970,7 +974,7 @@ def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[
     with get_connection() as conn:
         rows = conn.execute(
             f"""
-            SELECT c.id, c.video_id, c.title, c.start_s, c.end_s, c.llm_score, c.status, c.status_reason, c.humor_type,
+            SELECT c.id, c.video_id, c.title, c.start_s, c.end_s, c.peak_t, c.llm_score, c.final_score, c.status, c.status_reason, c.humor_type,
                    CASE c.status WHEN 'chat_pick' THEN 'chat' ELSE 'spike' END AS source,
                    r.status AS render_status, r.error AS render_error
             FROM candidates c
@@ -987,9 +991,20 @@ def list_other_moments(video_ids: Optional[List[int]] = None) -> Dict[int, List[
         ).fetchall()
     # Moments that mostly overlap each other are one moment: keep the one with a render job, else the higher score.
     # ponytail: O(n²) per video, fine for tens of candidates
+    rows = [dict(r) for r in rows]
+    # A Spike moment holding one of chat's busiest seconds (or one up to 10 s after it: chat lags) has the crowd's
+    # vote too, the same test as stage 7's chat_peak_boost
+    peaks: Dict[int, List[float]] = {}
+    for r in rows:
+        if r["source"] == "chat" and r["peak_t"] is not None:
+            peaks.setdefault(r["video_id"], []).append(r["peak_t"])
+    for r in rows:
+        r["chat_agrees"] = r["source"] == "spike" and any(r["start_s"] <= t <= r["end_s"] + 10.0 for t in peaks.get(r["video_id"], []))
     kept: Dict[int, List[Dict[str, Any]]] = {}
-    for r in sorted(map(dict, rows), key=lambda m: (m["render_status"] is None, -(m["llm_score"] or 0), m["start_s"])):
+    for r in sorted(rows, key=lambda m: (m["render_status"] is None, -(m["final_score"] or 0), -(m["llm_score"] or 0), m["start_s"])):
         same = kept.setdefault(r["video_id"], [])
+        if r["source"] == "spike" and r["render_status"] is None                 and sum(k["source"] == "spike" for k in same) >= OTHER_SPIKE_MOMENTS:
+            continue
         if not any(k["source"] == r["source"] and min(k["end_s"], r["end_s"]) - max(k["start_s"], r["start_s"])
                    > 0.5 * min(k["end_s"] - k["start_s"], r["end_s"] - r["start_s"]) for k in same):
             same.append(r)
