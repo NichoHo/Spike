@@ -15,11 +15,15 @@ TTL_S = 3600
 MAX_HOPS = 15
 TV_LIKE = {"TV", "TV_SHORT", "ONA"}   # what counts as a season; movies and specials are not
 
-SEARCH_QUERY = """query ($q: String) { Page(perPage: 8) { media(search: $q, type: ANIME, sort: SEARCH_MATCH) {
-  id title { romaji english } format episodes seasonYear } } }"""
+FIELDS = "id idMal title { romaji english } format episodes seasonYear coverImage { large } nextAiringEpisode { episode }"
+SEARCH_QUERY = """query ($q: String) { Page(perPage: 8) { media(search: $q, type: ANIME, sort: SEARCH_MATCH) { %s } } }""" % FIELDS
+SHELF_QUERIES = {   # trending: airing shows people watch this week; popular: the most-followed shows of all time
+    "trending": "{ Page(perPage: 12) { media(type: ANIME, isAdult: false, sort: [TRENDING_DESC], status: RELEASING) { %s } } }" % FIELDS,
+    "popular": "{ Page(perPage: 12) { media(type: ANIME, isAdult: false, sort: [POPULARITY_DESC], format_in: [TV, TV_SHORT, ONA]) { %s } } }" % FIELDS,
+}
 NODE_QUERY = """query ($id: Int) { Media(id: $id, type: ANIME) {
-  id title { romaji english } format episodes seasonYear
-  relations { edges { relationType(version: 2) node { id type format } } } } }"""
+  %s
+  relations { edges { relationType(version: 2) node { id type format } } } } }""" % FIELDS
 
 _cache: Dict[str, Any] = {}
 
@@ -42,9 +46,18 @@ def _cached(key: str, make: Callable[[], Any]) -> Any:
 
 
 def brief(m: Dict[str, Any]) -> Dict[str, Any]:
+    """aired: the last episode out while the show airs, None once it has finished."""
     t = m.get("title") or {}
+    nxt = (m.get("nextAiringEpisode") or {}).get("episode")
     return {"id": m["id"], "title": t.get("english") or t.get("romaji") or str(m["id"]), "format": m.get("format"),
-            "episodes": m.get("episodes"), "year": m.get("seasonYear")}
+            "episodes": m.get("episodes"), "year": m.get("seasonYear"), "cover": (m.get("coverImage") or {}).get("large"),
+            "mal": m.get("idMal"),
+            "aired": nxt - 1 if nxt else None}
+
+
+def shelf(kind: str, post: Callable[[str, Dict[str, Any]], Dict[str, Any]] = _post) -> List[Dict[str, Any]]:
+    """The shows listed before anything is typed: "trending" or "popular"."""
+    return _cached("shelf:" + kind, lambda: [brief(m) for m in post(SHELF_QUERIES[kind], {})["Page"]["media"]])
 
 
 def search(q: str, post: Callable[[str, Dict[str, Any]], Dict[str, Any]] = _post) -> List[Dict[str, Any]]:
@@ -115,7 +128,9 @@ if __name__ == "__main__":
     ids = lambda lst: [s["id"] for s in lst]
     assert ids(seasons(2, fake)) == [1, 2, 3], seasons(2, fake)       # from the middle: back to season 1, forward to 3; the movie is skipped
     assert ids(seasons(3, fake)) == [1, 2, 3] and ids(seasons(1, fake)) == [1, 2, 3]   # the loop 3 -> 1 stops
-    assert seasons(1, fake)[1] == {"id": 2, "title": "Shou 2", "format": "TV", "episodes": 24, "year": 2021}   # romaji when no English title
+    assert seasons(1, fake)[1] == {"id": 2, "title": "Shou 2", "format": "TV", "episodes": 24, "year": 2021,
+                                   "cover": None, "mal": None, "aired": None}   # romaji when no English title
+    assert brief({"id": 4, "title": {}, "nextAiringEpisode": {"episode": 6}})["aired"] == 5   # airing: episodes 1 to 5 are out
     assert seasons(3, fake)[2]["episodes"] is None
     assert ids(seasons(9, fake)) == [1, 2, 3] or ids(seasons(9, fake)) == [9]    # a movie: its PREQUEL is season 2, so the chain is the show's
     n = len(calls)
@@ -123,4 +138,5 @@ if __name__ == "__main__":
     assert len(calls) == n, "cached"
     assert search("  ", fake) == [] and search("x", fake) == []
     assert [r["id"] for r in search("show  one", fake)] == [1, 2]
+    assert [r["id"] for r in shelf("trending", fake)] == [1, 2]
     print("ok")

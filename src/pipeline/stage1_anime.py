@@ -27,9 +27,9 @@ PARODY_TAG_MIN_RANK = 50
 
 # "[Group] Show Name - 12 [1080p].mkv", "Show.Name.S01E12.mkv", "Show Name - 12.mkv"
 _EP_RES = [
-    re.compile(r"[Ss]\d{1,2}[Ee](\d{1,3})"),
-    re.compile(r"\s-\s(\d{1,3})(?:v\d)?(?:\s|$|\[|\()"),
-    re.compile(r"[Ee]p?(?:isode)?[ ._]?(\d{1,3})\b"),
+    re.compile(r"[Ss]\d{1,2}[Ee](\d{1,4})"),
+    re.compile(r"\s-\s(\d{1,4})(?:v\d)?(?:\s|$|\[|\()"),
+    re.compile(r"[Ee]p?(?:isode)?[ ._]?(\d{1,4})\b"),
 ]
 
 

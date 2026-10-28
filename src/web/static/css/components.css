@@ -602,6 +602,33 @@ fieldset.field > legend { padding: 0; margin-bottom: var(--space-2); }
 .lookup__name { font-size: 14px; font-weight: 500; color: var(--color-text); }
 .lookup__sub { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lookup__text { flex: 1; }
+/* From anime shelf: a scroll-snap row of cover cards */
+.shelf__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.shelf { display: grid; grid-auto-flow: column; grid-auto-columns: 104px; gap: var(--space-3); margin: var(--space-2) 0 0; padding: 0 0 var(--space-2); list-style: none; overflow-x: auto; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+.shelf__item { scroll-snap-align: start; min-width: 0; }
+.shelf__card { display: flex; flex-direction: column; gap: var(--space-1); width: 100%; padding: 0; border: 0; background: none; color: var(--color-text); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-md); }
+.shelf__card:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.shelf__cover { width: 100%; aspect-ratio: 2 / 3; border-radius: var(--radius-md); background: var(--color-bg-subtle); object-fit: cover; border: 1px solid var(--color-border); transition: transform 0.15s ease, border-color 0.15s ease; }
+.shelf__card:hover .shelf__cover { border-color: var(--color-border-strong); }
+.shelf__card:active .shelf__cover { transform: scale(0.98); }
+.shelf__card[aria-pressed="true"] .shelf__cover { border-color: var(--color-accent-text); box-shadow: 0 0 0 1px var(--color-accent-text); }
+.shelf__name { font-size: 13px; line-height: 17px; font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.shelf__sub { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+.shelf__item--skeleton { height: 190px; border-radius: var(--radius-md); background: var(--color-bg-subtle); }
+.shelf__empty { grid-column: 1 / -1; font-size: 13px; color: var(--color-text-muted); }
+@media (prefers-reduced-motion: reduce) { .shelf__cover { transition: none; } }
+/* From anime episode list: number, title with tags, fan rating */
+.ep-list { margin: 0; padding: 0; list-style: none; max-height: 320px; overflow-y: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.ep-row { display: grid; grid-template-columns: 4ch minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-2) var(--space-3); border: 0; background: none; color: var(--color-text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.ep-list li + li .ep-row { border-top: 1px solid var(--color-border); }
+.ep-row:hover { background: var(--color-surface-hover); }
+.ep-row:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.ep-row[aria-pressed="true"] { background: var(--color-accent-subtle); }
+.ep-row.is-dim { color: var(--color-text-muted); }
+.ep-row__n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--color-text-muted); }
+.ep-row__title { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.ep-row__title > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-row__stats { display: flex; align-items: center; gap: var(--space-2); font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lookup__count { flex: none; font-size: 12px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
 /* Outreach (OUTREACH.md §6.5): bulk review tables, draft cards, settings grid */

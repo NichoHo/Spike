@@ -73,11 +73,11 @@ def last_video():
     return row[0], json.loads(row[1] or "{}")
 
 
-def test_anime_tab_has_picker_and_no_stream_presets(client):
+def test_anime_tab_has_picker_upload_and_no_stream_presets(client):
     html = client.get("/new?tab=anime").text
-    assert 'id="field-anime-search"' in html
-    assert 'name="anime_source"' not in html and 'id="field-file"' not in html     # the video source comes later
-    assert 'class="btn btn--primary btn--lg" disabled' in html                     # so the tab cannot start a job yet
+    assert 'id="field-anime-search"' in html and 'id="anime-shelf"' in html
+    assert 'name="anime_source" value="file"' in html and 'id="field-file"' in html   # the user uploads the episode
+    assert 'class="btn btn--primary btn--lg" disabled' not in html
     assert 'id="kind-anime"' not in html                       # the tab itself says it is anime
     assert 'id="render-presets" class="job-options" disabled hidden' in html
 
@@ -91,6 +91,20 @@ def test_search_and_seasons_endpoints(client, monkeypatch):
     assert client.get("/new/anime/seasons", params={"id": 7}).json()["seasons"][0]["episodes"] == 12
     assert client.get("/new/anime/seasons", params={"id": 0}).status_code == 400
     assert client.get("/new/anime/seasons", params={"id": "x"}).status_code == 422
+    monkeypatch.setattr(anilist, "shelf", lambda k: [{"id": 9, "title": k, "aired": 4}])
+    assert client.get("/new/anime/shelf", params={"kind": "popular"}).json()["results"][0]["title"] == "popular"
+    assert client.get("/new/anime/shelf").json()["results"][0]["title"] == "trending"
+    assert client.get("/new/anime/shelf", params={"kind": "random"}).status_code == 400
+
+    from src import episode_scores
+    monkeypatch.setattr(episode_scores, "episodes", lambda m: [{"n": 1, "score": 4.5, "mal": m}])
+    assert client.get("/new/anime/episodes", params={"mal": 51009}).json()["episodes"][0]["mal"] == 51009
+    assert client.get("/new/anime/episodes", params={"mal": 0}).status_code == 400
+
+    def no_source(m):
+        raise OSError("both sources down")
+    monkeypatch.setattr(episode_scores, "episodes", no_source)
+    assert client.get("/new/anime/episodes", params={"mal": 5}).status_code == 502
 
     def down(*a):
         raise OSError("offline")
@@ -123,7 +137,6 @@ def test_anime_tab_refuses_incomplete_picks(client, data):
     assert client.post("/new/submit", data=body, follow_redirects=False).status_code == 400
 
 
-def test_anime_tab_is_hidden_from_the_tab_bar_for_now(client):
+def test_anime_tab_is_in_the_tab_bar(client):
     for tab in ("streamer", "url", "upload", "anime"):
-        html = client.get(f"/new?tab={tab}").text
-        assert "From anime" not in html and 'href="/new?tab=anime"' not in html, tab
+        assert 'href="/new?tab=anime"' in client.get(f"/new?tab={tab}").text, tab

@@ -15,7 +15,7 @@ from fastapi import APIRouter, Request, Depends, Form, UploadFile, File, HTTPExc
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
-from src import anilist
+from src import anilist, episode_scores
 from src.pipeline.stage1_anime import sanitize_anime_opts
 from src.config import (
     UPLOADS_DIR,
@@ -144,6 +144,18 @@ async def anime_search(q: str, user: Dict[str, Any] = Depends(get_current_user))
         raise HTTPException(status_code=502, detail="AniList did not answer. Try again in a moment.")
 
 
+@router.get("/new/anime/shelf")
+async def anime_shelf(kind: str = "trending", user: Dict[str, Any] = Depends(get_current_user)):
+    """Trending or popular shows, listed on the From anime tab before anything is typed."""
+    from starlette.concurrency import run_in_threadpool
+    if kind not in anilist.SHELF_QUERIES:
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid list.")
+    try:
+        return {"results": await run_in_threadpool(anilist.shelf, kind)}
+    except Exception:
+        raise HTTPException(status_code=502, detail="AniList did not answer. Try again in a moment.")
+
+
 @router.get("/new/anime/seasons")
 async def anime_seasons(id: int, user: Dict[str, Any] = Depends(get_current_user)):
     """The seasons of the show that title belongs to, each with its own AniList id and episode count."""
@@ -154,6 +166,18 @@ async def anime_seasons(id: int, user: Dict[str, Any] = Depends(get_current_user
         return {"seasons": await run_in_threadpool(anilist.seasons, id)}
     except Exception:
         raise HTTPException(status_code=502, detail="AniList did not answer. Try again in a moment.")
+
+
+@router.get("/new/anime/episodes")
+async def anime_episodes(mal: int, user: Dict[str, Any] = Depends(get_current_user)):
+    """A season's episodes with MyAnimeList fan scores, forum replies and filler/recap flags, by its MyAnimeList id."""
+    from starlette.concurrency import run_in_threadpool
+    if mal < 1:
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid anime.")
+    try:
+        return {"episodes": await run_in_threadpool(episode_scores.episodes, mal)}
+    except Exception:
+        raise HTTPException(status_code=502, detail="Episode ratings are not available right now.")
 
 
 def clean_label(text: str) -> str:

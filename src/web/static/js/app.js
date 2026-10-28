@@ -331,7 +331,7 @@ function initDropzones() {
       zone.classList.remove("is-dragover");
       if (e.dataTransfer.files.length > 0) {
         fileInput.files = e.dataTransfer.files;
-        updateDropzoneLabel(zone, e.dataTransfer.files[0]);
+        fileInput.dispatchEvent(new Event("change"));  // setting files fires no change event; listeners still need it
       }
     });
 

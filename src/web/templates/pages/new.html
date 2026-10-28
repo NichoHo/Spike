@@ -10,9 +10,7 @@
     <a href="/new?tab=streamer" class="tab {% if active_tab == 'streamer' or not active_tab %}is-active{% endif %}" role="tab">From streamer</a>
     <a href="/new?tab=url" class="tab {% if active_tab == 'url' %}is-active{% endif %}" role="tab">Paste URL</a>
     <a href="/new?tab=upload" class="tab {% if active_tab == 'upload' %}is-active{% endif %}" role="tab">Upload file</a>
-    {# The From anime tab is hidden until the video source is connected. To show it, remove the comment markers:
     <a href="/new?tab=anime" class="tab {% if active_tab == 'anime' %}is-active{% endif %}" role="tab">From anime</a>
-    #}
   </div>
 
   <form method="post" action="/new/submit" enctype="multipart/form-data" class="card" data-requires="video" data-requires-fields="source_id,url">
@@ -37,14 +35,25 @@
           <p class="field__help">Twitch and YouTube links supported.</p>
         </div>
       {% elif active_tab == 'anime' %}
-        <!-- Anime Tab: pick the show, season and episode. The video source is not connected yet. -->
+        <!-- Anime Tab: pick the show, season and episode, then upload the episode's file. -->
+        <div class="field">
+          <div class="shelf__head">
+            <span class="field__label" id="anime-lbl-shelf">Browse</span>
+            <div class="segmented" role="radiogroup" aria-labelledby="anime-lbl-shelf">
+              <input type="radio" name="shelf_kind" id="shelf-trending" value="trending" form="none" checked><label for="shelf-trending">Trending now</label>
+              <input type="radio" name="shelf_kind" id="shelf-popular" value="popular" form="none"><label for="shelf-popular">Popular</label>
+            </div>
+          </div>
+          <ul class="shelf" id="anime-shelf" aria-labelledby="anime-lbl-shelf" aria-busy="true"></ul>
+        </div>
+
         <div class="field">
           <label class="field__label" for="field-anime-search">Anime</label>
           <div class="lookup">
             <input type="search" id="field-anime-search" class="input" placeholder="Search by title…" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="anime-results" aria-autocomplete="list" autofocus>
             <ul class="lookup__list" id="anime-results" role="listbox" hidden></ul>
           </div>
-          <p class="field__help" id="anime-status" aria-live="polite">Type a title, then choose it from the list.</p>
+          <p class="field__help" id="anime-status" aria-live="polite">Pick a show above, or type a title and choose it from the list.</p>
         </div>
 
         <div class="settings-grid">
@@ -60,7 +69,42 @@
           </div>
           <p class="field__help settings-grid__wide" id="anime-ep-help">Each season is listed with its own episode count.</p>
         </div>
+        <!-- Which episode to pick: MyAnimeList fan ratings of the chosen season. Filled by new-job.js. -->
+        <div class="field" id="anime-eps" hidden>
+          <div class="shelf__head">
+            <span class="field__label" id="anime-lbl-best">Best rated</span>
+            <span class="small muted">Fan ratings on MyAnimeList, out of 5</span>
+          </div>
+          <div class="chip-row" id="anime-best" aria-labelledby="anime-lbl-best"></div>
+          <p class="field__help" id="anime-eps-status" aria-live="polite"></p>
+          <details class="disclosure" id="anime-eps-more" hidden>
+            <summary>{{ ui.icon("caret-right", 14) }} All episodes</summary>
+            <div class="stack disclosure__body">
+              <div class="segmented" role="radiogroup" aria-label="Sort episodes">
+                <input type="radio" name="ep_sort" id="ep-sort-n" value="n" form="none" checked><label for="ep-sort-n">Episode</label>
+                <input type="radio" name="ep_sort" id="ep-sort-score" value="score" form="none"><label for="ep-sort-score">Rating</label>
+                <input type="radio" name="ep_sort" id="ep-sort-replies" value="replies" form="none"><label for="ep-sort-replies">Most discussed</label>
+              </div>
+              <ul class="ep-list" id="anime-ep-list"></ul>
+              <p class="field__help" id="anime-eps-note"></p>
+            </div>
+          </details>
+        </div>
         <input type="hidden" name="anime_label" id="anime-label" value="">
+        <input type="hidden" name="anime_source" value="file">
+
+        <div class="field">
+          <label class="field__label" for="field-file">Episode file</label>
+          <div class="dropzone" id="file-dropzone">
+            <input type="file" name="file" id="field-file" accept=".mp4,.mov,.mkv,.webm" required>
+            <div class="dropzone__icon">
+              {{ ui.icon("upload-simple", 24) }}
+            </div>
+            <div class="dropzone__title">Drop the episode file or browse</div>
+            <div class="dropzone__help">Up to 2 GB · MP4, MOV, MKV, WebM</div>
+          </div>
+          <p class="field__help" id="anime-file-help" aria-live="polite">An episode number in the file name fills in the episode.</p>
+        </div>
 
       {% elif active_tab == 'streamer' %}
         <!-- Streamer Tab -->
@@ -124,8 +168,8 @@
     </div>
 
     <div class="card__footer">
-      <span class="card__footer-note">{% if active_tab == 'anime' %}The video source is not connected yet, so jobs cannot start from this tab.{% else %}Queued videos are processed sequentially in the background.{% endif %}</span>
-      <button type="submit" class="btn btn--primary btn--lg"{% if active_tab == 'anime' %} disabled{% endif %}>
+      <span class="card__footer-note">Queued videos are processed sequentially in the background.</span>
+      <button type="submit" class="btn btn--primary btn--lg">
         {{ ui.icon("plus", 16) }}
         <span>Start job</span>
       </button>
