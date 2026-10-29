@@ -951,5 +951,5 @@ td.select-cell { width: 40px; padding-right: 0; }
 /* Approve dialog: the body scrolls, the Post now / Schedule footer stays in view */
 #approve-dialog { max-height: calc(100dvh - 32px); overflow: hidden; }
 #approve-form { display: flex; flex-direction: column; max-height: calc(100dvh - 34px); }
-#approve-form > .dialog__body { overflow-y: auto; min-height: 0; }
+#approve-form > .dialog__body { overflow-y: auto; overflow-x: hidden; min-height: 0; }
 #approve-form > .dialog__footer { flex: none; }
