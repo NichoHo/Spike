@@ -995,13 +995,16 @@ a.link-icon:hover { border-color: var(--color-border-hover); background: var(--c
 .acct-group__head { display: flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); font-size: 13px; font-weight: 600; }
 .acct-group__n { font-weight: 400; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .acct-lines { list-style: none; margin: 0; padding: 0; }
-.acct-line { display: grid; grid-template-columns: auto minmax(120px, 1fr) minmax(0, 2fr) 120px auto; align-items: center; gap: var(--space-3); min-height: 48px; padding: var(--space-2) var(--space-3); font-size: 14px; }
+.acct-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); min-height: 48px; padding: var(--space-2) var(--space-3); font-size: 14px; }
+.acct-line__check { flex: none; display: flex; }
+.acct-line__state { flex: 1 1 auto; min-width: 0; }
+.acct-line__state:has(.acct-line__problem) { flex-basis: 220px; }
 .acct-line + .acct-line { border-top: 1px solid var(--color-border); }
 .acct-line__check:empty { width: 16px; }
-.acct-line__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-line__name { flex: 0 1 180px; min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acct-line__problem { font-size: 13px; color: var(--color-danger-text); }
-.acct-line__time { font-size: 13px; color: var(--color-text-muted); white-space: nowrap; }
-.acct-line__actions { display: flex; justify-content: flex-end; gap: var(--space-1); }
+.acct-line__time { flex: none; font-size: 13px; color: var(--color-text-muted); white-space: nowrap; }
+.acct-line__actions { flex: none; display: flex; justify-content: flex-end; gap: var(--space-1); margin-left: auto; }
 
 .fail-advice { display: flex; gap: var(--space-3); padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-danger-subtle); font-size: 14px; font-weight: 500; }
 .fail-advice svg { flex: none; margin-top: 2px; color: var(--color-danger-text); }
@@ -1012,7 +1015,6 @@ a.link-icon:hover { border-color: var(--color-border-hover); background: var(--c
 @media (max-width: 1100px) {
   .post-list { --post-cols: minmax(0, 1fr) 150px 150px 110px 32px; }
   .post-list--select { --post-cols: 20px minmax(0, 1fr) 150px 150px 110px 32px; }
-  .acct-line { grid-template-columns: auto minmax(100px, 1fr) minmax(0, 2fr) 110px auto; }
 }
 /* Narrow: title on top, then one wrapping line with the accounts, status and time */
 @media (max-width: 900px) {
@@ -1030,14 +1032,6 @@ a.link-icon:hover { border-color: var(--color-border-hover); background: var(--c
   .post-item__status, .post-item__time { display: flex; align-items: center; gap: 4px; }
   .problem-line { white-space: normal; }
   .post-item__detail, .post-list--select .post-item__detail { padding: 0 var(--space-3) var(--space-3); }
-}
-@media (max-width: 720px) {
-  .acct-line { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "check name name" "check state state" "check time actions"; row-gap: 2px; }
-  .acct-line__check { grid-area: check; align-self: start; padding-top: 4px; }
-  .acct-line__name { grid-area: name; }
-  .acct-line__state { grid-area: state; }
-  .acct-line__time { grid-area: time; }
-  .acct-line__actions { grid-area: actions; }
 }
 @media (max-width: 480px) {
   .post-item__row { padding-left: var(--space-3); padding-right: var(--space-3); }
