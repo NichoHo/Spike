@@ -407,7 +407,11 @@ input[type="checkbox"].switch:checked::after { transform: translateX(12px); back
 .toast--success span::before, .toast--danger span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--space-2); }
 .toast--success span::before { background: var(--color-success-text); }
 .toast--danger span::before { background: var(--color-danger-text); }
-.toast a { color: inherit; text-decoration: underline; }
+.toast a { color: inherit; text-decoration: none; }
+/* Linked toast: the anchor's ::after stretches over the whole toast so any click follows it. */
+.toast--link { position: relative; cursor: pointer; }
+.toast--link a::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.toast--link .btn { position: relative; z-index: 1; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(4px); } }
 
 /* Native Dialog (DESIGN.md §9.15) */

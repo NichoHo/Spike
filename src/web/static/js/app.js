@@ -263,7 +263,7 @@ function showToast(message, kind, href, ms) {
   }
 
   const toast = document.createElement("div");
-  toast.className = "toast" + (kind ? " toast--" + kind : "");
+  toast.className = "toast" + (kind ? " toast--" + kind : "") + (href ? " toast--link" : "");
 
   const span = document.createElement("span");
   if (href) {
