@@ -514,19 +514,20 @@
   <form method="post" action="/clips/{{ clip.id }}/post" id="approve-form">
     <input type="hidden" name="approve" value="true">
     <div class="dialog__body stack">
-      <div>
+      <div class="dialog__head">
+        <button type="button" class="btn btn--ghost btn--icon btn--sm dialog__close" data-close-dialog aria-label="Close">{{ ui.icon("x", 16) }}</button>
         <h2 class="dialog__title" id="approve-title">Approve and post</h2>
         <p class="dialog__text">Pick where this clip goes. Each account gets its own upload.</p>
       </div>
 
       {% if post.blocked %}
-        {{ ui.alert("danger", "Posting is blocked for this clip", post.blocked) }}
-      {% else %}
+        {{ ui.alert("warning", "Can't post this clip yet", post.blocked) }}
+      {% endif %}
         {% set short = {"youtube": "YouTube", "tiktok": "TikTok", "instagram": "Instagram"} %}
         {% set notes = {"youtube": "Private until Google audits the app", "tiktok": "Lands in the TikTok inbox to finish in the app"} %}
         {% set live = post.platforms | selectattr("accounts") | list %}
         {% set total = live | sum(attribute="accounts", start=[]) | length %}
-        {% if live %}
+        {% if live and not post.blocked %}
           <div class="acct-picker" data-acct-picker>
             {% if total > 5 or live | length > 1 %}
               <div class="acct-picker__bar">
@@ -581,6 +582,7 @@
           </ul>
         {% endif %}
 
+        {% if not post.blocked %}
         <details class="disclosure">
           <summary>{{ ui.icon("caret-right", 12) }}<span>Caption and hashtags</span></summary>
           <div class="disclosure__body stack stack--md">

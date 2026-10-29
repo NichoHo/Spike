@@ -227,7 +227,14 @@ def _approve_dialog_context(clip_id: int, clip: Dict[str, Any]) -> Dict[str, Any
         verify_clip_posting_permission(clip_id)
         blocked = ""
     except PermissionBlockedError as e:
-        blocked = str(e)
+        if not clip.get("source_id"):
+            blocked = ("This clip came from a pasted link, not one of your Sources, so Spike can't tell if you're allowed "
+                       "to repost it. Add the channel in Sources with a posting permission, then process the video from there.")
+        elif (clip.get("source_permission") or "none").strip().lower() == "none":
+            blocked = (f"{clip.get('source_name') or 'This source'} is set to private review only. "
+                       "Change its permission in Sources to post its clips.")
+        else:
+            blocked = str(e)  # anime allowlist: the message already names the file to edit
     accounts = list_accounts(decrypt=False)
     return {
         "blocked": blocked,

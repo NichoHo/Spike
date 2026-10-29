@@ -76,16 +76,37 @@ async def posts_page(
             "page_width": "wide",
             "user": user,
             "tab": tab,
-            "posts": display_posts,
-            "scheduled_count": len(scheduled_posts),
-            "posted_count": len(posted_posts),
-            "failed_count": len(failed_posts),
+            "groups": _group_by_clip(display_posts),
+            "scheduled_count": len({p["clip_id"] for p in scheduled_posts}),
+            "posted_count": len({p["clip_id"] for p in posted_posts}),
+            "failed_count": len({p["clip_id"] for p in failed_posts}),
             "watch": watch,
             "done": done,
             "failed": failed,
             "next_slot": get_next_schedule_slot().strftime("%Y-%m-%dT%H:%M"),
         },
     )
+
+
+PLATFORM_ORDER = ("youtube", "tiktok", "instagram")
+
+
+def _group_by_clip(posts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One entry per clip (in the list's order) with its posts split by platform, so the page shows a row per clip
+    and each account under its platform when the row is opened."""
+    groups: Dict[int, Dict[str, Any]] = {}
+    for p in posts:
+        g = groups.setdefault(p["clip_id"], {
+            "clip_id": p["clip_id"], "title": p["clip_title"] or p["clip_hook"] or f"Clip #{p['clip_id']}",
+            "thumb": p["clip_thumb_path"], "caption": p["caption"], "posts": []})
+        g["posts"].append(p)
+    rank = lambda plat: PLATFORM_ORDER.index(plat) if plat in PLATFORM_ORDER else len(PLATFORM_ORDER)
+    for g in groups.values():
+        g["posts"].sort(key=lambda p: (rank(p["account_platform"]), (p["account_name"] or "").lower()))
+        g["platforms"] = [(plat, [p for p in g["posts"] if p["account_platform"] == plat])
+                          for plat in dict.fromkeys(p["account_platform"] for p in g["posts"])]
+        g["hints"] = list(dict.fromkeys(p["hint"] for p in g["posts"] if p.get("hint")))
+    return list(groups.values())
 
 
 @router.get("/clips/{clip_id}/post", response_class=HTMLResponse)

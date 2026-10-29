@@ -2,7 +2,7 @@
 
 {% macro _svg(name, size=16) -%}
   <svg width="{{ size }}" height="{{ size }}" aria-hidden="true" focusable="false">
-    <use href="/static/icons/sprite.svg#{{ name }}"></use>
+    <use href="/static/icons/sprite.svg?v={{ static_v('icons/sprite.svg') }}#{{ name }}"></use>
   </svg>
 {%- endmacro %}
 

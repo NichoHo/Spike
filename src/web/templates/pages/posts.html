@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% import "macros/ui.html" as ui %}
 
+{% set PLATFORM = {"youtube": "YouTube", "tiktok": "TikTok", "instagram": "Instagram"} %}
+{% macro logo(platform, size=14) -%}
+  {%- if platform in PLATFORM -%}{{ ui.icon("logo-" ~ platform, size) }}{%- else -%}{{ ui.icon("paper-plane-tilt", size) }}{%- endif -%}
+{%- endmacro %}
+
 {% block content %}
 <header class="page-header">
   <div class="page-header__left">
@@ -32,145 +37,156 @@
 
 {% set selectable = tab in ('scheduled', 'failed') %}
 
-{% if posts %}
+{% if groups %}
   <form method="post" action="/posts/bulk" id="bulk-form">
-    <div class="table-wrap">
-      <table class="table">
-        <thead>
-          <tr>
+    <div class="post-list{% if selectable %} post-list--select{% endif %}">
+      <div class="post-list__head">
+        {% if selectable %}
+          <label class="post-item__check post-list__all"><input type="checkbox" class="check" id="select-all"><span>Select all</span></label>
+        {% endif %}
+        <span class="post-list__h post-list__h--clip">Clip</span>
+        <span class="post-list__h">{% if tab == 'posted' %}Links{% else %}Accounts{% endif %}</span>
+        <span class="post-list__h">{% if tab == 'failed' %}Problem{% else %}Status{% endif %}</span>
+        <span class="post-list__h">{% if tab == 'posted' %}Posted{% elif tab == 'failed' %}Was due{% else %}Posts at{% endif %}</span>
+        <span></span>
+      </div>
+      {% for g in groups %}
+        {% set n = g.posts | length %}
+        {% set uploading = g.posts | selectattr("status", "equalto", "uploading") | list %}
+        <div class="post-item post-group" data-clip="{{ g.clip_id }}">
+          <div class="post-item__row clip-row" data-toggle-clip>
             {% if selectable %}
-              <th class="select-cell"><input type="checkbox" class="check" id="select-all" aria-label="Select all"></th>
+              <div class="post-item__check">
+                {% if g.posts | selectattr("status", "in", ["scheduled", "failed"]) | list %}
+                  <input type="checkbox" class="check" data-select-clip aria-label="Select every account for {{ g.title }}">
+                {% endif %}
+              </div>
             {% endif %}
-            <th style="width: 48px;">Clip</th>
-            <th>Title</th>
-            <th>Account</th>
-            <th>Status</th>
-            <th>{% if tab == 'posted' %}Posted{% elif tab == 'failed' %}Was due{% else %}Posts at{% endif %}</th>
-            {% if tab == 'posted' %}<th>Link</th>{% endif %}
-            <th class="actions">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for p in posts %}
-            <tr {% if p.status == 'uploading' %}data-posting="{{ p.id }}"{% endif %}>
-              {% if selectable %}
-                <td class="select-cell">
-                  {% if p.status in ('scheduled', 'failed') %}
-                    <input type="checkbox" class="check" name="post_ids" value="{{ p.id }}" data-select aria-label="Select {{ p.clip_title or 'clip' }} on {{ p.account_name }}">
-                  {% endif %}
-                </td>
-              {% endif %}
-              <td style="padding: var(--space-2) var(--space-3);">
-                <a href="/clips/{{ p.clip_id }}" style="display: block; width: 32px; height: 56px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-bg-subtle);">
-                  {% if p.clip_thumb_path %}
-                    <img src="/media/clip/{{ p.clip_id }}/thumb" alt="" style="width: 100%; height: 100%; object-fit: cover;" loading="lazy">
-                  {% else %}
-                    <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted);">
-                      {{ ui.icon("film-strip", 16) }}
-                    </div>
-                  {% endif %}
-                </a>
-              </td>
-              <td class="primary-cell">
-                <a href="/clips/{{ p.clip_id }}" class="truncate" style="display: block; max-width: 320px; font-weight: 500;">
-                  {{ p.clip_title or p.clip_hook or 'Clip #' ~ p.clip_id }}
-                </a>
-                {% if p.status == 'failed' %}
-                  <div class="fail-reason">
-                    <div class="fail-reason__advice">
-                      {{ p.hint }}{% if p.hint_href %} <a href="{{ p.hint_href }}">Open Settings</a>{% endif %}
-                    </div>
-                    {% if p.error %}
-                      <details>
-                        <summary>What the platform said</summary>
-                        <pre>{{ p.error }}</pre>
-                      </details>
-                    {% endif %}
+            <div class="post-item__clip">
+                <div class="clip-cell">
+                  <a href="/clips/{{ g.clip_id }}" class="clip-cell__thumb" tabindex="-1" aria-hidden="true">
+                    {% if g.thumb %}<img src="/media/clip/{{ g.clip_id }}/thumb" alt="" loading="lazy" onerror="this.remove()">{% else %}{{ ui.icon("film-strip", 16) }}{% endif %}
+                  </a>
+                  <div class="clip-cell__text">
+                    <a href="/clips/{{ g.clip_id }}" class="clip-cell__title">{{ g.title }}</a>
+                    {% if g.caption and g.caption != g.title %}<span class="clip-cell__caption">{{ g.caption }}</span>{% endif %}
                   </div>
-                {% elif p.caption and p.caption != p.clip_title %}
-                  <span class="small muted truncate" style="display: block; max-width: 320px;">{{ p.caption }}</span>
-                {% endif %}
-              </td>
-              <td>
-                <div class="row row--sm">
-                  {% if p.account_platform == 'tiktok' %}
-                    <span class="badge">TikTok</span>
-                  {% elif p.account_platform == 'youtube' %}
-                    <span class="badge badge--accent">YouTube</span>
-                  {% elif p.account_platform == 'instagram' %}
-                    <span class="badge">Instagram</span>
-                  {% else %}
-                    <span class="badge">{{ p.account_platform }}</span>
-                  {% endif %}
-                  <span class="small">{{ p.account_name }}</span>
                 </div>
-              </td>
-              <td>
-                {% if p.status == 'posted' %}
-                  <span class="badge badge--success">Posted</span>
-                {% elif p.status == 'sent_to_inbox' %}
-                  <span class="badge badge--success">Sent to inbox</span>
-                {% elif p.status == 'scheduled' %}
+            </div>
+            <div class="post-item__meta">
+              <div class="post-item__accounts">
+                {% if tab == 'posted' %}
+                  <div class="link-icons">
+                    {% for p in g.posts[:4] %}
+                      {% if p.status == 'posted' and p.url %}
+                        <a href="{{ p.url }}" target="_blank" rel="noopener noreferrer" class="link-icon link-icon--{{ p.account_platform }}" aria-label="Open on {{ PLATFORM[p.account_platform] or p.account_platform }} ({{ p.account_name }})" data-tooltip="{{ p.account_name }}">{{ logo(p.account_platform, 16) }}</a>
+                      {% else %}
+                        <span class="link-icon link-icon--{{ p.account_platform }} is-pending" data-tooltip="{{ p.account_name }}: in the TikTok inbox" aria-label="{{ p.account_name }}: waiting in the TikTok inbox">{{ logo(p.account_platform, 16) }}</span>
+                      {% endif %}
+                    {% endfor %}
+                    {% if n > 4 %}<span class="link-icons__more" data-tooltip="Open the row to see all {{ n }}">+{{ n - 4 }}</span>{% endif %}
+                  </div>
+                {% else %}
+                  <div class="plat-chips">
+                    {% for plat, ps in g.platforms %}
+                      <span class="plat-chip" data-tooltip="{{ ps | map(attribute='account_name') | join(', ') | truncate(60) }}">{{ logo(plat) }}<span>{{ ps | length }}</span></span>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </div>
+              <div class="post-item__status">
+                {% if tab == 'failed' %}
+                  <span class="problem-line">{% if g.hints | length == 1 %}{{ g.hints[0] }}{% else %}{{ g.hints | length }} different problems{% endif %}</span>
+                {% elif tab == 'posted' %}
+                  {% set inbox = g.posts | selectattr("status", "equalto", "sent_to_inbox") | list | length %}
+                  <div class="status-stack">
+                    <span class="badge badge--success">Posted</span>
+                    {% if inbox %}<span class="status-stack__note">{{ inbox }} in TikTok inbox</span>{% endif %}
+                  </div>
+                {% elif uploading %}
+                  <span class="badge badge--accent"><span class="badge__spinner"></span><span>Posting{% if uploading | length < n %} {{ uploading | length }} of {{ n }}{% endif %}</span></span>
+                {% else %}
                   <span class="badge">Scheduled</span>
-                {% elif p.status == 'uploading' %}
-                  <span class="badge badge--accent"><span class="badge__spinner"></span><span>Posting</span></span>
-                {% elif p.status == 'failed' %}
-                  <span class="badge badge--danger">Failed</span>
-                {% else %}
-                  <span class="badge">{{ p.status }}</span>
                 {% endif %}
-              </td>
-              <td class="tabular muted small">
-                {% if p.status in ('posted', 'sent_to_inbox') and p.posted_at %}
-                  <span title="{{ p.posted_at | local_time }}">{{ p.posted_at | relative_time }}</span>
-                {% elif p.status == 'uploading' %}
+              </div>
+              <div class="post-item__time tabular">
+                {% if tab == 'posted' %}
+                  {% set t = g.posts | map(attribute="posted_at") | select | max %}
+                  {% if t %}<span title="{{ t | local_time }}">{{ t | relative_time }}</span>{% endif %}
+                {% elif uploading and uploading | length == n %}
                   <span>Now</span>
-                {% elif p.scheduled_for %}
-                  <span title="{{ p.scheduled_for | relative_time }}">{{ p.scheduled_for | local_time }}</span>
                 {% else %}
-                  <span>-</span>
-                {% endif %}
-              </td>
-              {% if tab == 'posted' %}
-                <td>
-                  {% if p.status == 'posted' and p.url %}
-                    <div class="row row--sm">
-                      <a href="{{ p.url }}" target="_blank" rel="noopener noreferrer" class="post-link">
-                        <span>{{ p.url | replace("https://", "") | replace("www.", "") }}</span>{{ ui.icon("arrow-up-right", 12) }}
-                      </a>
-                      <button type="button" class="btn btn--ghost btn--icon btn--sm" aria-label="Copy link" data-tooltip="Copy link" onclick='navigator.clipboard.writeText({{ p.url|tojson }}); showToast("Link copied");'>
-                        {{ ui.icon("copy", 14) }}
-                      </button>
-                    </div>
-                  {% elif p.status == 'sent_to_inbox' %}
-                    <span class="small muted">Finish in the TikTok app</span>
-                  {% else %}
-                    <span class="muted">-</span>
+                  {% set times = g.posts | rejectattr("status", "equalto", "uploading") | map(attribute="scheduled_for") | select | list %}
+                  {% if times %}
+                    <span>{{ times | min | short_time }}</span>{% if times | unique | list | length > 1 %} <span class="muted">+ later</span>{% endif %}
                   {% endif %}
-                </td>
-              {% endif %}
-              <td class="actions">
-                {% if p.status == 'failed' %}
-                  <button type="submit" formaction="/posts/{{ p.id }}/retry" class="btn btn--secondary btn--sm">
-                    {{ ui.icon("arrow-clockwise", 14) }}
-                    <span>Retry</span>
-                  </button>
-                {% elif p.status == 'scheduled' %}
-                  <button type="submit" formaction="/posts/{{ p.id }}/cancel" class="btn btn--ghost btn--sm">
-                    <span>Cancel</span>
-                  </button>
-                {% elif p.status == 'sent_to_inbox' and p.caption %}
-                  <button type="button" class="btn btn--ghost btn--sm" data-tooltip="TikTok drafts arrive without a caption. Paste this when you finish the post in the app." onclick='navigator.clipboard.writeText({{ p.caption|tojson }}); showToast("Caption copied");'>
-                    <span>Copy caption</span>
-                  </button>
-                {% else %}
-                  <span class="muted">-</span>
                 {% endif %}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+              </div>
+            </div>
+            <div class="post-item__toggle">
+                <button type="button" class="btn btn--ghost btn--icon btn--sm clip-toggle" aria-expanded="false" aria-controls="clip-detail-{{ g.clip_id }}" aria-label="Show {{ n }} account{{ 's' if n != 1 }}" data-tooltip="{{ n }} account{{ 's' if n != 1 }}">
+                  {{ ui.icon("caret-down", 14) }}
+                </button>
+            </div>
+          </div>
+          <div class="post-item__detail clip-detail" id="clip-detail-{{ g.clip_id }}" hidden>
+                <div class="acct-groups">
+                  {% for plat, ps in g.platforms %}
+                    <section class="acct-group">
+                      <h3 class="acct-group__head">{{ logo(plat, 14) }}<span>{{ PLATFORM[plat] or plat }}</span><span class="acct-group__n">{{ ps | length }}</span></h3>
+                      <ul class="acct-lines">
+                        {% for p in ps %}
+                          <li class="acct-line" {% if p.status == 'uploading' %}data-posting="{{ p.id }}"{% endif %}>
+                            {% if selectable %}
+                              <span class="acct-line__check">
+                                {% if p.status in ('scheduled', 'failed') %}
+                                  <input type="checkbox" class="check" name="post_ids" value="{{ p.id }}" data-select aria-label="Select {{ p.account_name }}">
+                                {% endif %}
+                              </span>
+                            {% endif %}
+                            <span class="acct-line__name">{{ p.account_name }}</span>
+                            <span class="acct-line__state">
+                              {% if p.status == 'posted' %}
+                                <span class="badge badge--success">Posted</span>
+                              {% elif p.status == 'sent_to_inbox' %}
+                                <span class="badge badge--success">In TikTok inbox</span>
+                              {% elif p.status == 'scheduled' %}
+                                <span class="badge">Scheduled</span>
+                              {% elif p.status == 'uploading' %}
+                                <span class="badge badge--accent"><span class="badge__spinner"></span><span>Posting</span></span>
+                              {% elif p.status == 'failed' %}
+                                <span class="acct-line__problem">{{ p.hint }}</span>
+                              {% endif %}
+                            </span>
+                            <span class="acct-line__time tabular">
+                              {% if p.status in ('posted', 'sent_to_inbox') and p.posted_at %}{{ p.posted_at | relative_time }}
+                              {% elif p.status == 'uploading' %}Now
+                              {% elif p.scheduled_for %}{{ p.scheduled_for | short_time }}{% endif %}
+                            </span>
+                            <span class="acct-line__actions">
+                              {% if p.status == 'posted' and p.url %}
+                                <a href="{{ p.url }}" target="_blank" rel="noopener noreferrer" class="btn btn--ghost btn--icon btn--sm" aria-label="Open post" data-tooltip="Open post">{{ ui.icon("arrow-up-right", 14) }}</a>
+                                <button type="button" class="btn btn--ghost btn--icon btn--sm" aria-label="Copy link" data-tooltip="Copy link" onclick='navigator.clipboard.writeText({{ p.url|tojson }}); showToast("Link copied");'>{{ ui.icon("copy", 14) }}</button>
+                              {% elif p.status == 'sent_to_inbox' and p.caption %}
+                                <button type="button" class="btn btn--ghost btn--sm" data-tooltip="TikTok's inbox upload takes no caption. Paste this when you post it in the app." onclick='navigator.clipboard.writeText({{ p.caption|tojson }}); showToast("Caption copied");'>{{ ui.icon("copy", 14) }}<span>Caption</span></button>
+                              {% elif p.status == 'scheduled' %}
+                                <button type="submit" formaction="/posts/{{ p.id }}/cancel" class="btn btn--ghost btn--sm">Cancel</button>
+                              {% elif p.status == 'failed' %}
+                                <button type="button" class="btn btn--ghost btn--sm" data-fail-details
+                                        data-account="{{ p.account_name }}" data-platform="{{ PLATFORM[p.account_platform] or p.account_platform }}"
+                                        data-hint="{{ p.hint }}" data-href="{{ p.hint_href or '' }}" data-error="{{ p.error or '' }}" data-post="{{ p.id }}">Details</button>
+                                <button type="submit" formaction="/posts/{{ p.id }}/retry" class="btn btn--secondary btn--sm">{{ ui.icon("arrow-clockwise", 14) }}<span>Retry</span></button>
+                              {% endif %}
+                            </span>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    </section>
+                  {% endfor %}
+                </div>
+          </div>
+        </div>
+      {% endfor %}
     </div>
 
     {% if selectable %}
@@ -206,6 +222,31 @@
         </div>
       </dialog>
     {% endif %}
+
+    {% if tab == 'failed' %}
+      <!-- Why one upload failed: filled from the Details button that opened it -->
+      <dialog id="fail-dialog" class="dialog dialog--md" aria-labelledby="fail-title">
+        <div class="dialog__body stack">
+          <div class="dialog__head">
+            <button type="button" class="btn btn--ghost btn--icon btn--sm dialog__close" data-close-dialog aria-label="Close">{{ ui.icon("x", 16) }}</button>
+            <h2 class="dialog__title" id="fail-title">Upload failed</h2>
+            <p class="dialog__text" id="fail-where"></p>
+          </div>
+          <div class="fail-advice">
+            {{ ui.icon("warning-circle", 16) }}
+            <div><div id="fail-hint"></div><a id="fail-link" href="#" hidden>Open Settings</a></div>
+          </div>
+          <div>
+            <div class="field__label">What the platform said</div>
+            <pre class="fail-raw" id="fail-error"></pre>
+          </div>
+        </div>
+        <div class="dialog__footer">
+          <button type="button" class="btn btn--secondary" data-close-dialog>Close</button>
+          <button type="submit" class="btn btn--primary" id="fail-retry">{{ ui.icon("arrow-clockwise", 14) }}<span>Retry</span></button>
+        </div>
+      </dialog>
+    {% endif %}
   </form>
 {% else %}
   <div class="empty">
@@ -237,24 +278,62 @@
 {% endif %}
 
 <script>
-// Bulk selection: the bar shows while any row is ticked.
+// Open a clip's row to see each account under its platform. The whole row toggles, except its links and boxes.
+document.querySelectorAll("[data-toggle-clip]").forEach((row) => {
+  const btn = row.querySelector(".clip-toggle");
+  const detail = document.getElementById(btn.getAttribute("aria-controls"));
+  const toggle = () => {
+    const open = detail.hidden;
+    detail.hidden = !open;
+    btn.setAttribute("aria-expanded", open);
+    row.classList.toggle("is-open", open);
+  };
+  row.addEventListener("click", (e) => { if (!e.target.closest("a, input, button:not(.clip-toggle)")) toggle(); });
+});
+
+// Selection: a clip's box ticks all its accounts; an account box updates its clip's box. The bar counts posts.
 (function () {
   const all = document.getElementById("select-all");
-  const boxes = () => [...document.querySelectorAll("[data-select]")];
+  const boxes = (root = document) => [...root.querySelectorAll("[data-select]")];
   const sync = () => {
-    const n = boxes().filter((b) => b.checked).length;
+    const picked = boxes().filter((b) => b.checked);
+    document.querySelectorAll(".post-group").forEach((g) => {
+      const cb = g.querySelector("[data-select-clip]"), mine = boxes(g);
+      if (!cb) return;
+      const on = mine.filter((b) => b.checked).length;
+      cb.checked = on > 0 && on === mine.length;
+      cb.indeterminate = on > 0 && on < mine.length;
+    });
     const bar = document.getElementById("bulk-bar");
     if (!bar) return;
-    bar.hidden = n === 0;
-    document.getElementById("bulk-count").textContent = `${n} selected`;
+    bar.hidden = picked.length === 0;
+    const clips = new Set(picked.map((b) => b.closest(".post-group").dataset.clip)).size;
+    document.getElementById("bulk-count").textContent =
+      `${clips} clip${clips === 1 ? "" : "s"} · ${picked.length} account${picked.length === 1 ? "" : "s"} selected`;
     const t = document.getElementById("reschedule-text");
-    if (t) t.textContent = `${n} post${n === 1 ? "" : "s"} move to this time.`;
-    if (all) { all.checked = n > 0 && n === boxes().length; all.indeterminate = n > 0 && n < boxes().length; }
+    if (t) t.textContent = `${picked.length} post${picked.length === 1 ? "" : "s"} move to this time.`;
+    if (all) { all.checked = picked.length > 0 && picked.length === boxes().length; all.indeterminate = picked.length > 0 && picked.length < boxes().length; }
   };
-  if (all) all.addEventListener("change", () => { boxes().forEach((b) => { b.checked = all.checked; }); sync(); });
-  document.addEventListener("change", (e) => { if (e.target.matches("[data-select]")) sync(); });
+  document.addEventListener("change", (e) => {
+    if (e.target === all) boxes().forEach((b) => { b.checked = all.checked; });
+    else if (e.target.matches("[data-select-clip]")) boxes(e.target.closest(".post-group")).forEach((b) => { b.checked = e.target.checked; });
+    else if (!e.target.matches("[data-select]")) return;
+    sync();
+  });
   sync();
 })();
+
+// Failure details popup
+document.querySelectorAll("[data-fail-details]").forEach((btn) => btn.addEventListener("click", () => {
+  const d = btn.dataset, link = document.getElementById("fail-link");
+  document.getElementById("fail-where").textContent = `${d.account} on ${d.platform}`;
+  document.getElementById("fail-hint").textContent = d.hint;
+  document.getElementById("fail-error").textContent = d.error || "No details were saved.";
+  link.hidden = !d.href;
+  link.href = d.href || "#";
+  document.getElementById("fail-retry").setAttribute("formaction", `/posts/${d.post}/retry`);
+  document.getElementById("fail-dialog").showModal();
+}));
 
 // Posting: watch uploads until each one is posted or failed, then open the tab that shows how it went.
 (function () {
@@ -280,7 +359,7 @@
 {% if done or failed %}
 document.addEventListener("DOMContentLoaded", () => {
   {% if failed %}
-    showToast("{{ failed }} post{{ 's' if failed != 1 }} failed{% if done %}, {{ done }} posted{% endif %}. The reason is under each one.", "danger", null, 9000);
+    showToast("{{ failed }} post{{ 's' if failed != 1 }} failed{% if done %}, {{ done }} posted{% endif %}. Open a clip to see why.", "danger", null, 9000);
   {% else %}
     showToast("Posted to {{ done }} account{{ 's' if done != 1 }}.", "success");
   {% endif %}

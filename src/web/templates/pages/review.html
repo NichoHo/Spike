@@ -39,9 +39,11 @@
           </h2>
           <div class="clip-group__meta">
             <button type="button" class="btn btn--ghost btn--sm" onclick="openMomentPicker({ videoId: {{ group.video.id }}, concept: 'top3' })">Combine moments</button>
-            {{ group.clips | length }} {% if group.clips | length == 1 %}clip{% else %}clips{% endif %}
-            {% if group.video.duration_s %} · {{ group.video.duration_s | duration_words }} source{% endif %}
-            {% if group.video.created_at %} · {{ group.video.created_at | relative_time }}{% endif %}
+            <span>
+              {{ group.clips | length }} {% if group.clips | length == 1 %}clip{% else %}clips{% endif %}
+              {% if group.video.duration_s %} · {{ group.video.duration_s | duration_words }} source{% endif %}
+              {% if group.video.created_at %} · {{ group.video.created_at | relative_time }}{% endif %}
+            </span>
           </div>
         </div>
 

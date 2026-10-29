@@ -94,7 +94,18 @@ def filter_local_time(dt_input: Optional[Union[str, datetime]]) -> str:
             dt = datetime.fromisoformat(dt_input)
         else:
             dt = dt_input
-        return dt.strftime("%b %d, %Y, %H:%M")
+        return dt.astimezone().strftime("%b %d, %Y, %H:%M")  # stored UTC -> this machine's time; naive values stay as they are
+    except Exception:
+        return str(dt_input)
+
+
+def filter_short_time(dt_input: Optional[Union[str, datetime]]) -> str:
+    """Local time without the year when it is this year (e.g. 'Oct 30, 19:00'), for narrow table cells."""
+    if not dt_input:
+        return ""
+    try:
+        dt = (datetime.fromisoformat(dt_input) if isinstance(dt_input, str) else dt_input).astimezone()
+        return dt.strftime("%b %d, %H:%M" if dt.year == datetime.now().year else "%b %d, %Y, %H:%M")
     except Exception:
         return str(dt_input)
 
@@ -214,6 +225,7 @@ def register_filters(jinja_env):
     jinja_env.filters["duration_words"] = filter_duration_words
     jinja_env.filters["relative_time"] = filter_relative_time
     jinja_env.filters["local_time"] = filter_local_time
+    jinja_env.filters["short_time"] = filter_short_time
     jinja_env.filters["filesize"] = filter_filesize
     jinja_env.filters["number"] = filter_number
     jinja_env.filters["compact_number"] = filter_compact_number
