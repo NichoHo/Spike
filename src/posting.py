@@ -390,11 +390,17 @@ def dispatch_post(post_id: int) -> Dict[str, Any]:
     account_id = post["account_id"]
 
     # 1. Enforce permission != 'none' check in code (Blueprint §8.3, §12)
-    verify_clip_posting_permission(clip_id)
+    # The post may already show 'uploading' (Post now marks it before the background upload): fail it, never leave it spinning
+    try:
+        verify_clip_posting_permission(clip_id)
+    except PermissionBlockedError as e:
+        update_post_status(post_id, "failed", error=str(e))
+        raise
 
     # 2. Retrieve account and decrypted tokens
     account = get_account(account_id, decrypt=True)
     if not account:
+        update_post_status(post_id, "failed", error=f"Account #{account_id} not found. Reconnect it in Settings.")
         raise ValueError(f"Account #{account_id} not found.")
 
     # 3. Locate clip media file
@@ -464,7 +470,30 @@ def dispatch_post(post_id: int) -> Dict[str, Any]:
         logger.error(f"Post #{post_id} failed: {err_msg}")
         update_post_status(post_id, "failed", error=err_msg)
         log_event("error", f"Post #{post_id} failed to dispatch to {platform}: {err_msg}")
+        from src.notify import send_post_failed_notification
+        send_post_failed_notification(post, platform, err_msg)
         raise
+
+
+# (words in the error, what the user should do, where to do it). First match wins.
+FAILURE_HINTS: List[Tuple[Tuple[str, ...], str, Optional[str]]] = [
+    (("permission", "blocked", "allowlist"), "This clip's source does not allow posting.", None),
+    (("missing on disk", "file not found"), "The video file is gone. Re-render the clip, then retry.", None),
+    (("process",), "The platform could not process the video. Retry in a few minutes, or re-render it.", None),
+    (("reconnect", "revoked", "not authenticated", "invalid_grant", "401", "unauthorized", "expired"),
+     "The account's sign-in expired. Reconnect it in Settings, then retry.", "/settings#accounts"),
+    (("quota", "429", "rate limit", "spam_risk", "too many"), "The platform's upload limit was hit. Retry later or tomorrow.", None),
+    (("timed out", "timeout", "urlopen error", "connection", "network", "temporarily"), "Network problem during the upload. Retry.", None),
+]
+
+
+def failure_hint(error: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Plain advice and an optional fix link for a post's stored error text."""
+    low = (error or "").lower()
+    for words, advice, href in FAILURE_HINTS:
+        if any(w in low for w in words):
+            return advice, href
+    return "The upload failed. Check the details below, then retry.", None
 
 
 # ── Auto-Post Rule Evaluator (§8.3) ───────────────────────────────────────────

@@ -57,6 +57,24 @@ def send_job_failed_notification(video_id: int, error: str) -> bool:
         return False
 
 
+def send_post_failed_notification(post: dict, platform: str, error: str) -> bool:
+    """Send a Discord message when an upload fails: scheduled posts fail while nobody is watching the Posts page."""
+    webhook_url = get_active_webhook_url()
+    if not webhook_url:
+        return False
+    title = post.get("clip_title") or f"Clip #{post.get('clip_id')}"
+    content = (
+        f"**Post failed:** {title[:150]} to {platform}\n"
+        f"```{error[:1500]}```\n"
+        f"Retry it from Posts: <{PUBLIC_URL}/posts?tab=failed>"
+    )
+    try:
+        return _post_webhook(webhook_url, content) in (200, 204)
+    except Exception as e:
+        log_event("error", f"Failed to send post failure webhook for post #{post.get('id')}: {e}")
+        return False
+
+
 def send_job_ready_notification(video_id: int) -> bool:
     """Send Discord webhook notification when a video job reaches 'ready' status."""
     webhook_url = get_active_webhook_url()

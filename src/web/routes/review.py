@@ -213,5 +213,25 @@ async def clip_detail(
             "prev_clip_id": prev_id,
             "next_clip_id": next_id,
             "review_count": len(all_clips),
+            "post": _approve_dialog_context(clip_id, clip),
         },
     )
+
+
+def _approve_dialog_context(clip_id: int, clip: Dict[str, Any]) -> Dict[str, Any]:
+    """What the Approve dialog needs: each platform with its accounts, or why it cannot be posted to yet."""
+    from src.db import list_accounts
+    from src.platform_auth import connect_options
+    from src.posting import PermissionBlockedError, get_next_schedule_slot, parse_tags, verify_clip_posting_permission
+    try:
+        verify_clip_posting_permission(clip_id)
+        blocked = ""
+    except PermissionBlockedError as e:
+        blocked = str(e)
+    accounts = list_accounts(decrypt=False)
+    return {
+        "blocked": blocked,
+        "platforms": [{**p, "accounts": [a for a in accounts if a["platform"] == p["key"]]} for p in connect_options()],
+        "tags": " ".join(f"#{t}" for t in parse_tags(clip.get("cand_hashtags"))),
+        "next_slot": get_next_schedule_slot().strftime("%Y-%m-%dT%H:%M"),
+    }

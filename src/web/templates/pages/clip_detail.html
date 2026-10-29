@@ -42,12 +42,10 @@
       <span>Reject</span>
     </button>
 
-    <form method="post" action="/clips/{{ clip.id }}/approve" style="display: inline;">
-      <button type="submit" id="btn-approve" class="btn btn--primary" {% if clip.status == 'approved' %}disabled{% endif %}>
-        {{ ui.icon("check", 16) }}
-        <span>{% if clip.status == 'approved' %}Approved{% else %}Approve clip{% endif %}</span>
-      </button>
-    </form>
+    <button type="button" id="btn-approve" class="btn btn--primary" {% if clip.status == 'approved' %}disabled{% endif %} onclick="openApproveDialog()">
+      {{ ui.icon("check", 16) }}
+      <span>{% if clip.status == 'approved' %}Approved{% else %}Approve clip{% endif %}</span>
+    </button>
   </div>
 </header>
 
@@ -230,14 +228,14 @@
               <div class="row">
                 <label class="small muted" for="ts-start">Start</label>
                 <input type="hidden" name="start_s" id="input-start-s" value="{{ clip.trim_start_s or clip.orig_start_s or 0 }}">
-                <input type="text" id="ts-start" data-ts-for="input-start-s" class="input input--mono input--short" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="ts-help">
+                <input type="text" id="ts-start" data-ts-for="input-start-s" class="input input--short" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="ts-help">
                 <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-start-s', -1)" aria-label="Start 1 s earlier">-1 s</button>
                 <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-start-s', 1)" aria-label="Start 1 s later">+1 s</button>
               </div>
               <div class="row">
                 <label class="small muted" for="ts-end">End</label>
                 <input type="hidden" name="end_s" id="input-end-s" value="{{ clip.trim_end_s or clip.orig_end_s or 30 }}">
-                <input type="text" id="ts-end" data-ts-for="input-end-s" class="input input--mono input--short" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="ts-help">
+                <input type="text" id="ts-end" data-ts-for="input-end-s" class="input input--short" inputmode="decimal" autocomplete="off" spellcheck="false" aria-describedby="ts-help">
                 <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-end-s', -1)" aria-label="End 1 s earlier">-1 s</button>
                 <button type="button" class="btn btn--secondary btn--sm" onclick="nudge('input-end-s', 1)" aria-label="End 1 s later">+1 s</button>
               </div>
@@ -510,6 +508,176 @@
 <footer style="margin-top: var(--space-8); padding-top: var(--space-4); border-top: 1px solid var(--color-border); font-size: 13px; color: var(--color-text-muted);">
   Shortcuts: <kbd class="kbd">j</kbd> / <kbd class="kbd">k</kbd> next/prev, <kbd class="kbd">space</kbd> play, <kbd class="kbd">a</kbd> approve, <kbd class="kbd">r</kbd> reject, <kbd class="kbd">e</kbd> edit hook, <kbd class="kbd">?</kbd> all shortcuts
 </footer>
+
+<!-- Approve: pick accounts, then Post now or Schedule. Both approve the clip and open Posts. -->
+<dialog id="approve-dialog" class="dialog dialog--md" aria-labelledby="approve-title">
+  <form method="post" action="/clips/{{ clip.id }}/post" id="approve-form">
+    <input type="hidden" name="approve" value="true">
+    <div class="dialog__body stack">
+      <div>
+        <h2 class="dialog__title" id="approve-title">Approve and post</h2>
+        <p class="dialog__text">Pick where this clip goes. Each account gets its own upload.</p>
+      </div>
+
+      {% if post.blocked %}
+        {{ ui.alert("danger", "Posting is blocked for this clip", post.blocked) }}
+      {% else %}
+        {% set short = {"youtube": "YouTube", "tiktok": "TikTok", "instagram": "Instagram"} %}
+        {% set notes = {"youtube": "Private until Google audits the app", "tiktok": "Lands in the TikTok inbox to finish in the app"} %}
+        {% set live = post.platforms | selectattr("accounts") | list %}
+        {% set total = live | sum(attribute="accounts", start=[]) | length %}
+        {% if live %}
+          <div class="acct-picker" data-acct-picker>
+            {% if total > 5 or live | length > 1 %}
+              <div class="acct-picker__bar">
+                {% if total > 5 %}
+                  <input type="search" class="input" placeholder="Search {{ total }} accounts" aria-label="Search accounts" data-acct-search>
+                {% endif %}
+                {% if live | length > 1 %}
+                  <div class="chip-row" role="group" aria-label="Filter by platform">
+                    <button type="button" class="chip is-on" data-acct-filter="" aria-pressed="true">All</button>
+                    {% for p in live %}
+                      <button type="button" class="chip" data-acct-filter="{{ p.key }}" aria-pressed="false">{{ short[p.key] or p.label }} <span class="acct-picker__n">{{ p.accounts | length }}</span></button>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </div>
+            {% endif %}
+            <div class="acct-list" role="group" aria-label="Accounts">
+              {% for p in live %}
+                {% for a in p.accounts %}
+                  <label class="acct-row" data-platform="{{ p.key }}" data-name="{{ a.display_name | lower }}">
+                    <input type="checkbox" class="check" name="account_ids" value="{{ a.id }}">
+                    <span class="acct-row__name">{{ a.display_name }}</span>
+                    <span class="acct-row__platform" {% if notes[p.key] %}data-tooltip="{{ notes[p.key] }}"{% endif %}>{{ short[p.key] or p.label }}</span>
+                  </label>
+                {% endfor %}
+              {% endfor %}
+              <p class="acct-list__empty" data-acct-empty hidden>No accounts match.</p>
+            </div>
+            <div class="acct-picker__foot">
+              <span data-acct-count>None selected</span>
+              <button type="button" class="btn btn--ghost btn--sm" data-acct-all>Select all shown</button>
+            </div>
+          </div>
+        {% endif %}
+
+        {# Platforms that cannot be posted to yet: one line each #}
+        {% set todo = post.platforms | rejectattr("accounts") | list %}
+        {% if todo %}
+          <ul class="setup-list" aria-label="Platforms not set up">
+            {% for p in todo %}
+              <li class="setup-list__row">
+                <span class="setup-list__name">{{ short[p.key] or p.label }}</span>
+                {% if not p.configured %}
+                  <span class="setup-list__text">Keys missing. Add <code>{{ p.env[0] }}</code> and <code>{{ p.env[1] }}</code> to <code>.env</code>, then restart Spike.</span>
+                  {% if user.role == 'admin' %}<a href="/settings#accounts" class="setup-list__action">Setup</a>{% endif %}
+                {% else %}
+                  <span class="setup-list__text">No account connected.</span>
+                  {% if user.role == 'admin' %}<a href="/accounts/{{ p.key }}/connect" class="setup-list__action">Connect</a>{% else %}<span class="setup-list__text">Ask an admin.</span>{% endif %}
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+
+        <details class="disclosure">
+          <summary>{{ ui.icon("caret-right", 12) }}<span>Caption and hashtags</span></summary>
+          <div class="disclosure__body stack stack--md">
+            <div class="field">
+              <label class="field__label" for="approve-caption">Caption</label>
+              <textarea name="caption" id="approve-caption" class="textarea" rows="3">{{ copy_caption }}</textarea>
+            </div>
+            <div class="field">
+              <label class="field__label" for="approve-tags">Hashtags</label>
+              <input type="text" name="hashtags" id="approve-tags" class="input" value="{{ post.tags }}" placeholder="#streamer #game #topic">
+              <p class="field__help">Most specific first. TikTok and Instagram get the first 5, YouTube the first 3.</p>
+            </div>
+          </div>
+        </details>
+
+        <div id="approve-when" hidden>{{ ui.schedule_picker("approve-when-input", post.next_slot) }}</div>
+      {% endif %}
+    </div>
+    <div class="dialog__footer dialog__footer--split">
+      <button type="submit" class="btn btn--ghost" formaction="/clips/{{ clip.id }}/approve" formnovalidate>Approve only</button>
+      {% if not post.blocked %}
+        <button type="button" class="btn btn--secondary" id="approve-schedule">
+          {{ ui.icon("calendar-blank", 16) }}<span>Schedule</span>
+        </button>
+        <button type="submit" class="btn btn--primary" name="timing" value="now" id="approve-now" onclick="this.classList.add('is-loading')">
+          {{ ui.icon("paper-plane-tilt", 16) }}<span>Post now</span>
+        </button>
+      {% endif %}
+    </div>
+  </form>
+</dialog>
+
+<script>
+// Post now is the main action. Schedule opens the time picker first, then becomes the main action itself.
+function openApproveDialog() {
+  const dlg = document.getElementById("approve-dialog");
+  if (!dlg.open) dlg.showModal();
+  syncApproveButtons();
+}
+function syncApproveButtons() {
+  const now = document.getElementById("approve-now"), sched = document.getElementById("approve-schedule");
+  if (!now) return;
+  const n = document.querySelectorAll('#approve-form input[name="account_ids"]:checked').length;
+  const scheduling = !document.getElementById("approve-when").hidden;
+  now.disabled = sched.disabled = n === 0;
+  const suffix = n > 1 ? ` (${n})` : "";
+  now.querySelector("span").textContent = n === 0 ? "Pick an account" : "Post now" + suffix;
+  sched.querySelector("span").textContent = scheduling ? "Schedule" + suffix : "Schedule";
+}
+document.getElementById("approve-form").addEventListener("change", syncApproveButtons);
+
+// Account picker: search by name, filter by platform, select every account still shown
+(function () {
+  const picker = document.querySelector("[data-acct-picker]");
+  if (!picker) return;
+  const rows = [...picker.querySelectorAll(".acct-row")];
+  const search = picker.querySelector("[data-acct-search]");
+  let platform = "";
+  const shown = () => rows.filter((r) => !r.hidden);
+  const count = () => {
+    const n = rows.filter((r) => r.querySelector("input").checked).length;
+    picker.querySelector("[data-acct-count]").textContent = n ? `${n} selected` : "None selected";
+  };
+  const apply = () => {
+    const q = (search?.value || "").trim().toLowerCase();
+    rows.forEach((r) => { r.hidden = (platform && r.dataset.platform !== platform) || (q && !r.dataset.name.includes(q)); });
+    picker.querySelector("[data-acct-empty]").hidden = shown().length > 0;
+  };
+  search?.addEventListener("input", apply);
+  search?.addEventListener("keydown", (e) => { if (e.key === "Enter") e.preventDefault(); });  // never submit the post from the search box
+  picker.querySelectorAll("[data-acct-filter]").forEach((chip) => chip.addEventListener("click", () => {
+    platform = chip.dataset.acctFilter;
+    picker.querySelectorAll("[data-acct-filter]").forEach((c) => { c.classList.toggle("is-on", c === chip); c.setAttribute("aria-pressed", c === chip); });
+    apply();
+  }));
+  picker.querySelector("[data-acct-all]").addEventListener("click", () => {
+    const vis = shown(), on = !vis.every((r) => r.querySelector("input").checked);
+    vis.forEach((r) => { r.querySelector("input").checked = on; });
+    picker.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  picker.addEventListener("change", count);
+})();
+document.getElementById("approve-schedule")?.addEventListener("click", (e) => {
+  const btn = e.currentTarget, when = document.getElementById("approve-when");
+  if (when.hidden) {  // first click: show the picker and swap which button is the main one
+    when.hidden = false;
+    btn.type = "submit"; btn.name = "timing"; btn.value = "scheduled";
+    btn.classList.replace("btn--secondary", "btn--primary");
+    document.getElementById("approve-now").classList.replace("btn--primary", "btn--secondary");
+    syncApproveButtons();
+    e.preventDefault();
+    document.getElementById("approve-when-input").focus();
+  } else {
+    btn.classList.add("is-loading");
+  }
+});
+</script>
 
 <!-- Reject Dialog (DESIGN.md §9.15) -->
 <dialog id="reject-dialog" class="dialog">
@@ -983,8 +1151,8 @@ function segRow(s, i, tag, isTop) {
     <span></span>
     ${isTop ? `<input type="text" class="input seg-row__label" data-k="label" value="${esc(s.label || '')}" maxlength="60" autocomplete="off" aria-label="Label for ${tag}" placeholder="Why it is on the list…">` : ''}
     <div class="seg-row__trim">
-      <label><span class="small muted">Start</span><input type="text" inputmode="decimal" autocomplete="off" class="input input--mono input--short" data-k="start_s" value="${fmtTs(s.start_s)}" aria-label="${tag} start, stream time"></label>
-      <label><span class="small muted">End</span><input type="text" inputmode="decimal" autocomplete="off" class="input input--mono input--short" data-k="end_s" value="${fmtTs(s.end_s)}" aria-label="${tag} end, stream time"></label>
+      <label><span class="small muted">Start</span><input type="text" inputmode="decimal" autocomplete="off" class="input input--short" data-k="start_s" value="${fmtTs(s.start_s)}" aria-label="${tag} start, stream time"></label>
+      <label><span class="small muted">End</span><input type="text" inputmode="decimal" autocomplete="off" class="input input--short" data-k="end_s" value="${fmtTs(s.end_s)}" aria-label="${tag} end, stream time"></label>
       <span class="small muted" data-len>${segLen(s).toFixed(1)} s</span>
     </div>
     ${isTop ? `<div class="seg-row__btns">

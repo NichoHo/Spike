@@ -8,7 +8,47 @@ document.addEventListener("DOMContentLoaded", () => {
   initDropzones();
   initClaudeApproval();
   initAiStatus();
+  initSchedulePickers();
 });
+
+// ── Schedule picker (macros/ui.html schedule_picker) ─────────────────────────
+// Chips for the next four 12:00 / 19:00 slots; picking one fills the datetime-local input.
+function initSchedulePickers() {
+  const pad = (n) => String(n).padStart(2, "0");
+  const local = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  document.querySelectorAll("[data-schedule-picker]").forEach((wrap) => {
+    const input = wrap.querySelector("input[type=datetime-local]");
+    const row = wrap.querySelector("[data-slot-chips]");
+    const now = new Date(), slots = [];
+    for (let day = 0; slots.length < 4; day++) {
+      for (const h of [12, 19]) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + day, h, 0);
+        if (d - now > 10 * 60 * 1000 && slots.length < 4) slots.push(d);
+      }
+    }
+    const dayName = (d) => {
+      const diff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+      return diff === 0 ? "Today" : diff === 1 ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "short" });
+    };
+    const mark = () => row.querySelectorAll(".chip").forEach((c) => {
+      c.classList.toggle("is-on", c.dataset.value === input.value);
+      c.setAttribute("aria-pressed", c.dataset.value === input.value ? "true" : "false");
+    });
+    slots.forEach((d) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip";
+      chip.dataset.value = local(d);
+      chip.textContent = `${dayName(d)} ${pad(d.getHours())}:00`;
+      chip.addEventListener("click", () => { input.value = chip.dataset.value; input.dispatchEvent(new Event("change", { bubbles: true })); });
+      row.appendChild(chip);
+    });
+    input.min = local(now);
+    input.addEventListener("change", mark);
+    input.addEventListener("input", mark);
+    mark();
+  });
+}
 
 // ── Sidebar AI panel ─────────────────────────────────────────────────────────
 // Server-rendered (partials/ai_status.html); re-fetched every 5 s and swapped in whole.
@@ -279,7 +319,16 @@ function showToast(message, kind, href, ms) {
   closeBtn.className = "btn btn--ghost btn--sm btn--icon";
   closeBtn.setAttribute("aria-label", "Close notification");
   closeBtn.innerHTML = '<svg width="14" height="14" aria-hidden="true"><use href="/static/icons/sprite.svg#x"></use></svg>';
-  closeBtn.addEventListener("click", () => toast.remove());
+  // Also drop it from the stored queue, or the next page load would show it again until it expires.
+  const dismiss = () => {
+    toast.remove();
+    try {
+      const q = JSON.parse(sessionStorage.getItem("spikeToastQueue") || "[]");
+      sessionStorage.setItem("spikeToastQueue", JSON.stringify(q.filter((t) => t.msg !== message)));
+    } catch (e) {}
+  };
+  closeBtn.addEventListener("click", dismiss);
+  span.addEventListener("click", dismiss);
 
   toast.appendChild(span);
   toast.appendChild(closeBtn);

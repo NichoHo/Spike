@@ -481,3 +481,37 @@ def test_signed_in_accounts_refresh_and_dedupe(monkeypatch):
     # Still valid: no network call
     calls.clear()
     assert platform_auth.fresh_token(saved) == "new_access" and not calls
+
+
+# ── Test: Approve and post, bulk actions, failure reasons ─────────────────────
+
+def test_approve_post_now_then_bulk_reschedule_and_retry(dummy_media_file):
+    """Approve + Post now marks the clip approved and uploads in the background; the redirect watches those
+    posts. Bulk reschedule moves scheduled posts; bulk retry re-uploads failed ones; failures carry advice."""
+    from src.posting import failure_hint
+    clip_id, _, _, _ = _create_test_clip(permission="own", dummy_path=dummy_media_file)
+    yt = create_account(platform="youtube", display_name="@yt", access_token="mock_yt")
+    tt = create_account(platform="tiktok", display_name="@tt", access_token="mock_tt")
+    client = TestClient(app)
+
+    resp = client.post(f"/clips/{clip_id}/post", data={"account_ids": [yt, tt], "timing": "now", "approve": "true",
+                                                         "caption": "hi"}, follow_redirects=False)
+    assert resp.status_code == 303 and "watch=" in resp.headers["location"]
+    ids = resp.headers["location"].split("watch=")[1]
+    assert get_clip_with_details(clip_id)["status"] == "approved"
+    st = client.get(f"/api/posts/status?ids={ids}").json()  # TestClient runs background tasks before returning
+    assert sorted(st.values()) == ["posted", "sent_to_inbox"]
+    assert "youtube.com/shorts/" in client.get("/posts?tab=posted").text  # the Posted tab shows each link
+
+    yt_post = int(ids.split(",")[0])
+    create_post(clip_id=clip_id, account_id=yt, status="scheduled", scheduled_for="2030-01-01T00:00:00+00:00")
+    client.post("/posts/bulk", data={"action": "reschedule", "post_ids": [yt_post], "scheduled_for": "2031-05-01T19:00"})
+    assert get_post(yt_post)["scheduled_for"].startswith("2031-05-01")
+
+    with get_connection() as conn:
+        conn.execute("UPDATE posts SET status = 'failed', error = 'HTTP Error 401: Unauthorized' WHERE id = ?", (yt_post,))
+    assert failure_hint(get_post(yt_post)["error"])[1] == "/settings#accounts"
+    assert "Reconnect it in Settings" in client.get("/posts?tab=failed").text
+    resp = client.post("/posts/bulk", data={"action": "retry", "post_ids": [yt_post]}, follow_redirects=False)
+    assert f"watch={yt_post}" in resp.headers["location"]
+    assert get_post(yt_post)["status"] == "posted"

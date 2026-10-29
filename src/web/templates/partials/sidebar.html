@@ -40,9 +40,10 @@
       <span>Jobs</span>
     </a>
 
-    <a href="/posts" class="nav-item {% if active_nav == 'posts' %}is-active{% endif %}" {% if active_nav == 'posts' %}aria-current="page"{% endif %}>
+    <a href="/posts?tab=failed" class="nav-item {% if active_nav == 'posts' %}is-active{% endif %}" {% if active_nav == 'posts' %}aria-current="page"{% endif %} data-nav-key="posts" data-nav-marker="{{ badges.posts[1] }}" {% if badges.posts[0] %}data-tooltip="{{ badges.posts[0] }} failed post{{ 's' if badges.posts[0] != 1 }}"{% endif %}>
       {{ ui.icon("paper-plane-tilt", 16) }}
       <span>Posts</span>
+      {{ nav_badge("posts") }}
     </a>
 
     <a href="/outreach" class="nav-item {% if active_nav == 'outreach' %}is-active{% endif %}" {% if active_nav == 'outreach' %}aria-current="page"{% endif %} data-nav-key="outreach" data-nav-marker="{{ badges.outreach[1] }}">

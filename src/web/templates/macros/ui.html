@@ -158,6 +158,16 @@
   </div>
 {%- endmacro %}
 
+{# Date and time to post, with one-tap chips for the next 12:00 / 19:00 slots (app.js fills the chips) #}
+{% macro schedule_picker(id, value) -%}
+  <div class="field" data-schedule-picker>
+    <label class="field__label" for="{{ id }}">Post at</label>
+    <div class="chip-row" data-slot-chips></div>
+    <input type="datetime-local" name="scheduled_for" id="{{ id }}" class="input" value="{{ value }}" style="margin-top: var(--space-2);">
+    <p class="field__help">Your local time. 12:00 and 19:00 are the default slots.</p>
+  </div>
+{%- endmacro %}
+
 {% macro kbd(key) -%}
   <kbd class="kbd">{{ key }}</kbd>
 {%- endmacro %}
