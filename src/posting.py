@@ -71,10 +71,12 @@ def anime_post_allowed(anilist_id: Any, allowlist: Optional[Path] = None, today:
         return False
 
 
-def verify_clip_posting_permission(clip_id: int) -> Dict[str, Any]:
+def verify_clip_posting_permission(clip_id: int, acknowledged: bool = False) -> Dict[str, Any]:
     """
     Verify that a clip is permitted to be posted.
     Blueprint §12: permission = none BLOCKS posting in code, not just in UI.
+    acknowledged: set only by a person who ticked "I have permission" on the Post page for a single post-now.
+    Scheduled, automatic and retried posts never pass it, so they stay blocked.
     """
     clip_row = get_clip_with_details(clip_id)
     if not clip_row:
@@ -83,7 +85,9 @@ def verify_clip_posting_permission(clip_id: int) -> Dict[str, Any]:
     clip = dict(clip_row)
     source_perm = (clip.get("source_permission") or "none").strip().lower()
 
-    if source_perm == "none":
+    if source_perm == "none" and acknowledged:
+        logger.warning(f"Clip #{clip_id}: posting despite permission='none'; the user confirmed they have the creator's permission.")
+    elif source_perm == "none":
         msg = (
             f"Posting permanently blocked: Clip #{clip_id} from source '{clip.get('source_name')}' "
             f"has permission='none' (private review only). Commercial or platform posting is prohibited."
@@ -91,17 +95,25 @@ def verify_clip_posting_permission(clip_id: int) -> Dict[str, Any]:
         logger.warning(msg)
         raise PermissionBlockedError(msg)
 
-    if str(clip.get("cand_origin") or "").startswith("anime_"):  # every post path calls this: auto, scheduled, manual, retry
-        try:
-            anilist_id = json.loads(clip.get("features") or "{}").get("anilist_id")
-        except ValueError:
-            anilist_id = None
-        if not anime_post_allowed(anilist_id):
-            msg = f"Posting blocked: Clip #{clip_id} is anime footage and its show has no unexpired entry in {ANIME_ALLOWLIST.name}."
+    if anime_unlisted(clip):  # every post path calls this: auto, scheduled, manual, retry
+        msg = f"Posting blocked: Clip #{clip_id} is anime footage and its show has no unexpired entry in {ANIME_ALLOWLIST.name}."
+        if not acknowledged:
             logger.warning(msg)
             raise PermissionBlockedError(msg)
+        logger.warning(f"Clip #{clip_id}: posting anime footage that is not on the allowlist; the user confirmed on the Post page.")
 
     return clip
+
+
+def anime_unlisted(clip: Dict[str, Any]) -> bool:
+    """True for an anime clip whose show has no unexpired entry in the allowlist."""
+    if not str(clip.get("cand_origin") or "").startswith("anime_"):
+        return False
+    try:
+        anilist_id = json.loads(clip.get("features") or "{}").get("anilist_id")
+    except ValueError:
+        anilist_id = None
+    return not anime_post_allowed(anilist_id)
 
 
 # Hashtags per platform. Instagram allows 5; YouTube shows the first 3 above the title.
@@ -376,10 +388,10 @@ def upload_to_instagram_reels(
 
 # ── Core Dispatch & Execution ─────────────────────────────────────────────────
 
-def dispatch_post(post_id: int) -> Dict[str, Any]:
+def dispatch_post(post_id: int, acknowledged: bool = False) -> Dict[str, Any]:
     """
     Dispatch and upload a post to its connected platform.
-    Enforces permission != 'none' check in code!
+    Enforces permission != 'none' check in code, unless the user confirmed it on the Post page (acknowledged).
     """
     post_row = get_post_with_details(post_id)
     if not post_row:
@@ -392,7 +404,7 @@ def dispatch_post(post_id: int) -> Dict[str, Any]:
     # 1. Enforce permission != 'none' check in code (Blueprint §8.3, §12)
     # The post may already show 'uploading' (Post now marks it before the background upload): fail it, never leave it spinning
     try:
-        verify_clip_posting_permission(clip_id)
+        verify_clip_posting_permission(clip_id, acknowledged)
     except PermissionBlockedError as e:
         update_post_status(post_id, "failed", error=str(e))
         raise

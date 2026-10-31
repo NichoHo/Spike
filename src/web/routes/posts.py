@@ -25,6 +25,7 @@ from src.db import (
 )
 from src.posting import (
     verify_clip_posting_permission,
+    anime_unlisted,
     dispatch_post,
     get_next_schedule_slot,
     parse_tags,
@@ -122,7 +123,8 @@ async def post_clip_page(
 
     clip = dict(clip_row)
     source_perm = (clip.get("source_permission") or "none").strip().lower()
-    blocked = (source_perm == "none")
+    no_permission = (source_perm == "none")  # warn and ask for confirmation instead of blocking the page
+    anime_unlisted_clip = anime_unlisted(clip)
 
     accounts = list_accounts(decrypt=False)
     next_slot = get_next_schedule_slot()
@@ -143,7 +145,9 @@ async def post_clip_page(
             "page_width": "narrow",
             "user": user,
             "clip": clip,
-            "blocked": blocked,
+            "blocked": False,
+            "no_permission": no_permission,
+            "anime_unlisted": anime_unlisted_clip,
             "accounts": accounts,
             "next_slot": next_slot.strftime("%Y-%m-%d %H:%M"),
             "prefilled_caption": caption,
@@ -152,11 +156,11 @@ async def post_clip_page(
     )
 
 
-def _dispatch_all(post_ids: List[int]) -> None:
+def _dispatch_all(post_ids: List[int], acknowledged: bool = False) -> None:
     """Upload one post after another; each failure is saved on its own post row."""
     for post_id in post_ids:
         try:
-            dispatch_post(post_id)
+            dispatch_post(post_id, acknowledged)
         except Exception:
             pass
 
@@ -171,13 +175,18 @@ async def post_clip_action(
     caption: str = Form(""),
     hashtags: Optional[str] = Form(""),
     approve: bool = Form(False),
+    confirm_no_permission: bool = Form(False),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
-    # Blueprint §12: Strictly check permission in code
+    # Blueprint §12: Strictly check permission in code. A source with no recorded permission can be posted to only
+    # right now, by a person who ticked the confirmation; scheduled posts would run later with no one confirming.
+    acknowledged = confirm_no_permission and timing == "now"
     try:
-        verify_clip_posting_permission(clip_id)
+        verify_clip_posting_permission(clip_id, acknowledged)
     except PermissionBlockedError as e:
         raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail=str(e))
+    if acknowledged:
+        log_event("warning", f"Clip #{clip_id} posted by {user['login']} without a recorded source permission (confirmed on the Post page)")
 
     account_ids = list(dict.fromkeys(account_ids))
     if any(not get_account(a, decrypt=False) for a in account_ids):
@@ -205,7 +214,7 @@ async def post_clip_action(
         update_clip_status(clip_id, "approved", user_id=user.get("id"))
         log_event("info", f"Clip #{clip_id} approved by {user['login']}")
     if timing == "now":
-        return _start_uploads(post_ids, background_tasks)
+        return _start_uploads(post_ids, background_tasks, acknowledged)
     log_event("info", f"Clip #{clip_id} scheduled to {len(post_ids)} account(s) at {slot_iso} by {user['login']}")
     return RedirectResponse(url="/posts?tab=scheduled", status_code=HTTP_303_SEE_OTHER)
 
@@ -218,13 +227,13 @@ def _slot_iso(scheduled_for: Optional[str]) -> str:
         return get_next_schedule_slot().astimezone(timezone.utc).isoformat()
 
 
-def _start_uploads(post_ids: List[int], background_tasks: BackgroundTasks) -> RedirectResponse:
+def _start_uploads(post_ids: List[int], background_tasks: BackgroundTasks, acknowledged: bool = False) -> RedirectResponse:
     """Mark posts 'uploading' and upload them after the response. The Posts page shows them as Posting
     and moves on to Posted or Failed once every watched upload has finished."""
     for post_id in post_ids:
         update_post_status(post_id, "uploading")
     # Uploads run after the response, so several accounts (and Instagram's processing wait) never hold the page
-    background_tasks.add_task(_dispatch_all, post_ids)
+    background_tasks.add_task(_dispatch_all, post_ids, acknowledged)
     return RedirectResponse(url="/posts?tab=scheduled&watch=" + ",".join(map(str, post_ids)), status_code=HTTP_303_SEE_OTHER)
 
 

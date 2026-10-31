@@ -57,6 +57,31 @@
       </div>
 
       <div class="card__body stack stack--md">
+        {% if no_permission or anime_unlisted %}
+          <!-- Blueprint §12: no recorded permission for this source. Warn and require a tick instead of blocking. -->
+          <div class="alert alert--warning" role="alert">
+            {{ ui.icon("warning", 20) }}
+            <div>
+              <div class="alert__title">Spike has no record of permission to post this clip</div>
+              <div class="alert__body">
+                {% if no_permission %}{% if clip.source_name %}Source <strong>{{ clip.source_name }}</strong> is set to private review only.{% else %}This clip came from a pasted link, not one of your Sources.{% endif %}{% endif %}
+                {% if anime_unlisted %}This clip uses <strong>anime footage</strong> and its show is not in <code>anime_allowlist.json</code>. The creator of a parody or abridged
+                video can't give permission for the original show's footage: that belongs to the studio or licensor, and studios file claims and takedowns often.{% endif %}
+                Posting someone else's video without their permission can lead to a copyright takedown or claim, and on YouTube a
+                <strong>copyright strike</strong>. Three strikes can get the channel terminated, and a strike or claim can also remove the
+                video, demonetize it or block your upload. TikTok and Instagram can remove posts and restrict the account. Permission you only
+                have verbally may not stop an automatic claim, so keep it in writing.
+                Only continue if you really have the creator's permission. To avoid this warning next time, add the channel in Sources with
+                its posting permission.
+              </div>
+            </div>
+          </div>
+          <label class="account-option">
+            <input type="checkbox" class="check" name="confirm_no_permission" value="true" required>
+            <span class="account-option__name">I have the creator's permission to post this clip, and I accept the risk.</span>
+          </label>
+          <p class="field__help">Because of this, the clip can only be published now, not scheduled.</p>
+        {% endif %}
         <!-- Posting Timing -->
         <div class="field">
           <label class="field__label">Post timing</label>
@@ -64,7 +89,7 @@
             <input type="radio" name="timing" id="timing-now" value="now" checked onchange="toggleTiming()">
             <label for="timing-now">Publish now</label>
 
-            <input type="radio" name="timing" id="timing-scheduled" value="scheduled" onchange="toggleTiming()">
+            <input type="radio" name="timing" id="timing-scheduled" value="scheduled" onchange="toggleTiming()" {% if no_permission %}disabled{% endif %}>
             <label for="timing-scheduled">Schedule for slot</label>
           </div>
         </div>
