@@ -50,7 +50,9 @@ def _with_eta(jobs):
         j["eta_s"] = eta.get(j["id"])
         if j["eta_s"] is not None:
             done = now + timedelta(seconds=j["eta_s"])
-            j["eta_at"] = done.strftime("%H:%M" if done.date() == now.date() else "%a %H:%M")
+            days = (done.date() - now.date()).days
+            day = "today" if days == 0 else "tomorrow" if days == 1 else done.strftime("%a")
+            j["eta_at"] = f"{day} {done:%H:%M}"
     return jobs
 
 
