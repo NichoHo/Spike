@@ -7,6 +7,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from statistics import median
 from typing import Optional, Dict, Any, List
 from src.config import DB_PATH
 
@@ -1416,13 +1417,18 @@ def estimate_remaining_seconds(jobs: List[Dict[str, Any]]) -> Dict[int, Optional
     running stage uses its live progress when it reports one, else its expected time minus elapsed.
     """
     with get_connection() as conn:
-        hist = {r["stage"]: (r["per_s"], r["flat"]) for r in conn.execute(
-            """SELECT t.stage,
-                      AVG(CASE WHEN v.duration_s > 0
-                               THEN (julianday(t.finished_at) - julianday(t.started_at)) * 86400 / v.duration_s END) AS per_s,
-                      AVG((julianday(t.finished_at) - julianday(t.started_at)) * 86400) AS flat
+        rows = conn.execute(
+            """SELECT t.stage, v.duration_s, (julianday(t.finished_at) - julianday(t.started_at)) * 86400 AS secs
                FROM stage_timings t JOIN videos v ON v.id = t.video_id
-               WHERE t.finished_at IS NOT NULL GROUP BY t.stage""")}
+               WHERE t.finished_at IS NOT NULL""").fetchall()
+        # Median, not mean: one stalled or paused run (hours for a short stream) would skew a mean.
+        runs: Dict[str, Dict[str, List[float]]] = {}
+        for r in rows:
+            s = runs.setdefault(r["stage"], {"per_s": [], "flat": []})
+            s["flat"].append(r["secs"])
+            if r["duration_s"]:
+                s["per_s"].append(r["secs"] / r["duration_s"])
+        hist = {st: (median(s["per_s"]) if s["per_s"] else None, median(s["flat"])) for st, s in runs.items()}
         running = {r["video_id"]: (r["started_at"], r["progress"]) for r in conn.execute(
             "SELECT video_id, started_at, progress FROM stage_timings WHERE finished_at IS NULL")}
 

@@ -3,7 +3,7 @@
 <tbody id="jobs-tbody" hx-get="/jobs/table" hx-trigger="every 5s" hx-swap="outerHTML">
   {% if gate %}
     <tr>
-      <td colspan="5" style="padding: 0;">
+      <td colspan="6" style="padding: 0;">
         <div class="alert alert--warning" style="margin: var(--space-3) 0;" role="alert">
           <div class="stack stack--sm">
             <strong>{{ "Oversized video: final check" if gate.level == 2 else "Long video: confirm before the expensive stages" }}</strong>
@@ -24,7 +24,7 @@
   {% endif %}
   {% if not jobs %}
     <tr>
-      <td colspan="5" style="text-align: center; padding: var(--space-8); color: var(--color-text-muted);">
+      <td colspan="6" style="text-align: center; padding: var(--space-8); color: var(--color-text-muted);">
         No processing jobs recorded yet.
       </td>
     </tr>
@@ -60,7 +60,15 @@
           <span class="small" style="font-family: var(--font-mono);">{{ j.stage or 'queued' }}</span>
           {% set steps = ['fetch_meta','fetch_audio','fetch_chat','fetch_crowd','transcribe','signals','moments','fetch_sections','render','render_vertical'] %}
           {% if j.status in ('queued', 'running') and j.stage in steps %}
-            <div class="secondary-line">Step {{ steps.index(j.stage) + 1 }} of {{ steps | length }}{% if j.eta_s is not none %} · done ~{{ j.eta_at }} ({{ j.eta_s | duration_words }} left){% endif %}</div>
+            <div class="secondary-line">Step {{ steps.index(j.stage) + 1 }} of {{ steps | length }}</div>
+          {% endif %}
+        </td>
+        <td style="white-space: nowrap;">
+          {% if j.eta_s is not none %}
+            <span class="tabular small">~{{ j.eta_s | duration_words }} left</span>
+            <div class="secondary-line tabular">done ~{{ j.eta_at }}</div>
+          {% else %}
+            <span class="subtle">-</span>
           {% endif %}
         </td>
         <td>

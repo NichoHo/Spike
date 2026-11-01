@@ -44,3 +44,23 @@ def test_eta_with_progress_extrapolates_from_elapsed():
     set_stage_progress(vid, 0.5)
     eta = estimate_remaining_seconds([{"id": vid, "status": "running", "stage": "transcribe", "duration_s": 3600}])
     assert eta[vid] == pytest.approx(100 + AFTER_TRANSCRIBE, abs=2)
+
+
+def test_eta_history_uses_median_so_one_stalled_run_does_not_skew_it():
+    vid = _running_job(0)
+    for i, secs in enumerate([360, 360, 360, 360 * 50]):  # three normal runs, one stalled
+        past = register_video("url", f"https://example.test/eta/past/{i}/{datetime.now().timestamp()}")
+        set_video_duration(past, 3600)
+        end = datetime.now(timezone.utc)
+        with get_connection() as conn:
+            conn.execute("INSERT INTO stage_timings (video_id, stage, started_at, finished_at) VALUES (?, 'transcribe', ?, ?)",
+                         (past, (end - timedelta(seconds=secs)).isoformat(), end.isoformat()))
+    eta = estimate_remaining_seconds([{"id": vid, "status": "running", "stage": "transcribe", "duration_s": 3600}])
+    assert eta[vid] == pytest.approx(360 + AFTER_TRANSCRIBE, abs=2)
+
+
+def test_download_fraction_from_bytes_or_fragments():
+    from src.pipeline.stage2_audio import _download_fraction
+    assert _download_fraction({"downloaded_bytes": 50, "total_bytes_estimate": 200}) == 0.25
+    assert _download_fraction({"downloaded_bytes": 50, "fragment_index": 3, "fragment_count": 4}) == 0.75
+    assert _download_fraction({"downloaded_bytes": 50}) is None

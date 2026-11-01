@@ -127,7 +127,7 @@ def run_pipeline(
 
         # Stage 2: fetch_audio
         enter_stage(video_id, "fetch_audio")
-        audio_path = run_stage2_audio(video_dir, meta)
+        audio_path = run_stage2_audio(video_dir, meta, on_progress=lambda f: set_stage_progress(video_id, f))
         sub_tracks = run_stage2_subs(video_dir, meta) if anime else []
 
         # Stage 3: fetch_chat (Twitch VODs and finished YouTube streams; skipped for uploads)

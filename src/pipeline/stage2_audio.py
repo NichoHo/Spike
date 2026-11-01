@@ -7,11 +7,22 @@ Output: data/videos/<id>/audio.m4a
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Callable, Optional
 import yt_dlp
 
 
-def run_stage2_audio(video_dir: Path, meta: Dict[str, Any]) -> Path:
+def _download_fraction(d: Dict[str, Any]) -> Optional[float]:
+    """Fraction done from a yt-dlp progress dict: bytes when known, else HLS fragments."""
+    total = d.get("total_bytes") or d.get("total_bytes_estimate")
+    if total and d.get("downloaded_bytes") is not None:
+        return d["downloaded_bytes"] / total
+    if d.get("fragment_count") and d.get("fragment_index") is not None:
+        return d["fragment_index"] / d["fragment_count"]
+    return None
+
+
+def run_stage2_audio(video_dir: Path, meta: Dict[str, Any],
+                     on_progress: Optional[Callable[[float], None]] = None) -> Path:
     """Run Stage 2: fetch_audio. Resumes if audio.m4a exists."""
     audio_path = video_dir / "audio.m4a"
     if audio_path.exists() and audio_path.stat().st_size > 1000:
@@ -51,6 +62,15 @@ def run_stage2_audio(video_dir: Path, meta: Dict[str, Any]) -> Path:
             "quiet": True,
             "no_warnings": True,
         }
+        if on_progress:
+            last = [-1.0]
+
+            def hook(d):  # yt-dlp calls this per chunk: report only each new percent
+                f = _download_fraction(d) if d.get("status") == "downloading" else None
+                if f is not None and f - last[0] >= 0.01:
+                    last[0] = f
+                    on_progress(f)
+            ydl_opts["progress_hooks"] = [hook]
         if limit_s:
             ydl_opts["download_ranges"] = yt_dlp.utils.download_range_func(None, [(0, limit_s)])
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
