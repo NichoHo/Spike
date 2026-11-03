@@ -24,6 +24,9 @@ def test_layout_segments_for():
         (0.0, "split"), (3.0, "face_track"), (10.0, "split"),
     ]
     assert layout_segments_for("center", None, 0.0, 10.0, []) == [(0.0, "center")]
+    # a switch in the first 0.2 s never replaces the clip's own layout, even when a cut maps it to 0
+    assert layout_segments_for("face_track", [{"t": 100.1, "layout": "letterbox"}], 100.0, 120.0, []) == [(0.0, "face_track")]
+    assert layout_segments_for("face_track", [{"t": 101.5, "layout": "letterbox"}], 100.0, 120.0, [(100.0, 102.0)]) == [(0.0, "face_track")]
 
 
 def test_render_with_layout_switches(tmp_path: Path, capfd):

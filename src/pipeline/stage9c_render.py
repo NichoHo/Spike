@@ -450,8 +450,8 @@ def layout_segments_for(
 ) -> List[Tuple[float, str]]:
     """
     Turn user layout switches ({t: source seconds, layout}) into (start on the trimmed
-    clip timeline, layout) segments. Drops switches outside the clip, merges repeats,
-    and lets a switch within 0.2 s of the previous one replace it.
+    clip timeline, layout) segments. Drops switches outside the clip or in its first 0.2 s (they would
+    silently override the clip's own layout), merges repeats, and lets a switch within 0.2 s of the previous one replace it.
     """
     segs: List[Tuple[float, str]] = [(0.0, base_layout)]
     for ch in sorted(layout_changes or [], key=lambda c: float(c["t"])):
@@ -459,6 +459,8 @@ def layout_segments_for(
         if lay not in SWITCH_LAYOUTS or not clip_start < t < clip_end:
             continue
         t_out = round(map_timestamp_to_trimmed(t, clip_start, cut_intervals), 3)
+        if t_out < 0.2:  # at the very start: the opening layout is the one picked for the clip, never a switch
+            continue
         if t_out - segs[-1][0] < 0.2:
             segs[-1] = (segs[-1][0], lay)
         else:

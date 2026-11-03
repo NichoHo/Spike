@@ -335,7 +335,7 @@ def _parse_layout_changes(raw: str, start_s: float, end_s: float) -> list:
             t = round(float(it["t"]), 2)
         except (TypeError, KeyError, ValueError):
             continue
-        if it.get("layout") in SWITCH_LAYOUTS and start_s < t < end_s:
+        if it.get("layout") in SWITCH_LAYOUTS and start_s + 0.2 <= t < end_s:  # one at the start would override the layout
             out.append({"t": t, "layout": it["layout"]})
     return sorted(out, key=lambda c: c["t"])
 
