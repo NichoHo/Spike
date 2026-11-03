@@ -24,6 +24,8 @@ from src.db import (
     get_connection,
     get_job,
     finish_video,
+    get_candidates,
+    enqueue_candidate_render,
 )
 from src import oversize_gate
 from src.notify import send_job_ready_notification, send_job_failed_notification
@@ -193,6 +195,13 @@ def run_pipeline(
 
         if not candidates:
             print("  [pipeline] No candidate moments met selection criteria.")
+            # A stream always gets one clip to review, even a bad one: queue the best-scored moment the judge kept
+            # (low_score first, then judge rejections; a length rejection can't render) for the worker to render.
+            rows = get_candidates(video_id)
+            best = next((r for st in ("low_score", "rejected") for r in rows if r["status"] == st
+                         and (st == "low_score" or (r["status_reason"] or "").startswith("judge:"))), None)
+            if best and enqueue_candidate_render(best["id"]):
+                print(f"  [pipeline] Rendering the best of the rest anyway: candidate #{best['id']} ({best['status_reason']}).")
             finish_video(video_id, status="ready")
             cleanup_after_pipeline(video_dir, meta, [])
             return {"video_id": video_id, "candidates": []}
