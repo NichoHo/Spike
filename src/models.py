@@ -6,15 +6,15 @@ Blueprint §6.3 & §6.4.
 from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
-from src.config import HUMOR_STYLES
+from src.config import MOMENT_TYPES
 
 
 class LLMJudgeResponse(BaseModel):
     """Schema for candidate moment evaluation. Field order is the order the model writes them:
-    it explains why the moment is funny before it commits to a score (§6.7)."""
-    keep: bool = Field(description="False unless a stranger with no context would laugh")
+    it explains why the moment works before it commits to a score (§6.7)."""
+    keep: bool = Field(description="False unless a stranger with no context would laugh, be impressed or feel warm")
     why_funny: str = Field(default="", description="What happens, what the viewer feels, and why it works")
-    humor_type: str = Field(default="other", description="One of the HUMOR_STYLES, or other")
+    humor_type: str = Field(default="other", description="One of the MOMENT_TYPES, or other")
     needs_context: bool = Field(default=False, description="True if a cold viewer would be confused")
     contrast: bool = Field(default=False, description="Hubris before the reaction, or an outcome unusual for this creator")
     score: int = Field(ge=0, le=100, description="30 fans smile, 50 stranger chuckles, 70 stranger shares, 90 viral")
@@ -25,7 +25,7 @@ class LLMJudgeResponse(BaseModel):
     cut_lines: List[int] = Field(default_factory=list, description="Lines inside the clip that are fluff and can be cut out")
     punchline: str = Field(description="Exact quote of the punchline or key moment")
     title: str = Field(description="Short engaging title for the clip")
-    hook_text: str = Field(description="3 to 8 word funny summary of what happens in the clip, not a quote")
+    hook_text: str = Field(description="3 to 8 word summary of what happens in the clip, in its tone, not a quote")
     post_caption: str = Field(description="Social media caption")
     hashtags: List[str] = Field(default_factory=list, description="Relevant hashtags without hash symbol")
     reason: str = Field(default="", description="Brief rationale for the score")
@@ -43,13 +43,14 @@ class LLMJudgeResponse(BaseModel):
     @classmethod
     def _humor_type(cls, v):
         v = str(v or "").strip().lower()
-        return v if v in HUMOR_STYLES else "other"
+        return v if v in MOMENT_TYPES else "other"
 
 
 class VideoVerdict(BaseModel):
     """Gemini's verdict after watching a shortlisted clip. Observations come before the score."""
     what_happens: str = Field(default="", description="What is seen and heard, in order")
-    visible: bool = Field(description="The funny or key thing is seen or heard in the clip itself")
+    play_start: Optional[float] = Field(default=None, description="Skill clips only: second of the watched clip where the play begins")
+    visible: bool = Field(description="The funny, impressive or key thing is seen or heard in the clip itself")
     standalone: bool = Field(description="A stranger understands it without chat, earlier context or inside jokes")
     reaction: str = Field(default="none", description="peak, routine, reading_chat or none")
     ends_on_reaction: bool = Field(default=True, description="The clip ends on the reaction, not before it")

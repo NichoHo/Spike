@@ -77,18 +77,18 @@ Concepts you may output (allowed: {', '.join(allowed)}):
 - single: one moment, a hook title. Start where a stranger understands it, end on the reaction.
 - story: 2 segments in time order (3 only if the middle step escalates), 20 to 45 s in total. Segment 1 is the setup, 8 s or less, a clear quotable claim (a brag, prediction, promise or dare) from an H or C source. The last segment is the payoff: it must contradict the claim and show the reaction (a C source). skip_card: 1 to 6 words of real elapsed time or event count, like '3 goals later'. callback_quote: the claim, copied exactly from the setup lines. foreshadow true only when the setup is calm. hook_text frames the irony without spoiling it.
 - pov: one plain reaction (C or R source), 4 to 12 s, one universal emotion that reads from face and voice, almost no speech: nothing that names the game, a player, a team, chat, a donation or the streamer. Do not write the caption, another step does.
-- top3 / top5: a ranking of the stream's funniest moments. Entries are different, unrelated moments from different parts of the stream (not one theme), and they may reuse candidates that are also singles. title is the on-screen header, 4 to 7 words starting with "Ranking", like "Ranking {who}'s Funniest Moments". Entries 6 to 15 s each (top5: 6 to 12 s), each cut to its funniest part, with a label of 2 to 6 words: a short quote or what happens ('he blamed the controller'). rank 1 is the funniest. Give a top3 whenever three candidates score 65 or more; top5 only when five do (all judge score 55 or more). Every entry must be good alone.
+- top3 / top5: a ranking of the stream's funniest moments, or of its best plays when every entry is a skill moment. Entries are different, unrelated moments from different parts of the stream (not one theme), and they may reuse candidates that are also singles. title is the on-screen header, 4 to 7 words starting with "Ranking", like "Ranking {who}'s Funniest Moments" (or "Ranking {who}'s Best Plays"). Entries 6 to 15 s each (top5: 6 to 12 s), each cut to its best part, with a label of 2 to 6 words: a short quote or what happens ('he blamed the controller'). rank 1 is the best. Give a top3 whenever three candidates score 65 or more; top5 only when five do (all judge score 55 or more). Every entry must be good alone.
 Rules for everything:
 - At most {cap} outputs. rank 1 is the best output.
 - A label (C1, H2, R3) may appear in only one output, except that top3 / top5 entries may reuse labels. Repeated reactions (such as four conceded goals) suit a countdown or POV, or keep only the most extreme one as a single.
-- Prefer a story over a single whenever a hubris line exists in that episode. At most one single or story per episode per humor type.
+- Prefer a story over a single whenever a hubris line exists in that episode. At most one single or story per episode per type (a humor style, skill or wholesome).
 - What the creator does constantly (see the creator context) is not a single on its own.
 - start_line and end_line are inclusive and use that source's own L numbers. cut_lines are lines strictly inside the range that are fluff; never cut the first or last line. zooms: 0 to 3, at_line is where it starts, scale 1.10, 1.20 or 1.35, hold_s 1 to 3.
-- title and hook_text (3 to 8 words, comedic, like a viewer describing it to a friend) must use the name {who}. Never write "the streamer"."""
+- title and hook_text (3 to 8 words in the clip's tone: comedic, hyped for a skill play, warm for a wholesome moment; like a viewer describing it to a friend) must use the name {who}. Never write "the streamer"."""
 
 
 _KIND_HEAD = {
-    "cand": "{label}: judge score {score}, humor {humor}, peak voice jump {jump:.0f} dB, judge edges {a:.0f}s to {b:.0f}s\nwhy funny: {why}",
+    "cand": "{label}: judge score {score}, type {humor}, peak voice jump {jump:.0f} dB, judge edges {a:.0f}s to {b:.0f}s\nwhy it works: {why}",
     "hubris": "{label} (hubris line, story setups only): {topic}",
     "reaction": "{label} (plain reaction, POV only): humor {humor}, peak voice jump {jump:.0f} dB, {a:.0f}s to {b:.0f}s",
 }

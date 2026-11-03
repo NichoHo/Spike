@@ -36,3 +36,15 @@ def test_chat_laugh_seeds_pick_biggest_bursts_a_minute_apart():
     seeds = chat_laugh_proposals(s, 1000.0)
     assert [x["peak_t"] for x in seeds] == [200, 700]
     assert chat_laugh_proposals(np.zeros(50), 50.0) == []
+
+
+def test_chat_hype_seeds_go_through_the_judge():
+    import numpy as np
+    from src.pipeline.stage7_moments import HYPE_SEEDS, chat_hype_proposals
+    s = np.zeros(2000)
+    for i, t in enumerate(range(100, 1900, 200)):  # 9 bursts, more than HYPE_SEEDS
+        s[t] = 0.1 + 0.01 * i
+    seeds = chat_hype_proposals(s, 2000.0)
+    assert len(seeds) == HYPE_SEEDS and seeds[0]["peak_t"] == 1700  # biggest burst first
+    assert all(not x["crowd"] and x["origin"] == "chat_hype" for x in seeds)  # no free pass to the video judge
+    assert chat_hype_proposals(np.zeros(50), 50.0) == []

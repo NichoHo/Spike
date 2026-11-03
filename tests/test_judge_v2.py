@@ -43,6 +43,7 @@ def test_judge_fields_are_ordered_and_coerced():
     r = LLMJudgeResponse.model_validate({"keep": True, "humor_type": "Meltdown", "score": 70,
                                          "punchline": "p", "title": "t", "hook_text": "h", "post_caption": "c"})
     assert r.humor_type == "other"
+    assert LLMJudgeResponse.model_validate({**r.model_dump(), "humor_type": "Skill"}).humor_type == "skill"
 
 
 def test_stage7_stores_every_judged_candidate(tmp_path, monkeypatch):
@@ -116,6 +117,38 @@ def test_stage7_aborts_without_storing_when_the_judge_mostly_fails(tmp_path, mon
     with pytest.raises(RuntimeError, match="Nothing was stored"):
         s7.run_stage7_moments(vid, tmp_path, {"duration": 400, "webpage_url": ""}, transcript, {"peaks": peaks}, [])
     assert get_candidates(vid) == [] and not (tmp_path / "candidates.json").exists()
+
+
+def test_skill_clip_starts_at_the_play_but_never_later_or_past_max_len():
+    rec = {"start_s": 100.0, "end_s": 120.0, "cuts": [[110.0, 112.0]], "play_start_s": 90.0}
+    s7.start_at_play(rec, 40.0)
+    assert rec["start_s"] == 90.0
+    rec.update(start_s=100.0, play_start_s=60.0)  # 120 - 2 s of cuts - 40 = 78 is as early as it may go
+    s7.start_at_play(rec, 40.0)
+    assert rec["start_s"] == 78.0
+    rec.update(start_s=100.0, play_start_s=105.0)  # a play after the start never moves it later
+    s7.start_at_play(rec, 40.0)
+    assert rec["start_s"] == 100.0
+    story = {"start_s": 100.0, "end_s": 120.0, "play_start_s": 90.0, "concept": "story"}
+    s7.start_at_play(story, 40.0)
+    assert story["start_s"] == 100.0
+
+
+def test_video_judge_asks_for_the_play_start_only_on_skill_clips(monkeypatch):
+    from types import SimpleNamespace
+    from google.genai import types
+    prompts = []
+
+    def fake_generate(client, contents, config, **kw):
+        prompts.append(contents[0].parts[1].text)
+        return SimpleNamespace(text='{"what_happens": "x", "play_start": 9, "visible": true, "standalone": true, "score": 70}')
+
+    monkeypatch.setattr(s7, "clip_video_part", lambda *a: types.Part(text="video"))
+    monkeypatch.setattr(s7, "get_gemini_client", lambda: None)
+    monkeypatch.setattr(s7, "judge_generate", fake_generate)
+    assert s7.video_judge({}, 0.0, 30.0, "", "Kai", find_play=True).play_start == 9
+    s7.video_judge({}, 0.0, 30.0, "", "Kai")
+    assert '"play_start": 9' in prompts[0] and "play_start" not in prompts[1]
 
 
 def test_video_gates_trim_and_line_proposals():

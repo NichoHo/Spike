@@ -144,6 +144,9 @@ RELATIVE_TOP_PCT = 2.0
 # weight_mult multiplies the stage 6 signal weights and stays within 0.5 to 2.
 CREATOR_TYPES = ("gaming", "irl", "just_chatting", "podcast", "comedy", "reaction", "sports", "educational", "other")
 HUMOR_STYLES = ("rage", "hubris", "roast", "banter", "storytelling", "absurd", "cringe", "wholesome", "deadpan")
+# What the stream judge may call a moment: the humor styles plus "skill" (an impressive play). A "wholesome" moment
+# does not have to be funny. The editor keeps one clip per episode per type, so a play never crowds out a joke.
+MOMENT_TYPES = HUMOR_STYLES + ("skill",)
 CREATOR_PRESETS = {
     "gaming": {"min_len": 12, "max_len": 40, "setup_pad_s": 3, "end_extend_max_s": 8,
                "weight_mult": {"voice_jump": 1.5, "rage_words": 1.5}, "zoom_scale": 1.20},
