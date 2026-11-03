@@ -47,19 +47,12 @@ from src.pipeline.stage9_render import run_stage9_render
 from src.pipeline.stage9c_render import run_stage9c_render
 
 
-def _park_job(video_id: int) -> None:
-    """Set a running job back to 'queued', like a queue-reorder pause, so the worker picks the next one."""
-    with get_connection() as conn:
-        conn.execute("UPDATE videos SET status = 'queued' WHERE id = ? AND status = 'running'", (video_id,))
-
-
 def _oversize_gate(video_id: int, meta: Dict[str, Any]) -> None:
     """Pause before the expensive 'moments' stage when the VOD is too long, and ask the user.
 
     Levels: 4 h threshold -> ask once; 6 h soft ceiling -> ask a second, escalated time; a Continue there
-    processes the WHOLE video (no truncation). Stop cancels the job; no answer within the timeout parks it
-    (back to 'queued') and raises JobInterrupted so the worker moves to the next queued job and resumes this
-    one later from the same stage.
+    processes the WHOLE video (no truncation). Stop cancels the job; no answer within the timeout counts as
+    Continue, so the warning never blocks the run.
     """
     duration_s = float(meta.get("duration") or 0.0)
     if duration_s <= oversize_gate.THRESHOLD_S:
@@ -77,10 +70,7 @@ def _oversize_gate(video_id: int, meta: Dict[str, Any]) -> None:
                              "WHERE id = ? AND status = 'running'", (video_id,))
             oversize_gate.clear(video_id)
             raise JobInterrupted(video_id, "cancelled")
-        if decision == "timeout":
-            _park_job(video_id)
-            raise JobInterrupted(video_id, "queued")
-        # decision == "continue": fall through to the next level (if any), else proceed into stage 7.
+        # decision == "continue" (clicked, or nobody answered): next level (if any), else proceed into stage 7.
     oversize_gate.clear(video_id)
 
 

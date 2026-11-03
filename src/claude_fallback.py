@@ -1,6 +1,7 @@
 """
 Spike: Claude (the user's Pro plan, via `claude -p`) stands in for Gemini once Gemini's daily quota is used up.
-Every fallback call waits for the user's OK in the web app (a popup on every page). "Don't ask again today"
+Every fallback call warns the user in the web app (a popup on every page) and runs after WAIT_S unless the
+user denies it. "Don't ask again today"
 approves the rest of the day's calls. The pipeline and the web app are separate processes, so the one pending
 request lives in the settings table.
 """
@@ -17,7 +18,7 @@ REQUEST_KEY = "claude_fallback_request"
 SKIP_KEY = "claude_fallback_skip_day"
 PAUSE_KEY = "claude_paused"
 RUNNING_KEY = "claude_running"
-WAIT_S = 3600  # no answer within an hour counts as a no, so an unattended job stops instead of hanging
+WAIT_S = 300  # no answer within 5 minutes counts as a yes: the popup is a warning, Deny is the way to stop it
 
 
 def paused() -> bool:
@@ -69,7 +70,7 @@ def _notify(label: str, model: Optional[str]) -> None:
     url = get_active_webhook_url()
     if url:
         try:
-            _post_webhook(url, f"**Gemini quota used up.** Spike wants to use your Claude plan for: {label}\nApprove or deny: <{PUBLIC_URL}/>")
+            _post_webhook(url, f"**Gemini quota used up.** Spike will use your Claude plan in {WAIT_S // 60} min for: {label}\nDeny it to stop: <{PUBLIC_URL}/>")
         except Exception:
             pass
 
@@ -116,7 +117,7 @@ def ask(label: str, detail: str, model: Optional[str] = None) -> bool:
             return False  # replaced by another request: treat this one as not approved
         if cur.get("status") in ("approved", "denied"):
             return cur["status"] == "approved"
-    req["status"] = "expired"
+    req["status"] = "approved"  # closes the popup
     set_setting(REQUEST_KEY, json.dumps(req))
-    log_event("info", f"Claude fallback not approved within {WAIT_S // 60} min: {label}")
-    return False
+    log_event("info", f"Claude fallback not answered within {WAIT_S // 60} min, running on Claude: {label}")
+    return True

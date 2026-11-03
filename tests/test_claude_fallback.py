@@ -25,7 +25,7 @@ def _answer_when_pending(approve, skip_today=False):
 
 
 def test_each_call_waits_for_an_answer_and_skip_today_stops_asking(monkeypatch):
-    monkeypatch.setattr(cf, "_notify", lambda label: None)
+    monkeypatch.setattr(cf, "_notify", lambda *a: None)
     real_sleep = time.sleep
     monkeypatch.setattr(cf.time, "sleep", lambda s: real_sleep(0.05))
     set_setting(cf.SKIP_KEY, "")
@@ -48,10 +48,20 @@ def test_each_call_waits_for_an_answer_and_skip_today_stops_asking(monkeypatch):
     set_setting(cf.SKIP_KEY, "")
 
 
+def test_no_answer_runs_on_claude(monkeypatch):
+    monkeypatch.setattr(cf, "_notify", lambda *a: None)
+    monkeypatch.setattr(cf.time, "sleep", lambda s: _real_sleep(0.02))
+    monkeypatch.setattr(cf, "WAIT_S", 0.1)
+    set_setting(cf.SKIP_KEY, "")
+    set_setting(cf.REQUEST_KEY, "null")
+    assert cf.ask("score one moment", "") is True
+    assert cf.pending() is None  # popup closed
+
+
 def test_claude_instead_returns_gemini_shaped_text_and_skips_video(monkeypatch):
     from types import SimpleNamespace
     import src.claude_cli
-    monkeypatch.setattr(cf, "ask", lambda purpose, detail: True)
+    monkeypatch.setattr(cf, "ask", lambda purpose, detail, model=None: True)
     used = []
     monkeypatch.setattr(src.claude_cli, "run_claude",
                         lambda system, prompt, schema, label="", model="sonnet": used.append(model) or {"keep": True})
@@ -60,14 +70,14 @@ def test_claude_instead_returns_gemini_shaped_text_and_skips_video(monkeypatch):
     s7.claude_instead("read the stream", None, "read the stream", claude_model="sonnet")
     assert used == ["haiku", "sonnet"]  # Flash-Lite calls -> Haiku, Flash calls -> Sonnet
     assert s7.claude_instead(["video part", "text"], None, "watch a clip") is None
-    monkeypatch.setattr(cf, "ask", lambda purpose, detail: False)
+    monkeypatch.setattr(cf, "ask", lambda purpose, detail, model=None: False)
     assert s7.claude_instead("judge this", None, "score one moment") is None
 
 
 def test_pause_stops_every_claude_call_and_denies_a_waiting_one(monkeypatch):
     import pytest
     from src import claude_cli
-    monkeypatch.setattr(cf, "_notify", lambda label: None)
+    monkeypatch.setattr(cf, "_notify", lambda *a: None)
     monkeypatch.setattr(cf.time, "sleep", lambda s: _real_sleep(0.05))
     set_setting(cf.SKIP_KEY, "")
     set_setting(cf.REQUEST_KEY, "null")

@@ -100,14 +100,14 @@ def test_ask_returns_cached_decision_without_asking_again(monkeypatch):
     _reset()
 
 
-def test_ask_times_out_and_parks(monkeypatch):
+def test_ask_times_out_and_continues(monkeypatch):
     monkeypatch.setattr(gate, "_notify", lambda text: None)
     monkeypatch.setattr(gate.time, "sleep", lambda s: _real_sleep(0.02))
     monkeypatch.setattr(gate, "WAIT_S", 0.1)  # nobody answers
     _reset()
     vid = _running_job(5 * 3600)  # a real row so the timeout log_event's FK holds
-    assert gate.ask(vid, "v", 5 * 3600, 1, "http://h") == "timeout"
-    assert gate.pending(vid) is not None  # record stays so the Jobs-page buttons can still answer it
+    assert gate.ask(vid, "v", 5 * 3600, 1, "http://h") == "continue"
+    assert gate.pending(vid) is None  # request closed, so the Jobs-page buttons are gone
     _reset()
 
 
@@ -139,13 +139,11 @@ def test_gate_stop_cancels_the_job(monkeypatch):
     assert get_job(vid)["status"] == "done" and "too long" in (get_job(vid)["error"] or "")
 
 
-def test_gate_timeout_parks_the_job(monkeypatch):
-    monkeypatch.setattr(gate, "ask", lambda *a, **k: "timeout")
+def test_gate_unanswered_keeps_running(monkeypatch):
+    monkeypatch.setattr(gate, "ask", lambda *a, **k: "continue")  # what ask() returns when nobody answers
     vid = _running_job(5 * 3600)
-    with pytest.raises(JobInterrupted) as exc:
-        runner._oversize_gate(vid, {"duration": 5 * 3600, "title": "GateJob"})
-    assert exc.value.status == "queued"
-    assert get_job(vid)["status"] == "queued"  # back in the queue for the next worker claim
+    runner._oversize_gate(vid, {"duration": 5 * 3600, "title": "GateJob"})  # must not raise
+    assert get_job(vid)["status"] == "running"
 
 
 def test_gate_continue_past_ceiling_asks_twice_then_proceeds(monkeypatch):

@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initDialogs();
   initDropzones();
   initClaudeApproval();
+  initOversizeGate();
   initAiStatus();
   initSchedulePickers();
 });
@@ -838,4 +839,59 @@ function initClaudeApproval() {
   });
   poll();
   setInterval(poll, 3000);
+}
+
+// ── Long-video warning ───────────────────────────────────────────────────────
+// A job about to start the expensive stages on a very long video warns here, on every page, and carries on
+// by itself when the countdown ends. Stop is the only way to cancel it.
+function initOversizeGate() {
+  const dlg = document.getElementById("oversize-gate-dialog");
+  if (!dlg) return;
+  const pick = (name) => dlg.querySelector(`[data-gate-${name}]`);
+  let current = null;
+  let continuesAt = 0;
+  const tick = () => {
+    const left = Math.max(0, Math.round(continuesAt - Date.now() / 1000));
+    pick("countdown").textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  };
+  const poll = async () => {
+    if (document.hidden) return;
+    try {
+      const res = await fetch("/api/oversize-gate");
+      if (!res.ok) return;
+      const { request: req } = await res.json();
+      if (!req) {
+        current = null;
+        if (dlg.open) dlg.close();
+        return;
+      }
+      continuesAt = req.continues_at;
+      if (current === req.id && dlg.open) return;
+      current = req.id;
+      pick("heading").textContent = req.level === 2 ? "Oversized video: final check" : "Long video";
+      pick("title").textContent = req.title;
+      pick("length").textContent = `${req.hours} hours` + (req.level === 2 ? ", over the 6 hour ceiling (the whole video is processed)" : ", over the 4 hour threshold");
+      pick("tokens").textContent = `${req.tokens.lo.toLocaleString()} to ${req.tokens.hi.toLocaleString()}`;
+      tick();
+      if (!dlg.open) dlg.showModal();
+    } catch (e) {}
+  };
+  dlg.querySelectorAll("[data-gate-answer]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!current) return;
+      const go = btn.dataset.gateAnswer === "continue";
+      try {
+        await fetch("/api/oversize-gate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: current, continue: go }),
+        });
+      } catch (e) {}
+      dlg.close();
+      showToast(go ? "Continuing." : "Stopped. The job is cancelled.", go ? "success" : "danger");
+    });
+  });
+  poll();
+  setInterval(poll, 3000);
+  setInterval(() => { if (dlg.open) tick(); }, 1000);
 }

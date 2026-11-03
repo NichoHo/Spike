@@ -39,7 +39,7 @@
   <dialog id="claude-approval-dialog" class="dialog dialog--md" aria-labelledby="claude-approval-title">
     <div class="dialog__body">
       <h2 class="dialog__title" id="claude-approval-title">Use your Claude plan for this call?</h2>
-      <p class="dialog__text">Gemini's free quota is used up for today. It resets at midnight Pacific time<span data-claude-approval-reset></span>. The job is paused until you answer.</p>
+      <p class="dialog__text">Gemini's free quota is used up for today. It resets at midnight Pacific time<span data-claude-approval-reset></span>. The job runs on Claude in 5 minutes unless you deny it.</p>
       <p class="dialog__text"><strong data-claude-approval-label></strong></p>
       <label class="row" style="gap: var(--space-2); margin-top: var(--space-4);">
         <input type="checkbox" data-claude-approval-skip>
@@ -49,6 +49,20 @@
     <div class="dialog__footer">
       <button class="btn btn--secondary" type="button" data-claude-approval-answer="deny">Deny (stop the job)</button>
       <button class="btn btn--primary" type="button" data-claude-approval-answer="approve">Use Claude</button>
+    </div>
+  </dialog>
+
+  <!-- Long-video warning: shown on every page; the job continues on its own unless stopped -->
+  <dialog id="oversize-gate-dialog" class="dialog dialog--md" aria-labelledby="oversize-gate-title">
+    <div class="dialog__body">
+      <h2 class="dialog__title" id="oversize-gate-title" data-gate-heading>Long video</h2>
+      <p class="dialog__text"><strong data-gate-title></strong></p>
+      <p class="dialog__text"><span data-gate-length></span>. The next stages score moments with Claude and Gemini and are the expensive part of the run: about <span data-gate-tokens></span> tokens end to end.</p>
+      <p class="dialog__text">The job continues on its own in <strong data-gate-countdown></strong> unless you stop it.</p>
+    </div>
+    <div class="dialog__footer">
+      <button class="btn btn--secondary" type="button" data-gate-answer="stop">Stop the job</button>
+      <button class="btn btn--primary" type="button" data-gate-answer="continue">Continue now</button>
     </div>
   </dialog>
 

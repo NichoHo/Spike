@@ -14,8 +14,7 @@ The question is delivered two ways at once (mirrors src/claude_fallback.py):
 
 The pending record lives in spike.db settings (src/db.py get_setting/set_setting), because the pipeline/worker
 process and the web app are separate processes, exactly like the Claude fallback. If nobody answers within
-WAIT_S, ask() returns "timeout" and the runner PARKS the job (back to 'queued') so the worker moves on to the
-next queued job; the record stays so the Jobs-page buttons can still answer it.
+WAIT_S, ask() returns "continue": the gate is a warning with a Stop button, not a block.
 
 Token figures below are MEASURED from real claude_usage data (n=80 real moment-scoring calls) and are hardcoded
 on purpose so the gate can show a grounded estimate without a live query.
@@ -34,7 +33,7 @@ THRESHOLD_S = 14400  # 4 h: ask Continue or Stop
 CEILING_S = 21600    # 6 h: soft ceiling, escalated warning, never truncates
 
 REQUEST_KEY = "oversize_gate_request"
-WAIT_S = 3600  # no answer within an hour -> park the job so the worker moves to the next one
+WAIT_S = 300  # no answer within 5 minutes -> the job continues on its own
 
 # Measured token figures (claude_usage, n=80 real calls)
 TOKENS_PER_MOMENT = 20300        # 14.1k in + 6.2k out per candidate moment scored
@@ -109,7 +108,8 @@ def build_message(video_id: int, title: str, duration_s: float, level: int, publ
         f"Remaining stages: {' -> '.join(remaining)}.",
         f"Now: {now}.",
         "",
-        f"Answer here, or on the Jobs page if you cannot from Discord: <{jobs_link}>",
+        f"**This job continues automatically in {WAIT_S // 60} min unless you stop it.** "
+        f"Stop it in the popup on any Spike page: <{jobs_link}>",
     ]
     return "\n".join(lines)
 
@@ -165,7 +165,7 @@ def clear(video_id: int) -> None:
 
 
 def ask(video_id: int, title: str, duration_s: float, level: int, public_url: str) -> str:
-    """Block until the user answers, or WAIT_S passes. Returns "continue", "stop", or "timeout".
+    """Block until the user answers, or WAIT_S passes. Returns "continue" or "stop". No answer means continue.
 
     If a resolved answer for this exact (video_id, level) already exists - e.g. the job was parked after a
     Continue and re-claimed - it is returned at once without asking again.
@@ -198,5 +198,9 @@ def ask(video_id: int, title: str, duration_s: float, level: int, public_url: st
         if cur.get("status") in ("continue", "stop"):
             return cur["status"]
     log_event("info", f"Oversized-input gate (level {level}) not answered within {WAIT_S // 60} min for job "
-              f"#{video_id}; parking it.", video_id=video_id)
-    return "timeout"
+              f"#{video_id}; continuing.", video_id=video_id)
+    cur = _current()
+    if cur and cur.get("id") == req["id"]:  # close the request so the Jobs-page buttons disappear
+        cur["status"] = "continue"
+        set_setting(REQUEST_KEY, json.dumps(cur))
+    return "continue"

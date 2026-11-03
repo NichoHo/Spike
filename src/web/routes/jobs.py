@@ -23,7 +23,7 @@ from src.db import (
     reorder_queue,
 )
 from src import oversize_gate
-from src.web.auth import get_current_user
+from src.web.auth import get_current_user, require_admin
 
 
 router = APIRouter()
@@ -56,23 +56,6 @@ def _with_eta(jobs):
     return jobs
 
 
-def _gate_ctx():
-    """The oversized-input gate waiting for an answer, with its rendered message, or None."""
-    req = oversize_gate.pending()
-    if not req:
-        return None
-    return {
-        "id": req["id"],
-        "video_id": req["video_id"],
-        "title": req.get("title") or f"Video #{req['video_id']}",
-        "level": req.get("level", 1),
-        "message": oversize_gate.build_message(
-            req["video_id"], req.get("title") or f"Video #{req['video_id']}",
-            float(req.get("duration_s") or 0.0), req.get("level", 1), PUBLIC_URL,
-        ),
-    }
-
-
 @router.get("/jobs", response_class=HTMLResponse)
 async def jobs_page(
     request: Request,
@@ -99,7 +82,6 @@ async def jobs_page(
             "claude_5h_cap": CLAUDE_5H_TOKEN_CAP,
             "claude_week_cap": CLAUDE_WEEK_TOKEN_CAP,
             "review_count": review_count,
-            "gate": _gate_ctx(),
         },
     )
 
@@ -118,7 +100,6 @@ async def jobs_table_partial(
         context={
             "jobs": jobs,
             "user": user,
-            "gate": _gate_ctx(),
         },
     )
 
@@ -174,16 +155,27 @@ async def cancel_job_action(
     return RedirectResponse(url="/jobs", status_code=HTTP_303_SEE_OTHER)
 
 
-@router.post("/jobs/gate/answer")
-async def gate_answer_action(
-    request: Request,
-    user: Dict[str, Any] = Depends(get_current_user),
-):
-    """Answer the oversized-input gate: Continue (decision=continue) lets the pipeline into the moments stage,
-    Stop (decision=stop) stops the job. The waiting worker/pipeline process reads the answer from settings."""
-    form = await request.form()
-    req_id = str(form.get("req_id", ""))
-    decision = str(form.get("decision", ""))
-    if decision in ("continue", "stop"):
-        oversize_gate.answer(req_id, approve=(decision == "continue"))
-    return RedirectResponse(url="/jobs", status_code=HTTP_303_SEE_OTHER)
+@router.get("/api/oversize-gate")
+async def oversize_gate_pending(user: Dict[str, Any] = Depends(require_admin)):
+    """The long-video warning waiting for an answer, polled by every page (popup in base.html)."""
+    req = oversize_gate.pending()
+    if not req:
+        return {"request": None}
+    hours = float(req.get("duration_s") or 0.0) / 3600.0
+    return {"request": {
+        "id": req["id"],
+        "title": req.get("title") or f"Video #{req['video_id']}",
+        "level": req.get("level", 1),
+        "hours": round(hours, 1),
+        "tokens": oversize_gate.estimate_tokens(hours * 3600.0),
+        "continues_at": req["ts"] + oversize_gate.WAIT_S,
+    }}
+
+
+@router.post("/api/oversize-gate")
+async def oversize_gate_answer(request: Request, user: Dict[str, Any] = Depends(require_admin)):
+    """Body: {"id": str, "continue": bool}. Stop cancels the job; the pipeline process reads the answer from settings."""
+    if not request.headers.get("content-type", "").startswith("application/json"):
+        raise HTTPException(status_code=415, detail="JSON body required")  # same CSRF guard as /api/claude-approval
+    body = await request.json()
+    return {"ok": oversize_gate.answer(str(body.get("id", "")), bool(body.get("continue")))}

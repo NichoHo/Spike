@@ -1,27 +1,6 @@
 {% import "macros/ui.html" as ui %}
 
 <tbody id="jobs-tbody" hx-get="/jobs/table" hx-trigger="every 5s" hx-swap="outerHTML">
-  {% if gate %}
-    <tr>
-      <td colspan="6" style="padding: 0;">
-        <div class="alert alert--warning" style="margin: var(--space-3) 0;" role="alert">
-          <div class="stack stack--sm">
-            <strong>{{ "Oversized video: final check" if gate.level == 2 else "Long video: confirm before the expensive stages" }}</strong>
-            <pre class="mono" style="white-space: pre-wrap; font-size: 12px; margin: 0;">{{ gate.message }}</pre>
-            <form method="post" action="/jobs/gate/answer" class="row" style="gap: var(--space-2);">
-              <input type="hidden" name="req_id" value="{{ gate.id }}">
-              <button type="submit" name="decision" value="continue" class="btn btn--primary btn--sm">
-                {{ ui.icon("play", 14) }} <span>Continue</span>
-              </button>
-              <button type="submit" name="decision" value="stop" class="btn btn--secondary btn--sm" style="color: var(--color-danger-text);">
-                {{ ui.icon("x", 14) }} <span>Stop</span>
-              </button>
-            </form>
-          </div>
-        </div>
-      </td>
-    </tr>
-  {% endif %}
   {% if not jobs %}
     <tr>
       <td colspan="6" style="text-align: center; padding: var(--space-8); color: var(--color-text-muted);">
