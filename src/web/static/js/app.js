@@ -248,6 +248,8 @@ function initRenderNotifications() {
       let data = await get(last === "" ? null : last);
       if (data && epoch && epoch !== String(data.epoch)) data = await get(0);
       if (!data) return;
+      // Spinner on the sidebar's Review item while any clip is re-rendering
+      document.querySelectorAll("[data-render-busy]").forEach((el) => { el.hidden = !data.rendering; });
       data.events.forEach((e) => {
         queue({
           id: e.id + "@" + data.epoch,

@@ -28,10 +28,13 @@ from src.web.auth import get_current_user
 
 router = APIRouter()
 
+# A clip being re-rendered stays on the Review page (greyed out with a spinner) instead of vanishing until it is done
+REVIEW_STATUSES = ("ready", "rendering")
+
 
 def _review_signature(source_id: Optional[int]) -> str:
-    """Changes whenever a clip enters/leaves the review queue or is re-rendered (version bump)."""
-    return ",".join(f"{c['id']}:{c['version']}" for c in list_review_clips(source_id=source_id, status="ready"))
+    """Changes whenever a clip enters/leaves the review queue, starts or finishes a re-render, or gets a new version."""
+    return ",".join(f"{c['id']}:{c['version']}:{c['status']}" for c in list_review_clips(source_id=source_id, status=REVIEW_STATUSES))
 
 
 def _real_title_and_streamer(video: Dict[str, Any]) -> None:
@@ -59,7 +62,7 @@ async def review_home(
 ):
     templates = request.app.state.templates
     sources = [dict(s) for s in list_sources()]
-    clips_raw = list_review_clips(source_id=source_id, status="ready")
+    clips_raw = list_review_clips(source_id=source_id, status=REVIEW_STATUSES)
 
     # Group clips by video job
     job_groups: Dict[int, Dict[str, Any]] = {}
@@ -109,7 +112,8 @@ async def review_home(
             "sources": sources,
             "selected_source_id": source_id,
             "job_groups": list(job_groups.values()),
-            "total_clips": len(clips_raw),
+            "total_clips": sum(1 for c in clips_raw if c["status"] == "ready"),
+            "rendering_clips": sum(1 for c in clips_raw if c["status"] == "rendering"),
             "review_count": len(all_ready),
             "review_sig": _review_signature(source_id),
         },

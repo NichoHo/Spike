@@ -68,9 +68,11 @@ def _nav_badges() -> dict:
     from src.db import list_posts, list_review_clips
     from src.outreach import db as outreach_db
     clips = list_review_clips(status="ready")
+    rendering = len(list_review_clips(status="rendering"))
     leads, latest = outreach_db.attention()
     failed = list_posts("failed")
     return {"review": (len(clips), f"{max((c['id'] for c in clips), default=0):012d}" if clips else ""),
+            "rendering": rendering,  # clips being re-rendered: spinner on the Review item (app.js keeps it live)
             "outreach": (leads, latest),
             # ponytail: marker is the newest failed post id, so a retried post failing again shows no new dot (Discord still pings)
             "posts": (len(failed), f"{max(p['id'] for p in failed):012d}" if failed else "")}

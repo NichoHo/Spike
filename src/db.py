@@ -715,8 +715,8 @@ def get_clip_with_details(clip_id: int) -> Optional[sqlite3.Row]:
         ).fetchone()
 
 
-def list_review_clips(source_id: Optional[int] = None, status: str = "ready") -> List[sqlite3.Row]:
-    """Clips grouped by job, highest score first."""
+def list_review_clips(source_id: Optional[int] = None, status: "str | tuple" = "ready") -> List[sqlite3.Row]:
+    """Clips grouped by job, highest score first. `status` is one status or a tuple of them."""
     with get_connection() as conn:
         query = """
             SELECT c.*,
@@ -730,9 +730,11 @@ def list_review_clips(source_id: Optional[int] = None, status: str = "ready") ->
             JOIN candidates cand ON c.candidate_id = cand.id
             JOIN videos v ON cand.video_id = v.id
             LEFT JOIN sources s ON v.source_id = s.id
-            WHERE c.status = ?
+            WHERE c.status IN ({})
         """
-        params = [status]
+        statuses = (status,) if isinstance(status, str) else tuple(status)
+        query = query.format(",".join("?" * len(statuses)))
+        params = list(statuses)
         if source_id:
             query += " AND s.id = ?"
             params.append(source_id)

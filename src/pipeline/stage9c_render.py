@@ -259,8 +259,8 @@ def _build_sendcmd_file(
         t = kf["t_s"]
         cx = kf["cx_px"]
         cy = kf["cy_px"]
-        cw = kf.get("crop_w_px", OUTPUT_WIDTH)
-        ch = kf.get("crop_h_px", OUTPUT_HEIGHT)
+        cw = kf.get("crop_w_px", min(src_w, src_h * OUTPUT_WIDTH / OUTPUT_HEIGHT))
+        ch = kf.get("crop_h_px", min(src_h, src_w * OUTPUT_HEIGHT / OUTPUT_WIDTH))
         x = max(0, cx - cw / 2)
         y = max(0, cy - ch / 2)
         x = min(x, max(0, src_w - cw))
@@ -488,11 +488,11 @@ def _layout_filters(
         inner = _layout_filters(layout, src, f"{dst}_nz", src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style)
         return inner + [f"[{dst}_nz]{_zoompan(zoom_z, OUTPUT_WIDTH, OUTPUT_HEIGHT)}[{dst}]"]
     if layout == "face_track" and sc_rel:
-        first_kf = keyframes[0] if keyframes else {
-            "cx_px": src_w / 2, "cy_px": src_h / 2, "crop_w_px": src_w, "crop_h_px": src_h
-        }
-        cw = int(first_kf.get("crop_w_px", src_w))
-        ch = int(first_kf.get("crop_h_px", src_h))
+        first_kf = keyframes[0] if keyframes else {"cx_px": src_w / 2, "cy_px": src_h / 2}
+        # A keyframe without a crop size gets the 9:16 crop, never the whole wide frame (that is letterbox)
+        tall_w, tall_h = min(src_w, src_h * OUTPUT_WIDTH / OUTPUT_HEIGHT), min(src_h, src_w * OUTPUT_HEIGHT / OUTPUT_WIDTH)
+        cw = int(first_kf.get("crop_w_px", tall_w))
+        ch = int(first_kf.get("crop_h_px", tall_h))
         init_x = int(max(0, first_kf["cx_px"] - cw / 2))
         init_y = int(max(0, first_kf["cy_px"] - ch / 2))
         # Named crop so sendcmd only moves this one, not the split layout's crops

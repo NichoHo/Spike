@@ -6,7 +6,7 @@
   <div class="page-header__left">
     <h1 class="page-header__title">Review</h1>
     <p class="page-header__description">
-      {% if total_clips == 1 %}1 clip needs review{% else %}{{ total_clips }} clips need review{% endif %}
+      {% if total_clips == 1 %}1 clip needs review{% else %}{{ total_clips }} clips need review{% endif %}{% if rendering_clips %} · {{ rendering_clips }} re-rendering{% endif %}
     </p>
   </div>
   {% if sources %}
@@ -49,15 +49,22 @@
 
         <div class="clip-grid">
           {% for clip in group.clips %}
-            <article class="clip-card">
+            {% set busy = clip.status == 'rendering' %}
+            {# A clip being re-rendered keeps its card, greyed out and not clickable, with a spinner over the thumbnail #}
+            <article class="clip-card{% if busy %} clip-card--rendering{% endif %}"{% if busy %} aria-busy="true"{% endif %}>
               <div class="clip-card__media">
                 {% if clip.thumb_path %}
-                  <img src="/media/clip/{{ clip.id }}/thumb" alt="Thumbnail for {{ clip.cand_title or 'Clip' }}" loading="lazy">
+                  <img src="/media/clip/{{ clip.id }}/thumb?v={{ clip.version or 1 }}" alt="Thumbnail for {{ clip.cand_title or 'Clip' }}" loading="lazy">
                 {% endif %}
-                <video preload="none" data-src="/media/clip/{{ clip.id }}/stream" muted playsinline></video>
+                {% if busy %}
+                  <div class="clip-card__busy" role="status"><span class="clip-card__spinner" aria-hidden="true"></span><span>Re-rendering</span></div>
+                {% else %}
+                  <video preload="none" data-src="/media/clip/{{ clip.id }}/stream?v={{ clip.version or 1 }}" muted playsinline></video>
+                {% endif %}
               </div>
               <div class="clip-card__title">
-                <a href="/clips/{{ clip.id }}" class="clip-card__link">{{ clip.cand_title or clip.cand_hook or 'Untitled Clip' }}</a>
+                {% if busy %}<span>{{ clip.cand_title or clip.cand_hook or 'Untitled Clip' }}</span>
+                {% else %}<a href="/clips/{{ clip.id }}" class="clip-card__link">{{ clip.cand_title or clip.cand_hook or 'Untitled Clip' }}</a>{% endif %}
               </div>
               {% if clip.concept and clip.concept != 'single' %}
               <div class="clip-card__concept">

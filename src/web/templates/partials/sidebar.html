@@ -22,6 +22,7 @@
     <a href="/" class="nav-item {% if active_nav == 'review' %}is-active{% endif %}" {% if active_nav == 'review' %}aria-current="page"{% endif %} data-nav-key="review" data-nav-marker="{{ badges.review[1] }}">
       {{ ui.icon("film-strip", 16) }}
       <span>Review</span>
+      <span class="nav-item__finder" data-render-busy data-tooltip="Re-rendering clips" {% if not badges.rendering %}hidden{% endif %}><span class="badge__spinner"></span><span class="visually-hidden">Clips re-rendering</span></span>
       {{ nav_badge("review") }}
     </a>
 

@@ -52,10 +52,11 @@ def _push_render_event(user_login: str, clip_id: int, title: str, ok: bool) -> N
 async def render_events(after: Optional[int] = None, user: Dict[str, Any] = Depends(get_current_user)):
     """Rerender outcomes newer than `after`. Without `after`, only returns the baseline id."""
     last = _render_events[-1]["id"] if _render_events else 0
+    rendering = len(list_review_clips(status="rendering"))  # drives the spinner on the sidebar's Review item
     if after is None:
-        return {"epoch": _EPOCH, "last": last, "events": []}
+        return {"epoch": _EPOCH, "last": last, "events": [], "rendering": rendering}
     events = [e for e in list(_render_events) if e["id"] > after and e["user"] == user["login"]]
-    return {"epoch": _EPOCH, "last": last, "events": events}
+    return {"epoch": _EPOCH, "last": last, "events": events, "rendering": rendering}
 
 
 @router.get("/api/claude-approval")
@@ -141,6 +142,9 @@ async def claude_approval_answer(request: Request, user: Dict[str, Any] = Depend
     return {"ok": ok}
 
 
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
 @router.get("/media/clip/{clip_id}/stream")
 async def stream_clip_media(clip_id: int):
     """Serve vertical video file for playback in player or card preview."""
@@ -153,7 +157,8 @@ async def stream_clip_media(clip_id: int):
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Media file does not exist on disk.")
 
     # inline, not attachment: the player streams it with Range requests
-    return FileResponse(path=file_path, media_type="video/mp4", content_disposition_type="inline")
+    # no-cache: a re-render replaces the file behind this same URL, so the browser must revalidate
+    return FileResponse(path=file_path, media_type="video/mp4", content_disposition_type="inline", headers=_NO_CACHE)
 
 
 @router.get("/media/music/{rel_path:path}")
@@ -187,7 +192,7 @@ async def get_clip_thumbnail(clip_id: int):
     if not thumb_path.exists():
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Thumbnail file does not exist.")
 
-    return FileResponse(path=thumb_path, media_type="image/jpeg", filename=thumb_path.name)
+    return FileResponse(path=thumb_path, media_type="image/jpeg", filename=thumb_path.name, headers=_NO_CACHE)
 
 
 @router.get("/clips/{clip_id}/download")

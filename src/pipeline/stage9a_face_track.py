@@ -452,15 +452,6 @@ def track_faces(
             raw, cuts, speakers = followed
             if len(set(speakers)) < 2:
                 speakers = []
-    if not raw:
-        # Fallback: static center crop keyframe
-        cx = src_w / 2.0
-        cy = src_h / 2.0
-        return [{"t_s": 0.0, "cx_px": cx, "cy_px": cy}], []
-
-    smooth = _ema_smooth_centers(raw, cuts=cuts)
-    sample_fps = FACE_DETECT_FPS
-
     # Crop rectangle: keep aspect ratio of output (9:16) in source pixels
     # Fit within source dimensions
     crop_h_px = float(src_h)
@@ -468,6 +459,15 @@ def track_faces(
     if crop_w_px > src_w:
         crop_w_px = float(src_w)
         crop_h_px = crop_w_px * (out_h / out_w)
+
+    if not raw:
+        # Fallback: static 9:16 centre crop. Without the crop size the render used the whole wide frame,
+        # so face track on a clip with no face (anime, no MediaPipe) looked exactly like letterbox.
+        return [{"t_s": 0.0, "cx_px": src_w / 2.0, "cy_px": src_h / 2.0,
+                 "crop_w_px": round(crop_w_px, 1), "crop_h_px": round(crop_h_px, 1)}], []
+
+    smooth = _ema_smooth_centers(raw, cuts=cuts)
+    sample_fps = FACE_DETECT_FPS
 
     keyframes: List[Dict[str, Any]] = []
     for idx, (cx_ratio, cy_ratio) in enumerate(smooth):
