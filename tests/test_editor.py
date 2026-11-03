@@ -142,7 +142,7 @@ def pov_inputs(speech="no no no bro"):
 
 def test_pov_starts_before_the_peak_ends_with_the_outburst_and_waits_for_a_caption():
     c, words, series = pov_inputs()
-    [rec], notes = apply(answer(out("pov", 1, [span("C1", 3, 7)])), [c], words=words, series=series)
+    [rec], notes = apply(answer(out("pov", 1, [span("C1", 3, 7)])), [c], allowed=["pov"], words=words, series=series)
     seg = rec["segs"][0]
     assert not notes and rec["concept"] == "pov" and rec["needs_pov"] is True
     assert seg["start_s"] == pytest.approx(1009.6) and 4.0 <= seg["end_s"] - seg["start_s"] <= 12.0
@@ -152,13 +152,13 @@ def test_pov_starts_before_the_peak_ends_with_the_outburst_and_waits_for_a_capti
 def test_pov_whose_speech_names_the_game_a_player_chat_or_the_streamer_is_dropped():
     for speech in ("chat is cooking me", "Kvaratskhelia scored", "this EA game is rigged", "Speed what is that"):
         c, words, series = pov_inputs(speech)
-        recs, notes = apply(answer(out("pov", 1, [span("C1", 3, 7)])), [c], words=words, series=series)
+        recs, notes = apply(answer(out("pov", 1, [span("C1", 3, 7)])), [c], allowed=["pov"], words=words, series=series)
         assert recs == [] and "names" in notes[0], speech
 
 
 def test_pov_captions_are_checked_in_code_and_a_failed_caption_call_drops_the_clip(monkeypatch):
     c, words, series = pov_inputs()
-    [rec], _ = apply(answer(out("pov", 1, [span("C1", 3, 7)])), [c], words=words, series=series)
+    [rec], _ = apply(answer(out("pov", 1, [span("C1", 3, 7)])), [c], allowed=["pov"], words=words, series=series)
     good = {"emotion": "fury", "options": ["POV: you said one more round at midnight", "me when the wifi dies", "when mom walks in"],
             "text": "POV: you said one more round at midnight"}
     monkeypatch.setattr("src.pov.generate_pov_captions", lambda *a, **k: good)
@@ -167,7 +167,7 @@ def test_pov_captions_are_checked_in_code_and_a_failed_caption_call_drops_the_cl
     assert "needs_pov" not in kept[0]
 
     c, words, series = pov_inputs()
-    [rec], _ = apply(answer(out("pov", 1, [span("C1", 3, 7)])), [c], words=words, series=series)
+    [rec], _ = apply(answer(out("pov", 1, [span("C1", 3, 7)])), [c], allowed=["pov"], words=words, series=series)
     monkeypatch.setattr("src.pov.generate_pov_captions", lambda *a, **k: (_ for _ in ()).throw(ValueError("no caption passed")))
     assert finalize_pov([rec], words, TERMS, PRESET)[0] == []
 
@@ -293,7 +293,7 @@ def test_stage7_stores_a_story_with_segment_ids_and_marks_its_components(tmp_pat
     ctx = {"profile": {"display_name": "Speed"}, "preset": PRESET}
     picked = s7.run_stage7_moments(vid, tmp_path, {"duration": 3000, "webpage_url": ""}, transcript,
                                    {"peaks": peaks, "has_chat": False}, [], profile_ctx=ctx)
-    assert "Episode 1: match 1" in captured["prompt"] and "H1 (hubris line" in captured["prompt"] and "allowed: single, story, pov, top3" in captured["system"]
+    assert "Episode 1: match 1" in captured["prompt"] and "H1 (hubris line" in captured["prompt"] and "allowed: single, story, top3" in captured["system"]
     story_rec = next(c for c in picked if c["concept"] == "story")
     assert story_rec["title"] == "Speed talks then loses" and len(story_rec["segs"]) == 2
 

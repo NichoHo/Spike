@@ -1,5 +1,17 @@
 # Spike: Learnings
 
+## 2026-11-04: Automatic POV picks turned off
+
+- **Learned:** auto POV made corny clips. Its sources are baseline
+  (routine) reactions ranked by voice jump only, with no score floor, no
+  face check and no per-stream cap. On VOD 74 nothing passed the 65 floor,
+  so all 4 outputs were POV, one with judge score 30.
+- **Decided (user):** `pov` is out of `DEFAULT_AUTO_CONCEPTS` and unticked
+  on sources 2, 3 and 4. Building a POV by hand on the clip page still works.
+- **Open:** to bring auto POV back, take POV only from watched peaks, ask
+  the video judge if the face is funny with no context, apply the score
+  floor, allow at most 1 per stream, and eval it on several streams.
+
 ## 2026-10-15: Twitch finder uses Spike's Twitch app; verified live
 
 - **Decided (user):** the Twitch finder uses Spike's own `TWITCH_CLIENT_ID`

@@ -16,7 +16,7 @@ import numpy as np
 
 CONCEPTS = ("single", "story", "pov", "top3", "top5")
 CONCEPT_LABELS = {"single": "Single", "story": "Story", "pov": "POV", "top3": "Top 3", "top5": "Top 5"}
-DEFAULT_AUTO_CONCEPTS = ["single", "story", "pov", "top3"]   # top5 is off by default
+DEFAULT_AUTO_CONCEPTS = ["single", "story", "top3"]   # top5 is off by default; pov too, it picked routine reactions
 EMOTIONS = ("fury", "despair", "disbelief", "panic", "smug joy", "hysterical laughing", "slow realization")
 
 STORY_TOTAL_S = (20.0, 45.0)
