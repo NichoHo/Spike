@@ -6,7 +6,7 @@ Exit criteria:
 1. Accounts screen with OAuth connection for TikTok, YouTube, and Instagram. Access and refresh
    tokens encrypted at rest via Fernet.
 2. TikTok upload-to-inbox mode (lands in creator's TikTok inbox, status='sent_to_inbox').
-3. YouTube Shorts upload (marked privacyStatus: "private" until audit).
+3. YouTube Shorts upload (privacyStatus: "public").
 4. Auto-post rules (§8.3): permission check, score floors (final_score >= 80, raw llm_score >= 70),
    account daily cap (3/day), needs_context == 0.
 5. Scheduling (§8.4) with slots and background scheduler tick.
@@ -265,7 +265,7 @@ def test_tiktok_upload_to_inbox(dummy_media_file):
 def test_youtube_shorts_private_upload(dummy_media_file):
     """
     Blueprint §8.1 & Exit Criteria:
-    Verify YouTube Shorts upload succeeds with privacyStatus='private'.
+    Verify YouTube Shorts upload succeeds with privacyStatus='public'.
     """
     clip_id, _, _, _ = _create_test_clip(permission="written", dummy_path=dummy_media_file)
 
@@ -284,7 +284,7 @@ def test_youtube_shorts_private_upload(dummy_media_file):
 
     res = dispatch_post(post_id)
     assert res["status"] == "posted"
-    assert res["privacy"] == "private"
+    assert res["privacy"] == "public"
     assert "youtube.com/shorts/" in res["url"]
 
     updated_post = get_post_with_details(post_id)

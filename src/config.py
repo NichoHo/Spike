@@ -54,8 +54,8 @@ GOOGLE_OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 # YouTube quota is per Google Cloud project: a client in its own project keeps uploads off Outreach's quota.
 YOUTUBE_UPLOAD_CLIENT_ID = os.environ.get("YOUTUBE_UPLOAD_CLIENT_ID", "")
 YOUTUBE_UPLOAD_CLIENT_SECRET = os.environ.get("YOUTUBE_UPLOAD_CLIENT_SECRET", "")
-# Google locks uploads from an unaudited app to private; set to public once the audit passes
-YOUTUBE_PRIVACY = os.environ.get("SPIKE_YOUTUBE_PRIVACY", "private")
+# Privacy for YouTube uploads (public, unlisted or private). Google forces uploads from an unaudited app to private.
+YOUTUBE_PRIVACY = os.environ.get("SPIKE_YOUTUBE_PRIVACY", "public")
 TIKTOK_CLIENT_KEY = os.environ.get("TIKTOK_CLIENT_KEY", "")
 TIKTOK_CLIENT_SECRET = os.environ.get("TIKTOK_CLIENT_SECRET", "")
 INSTAGRAM_APP_ID = os.environ.get("INSTAGRAM_APP_ID", "")

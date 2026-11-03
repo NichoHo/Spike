@@ -4,7 +4,7 @@ Blueprint §8, §9, §12, §13 (Phase 6).
 
 Rollout & Rules:
 1. TikTok upload-to-inbox: free, no audit, lands in creator's TikTok inbox.
-2. YouTube Shorts: private uploads until compliance audit passes.
+2. YouTube Shorts: public uploads (SPIKE_YOUTUBE_PRIVACY).
 3. Instagram Reels: resumable container upload, wait for processing, then publish.
 4. Permission = none is strictly BLOCKED in code (raises PermissionBlockedError).
 5. Auto-post rules (§8.3): permission check, score floor (final >= 80, raw LLM >= 70),
@@ -257,7 +257,7 @@ def upload_to_youtube_shorts(
     tags: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Upload vertical video to YouTube Shorts (Blueprint §8.1: private until audit passes).
+    Upload vertical video to YouTube Shorts (public by default, set by SPIKE_YOUTUBE_PRIVACY).
     """
     if not clip_path.exists():
         raise FileNotFoundError(f"Clip file not found: {clip_path}")
@@ -272,7 +272,7 @@ def upload_to_youtube_shorts(
             "platform_post_id": mock_id,
             "status": "posted",
             "url": f"https://youtube.com/shorts/{mock_id}",
-            "privacy": "private",
+            "privacy": config.YOUTUBE_PRIVACY,
         }
 
     # Live YouTube Data API v3 Resumable Upload

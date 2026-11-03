@@ -524,7 +524,7 @@
         {{ ui.alert("warning", "Can't post this clip yet", post.blocked) }}
       {% endif %}
         {% set short = {"youtube": "YouTube", "tiktok": "TikTok", "instagram": "Instagram"} %}
-        {% set notes = {"youtube": "Private until Google audits the app", "tiktok": "Lands in the TikTok inbox to finish in the app"} %}
+        {% set notes = {"tiktok": "Lands in the TikTok inbox to finish in the app"} %}
         {% set live = post.platforms | selectattr("accounts") | list %}
         {% set total = live | sum(attribute="accounts", start=[]) | length %}
         {% if live and not post.blocked %}
