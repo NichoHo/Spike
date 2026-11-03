@@ -24,7 +24,8 @@ from typing import List, Optional, Tuple, Dict, Any, Sequence
 from src.config import FACE_DETECT_FPS, FACE_TRACK_EMA_ALPHA
 
 
-DETECT_WIDTH = 640  # face boxes are found on frames downscaled to this width; ratios are scale-free
+FACE_TRACK_MIN_HIT_SHARE = 0.2  # below this share of samples with a face, try the tiled facecam finder
+DETECT_WIDTH = 640 # face boxes are found on frames downscaled to this width; ratios are scale-free
 
 # Speaker tracking (only runs when the quick pass sees two faces at once)
 MULTI_FACE_MIN_SHARE = 0.15   # share of probe frames with 2+ faces that turns speaker tracking on
@@ -460,11 +461,20 @@ def track_faces(
         crop_w_px = float(src_w)
         crop_h_px = crop_w_px * (out_h / out_w)
 
-    if not raw:
-        # Fallback: static 9:16 centre crop. Without the crop size the render used the whole wide frame,
-        # so face track on a clip with no face (anime, no MediaPipe) looked exactly like letterbox.
-        return [{"t_s": 0.0, "cx_px": src_w / 2.0, "cy_px": src_h / 2.0,
-                 "crop_w_px": round(crop_w_px, 1), "crop_h_px": round(crop_h_px, 1)}], []
+    # The full-frame pass misses a small facecam overlay on gameplay. Look for it with the tiled
+    # facecam finder and hold the crop on it, instead of drifting over the game.
+    if sum(bb is not None for bb in raw) < len(raw) * FACE_TRACK_MIN_HIT_SHARE:
+        cam = detect_facecam(section_path)
+        if cam:
+            half = cam["w"] / 2.0
+            raw = [(cam["cx"] - half, cam["cy"] - half, cam["w"], cam["w"])] * max(1, len(raw))
+            cuts, speakers = [], []
+    if not any(bb is not None for bb in raw):
+        # Fallback: static centre crop (sized, so the render crops instead of showing the whole frame)
+        return [{
+            "t_s": 0.0, "cx_px": src_w / 2.0, "cy_px": src_h / 2.0,
+            "crop_w_px": round(crop_w_px, 1), "crop_h_px": round(crop_h_px, 1),
+        }], []
 
     smooth = _ema_smooth_centers(raw, cuts=cuts)
     sample_fps = FACE_DETECT_FPS
