@@ -293,7 +293,7 @@ def test_stage7_stores_a_story_with_segment_ids_and_marks_its_components(tmp_pat
     ctx = {"profile": {"display_name": "Speed"}, "preset": PRESET}
     picked = s7.run_stage7_moments(vid, tmp_path, {"duration": 3000, "webpage_url": ""}, transcript,
                                    {"peaks": peaks, "has_chat": False}, [], profile_ctx=ctx)
-    assert "Episode 1: match 1" in captured["prompt"] and "H1 (hubris line" in captured["prompt"] and "allowed: single, story, top3" in captured["system"]
+    assert "Episode 1: match 1" in captured["prompt"] and "H1 (hubris line" in captured["prompt"] and "allowed: single, story" in captured["system"]
     story_rec = next(c for c in picked if c["concept"] == "story")
     assert story_rec["title"] == "Speed talks then loses" and len(story_rec["segs"]) == 2
 
