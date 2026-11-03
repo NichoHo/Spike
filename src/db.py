@@ -5,6 +5,7 @@ Blueprint §9: WAL mode, foreign keys on, times in UTC ISO-8601.
 
 import sqlite3
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import median
@@ -236,6 +237,7 @@ def init_db():
             "ALTER TABLE videos ADD COLUMN claimed_at TEXT",
             "ALTER TABLE videos ADD COLUMN finished_at TEXT",
             "ALTER TABLE stage_timings ADD COLUMN progress REAL",  # 0..1 inside the running stage (transcribe reports it)
+            "ALTER TABLE stage_timings ADD COLUMN progress_samples TEXT",  # JSON [[unix_s, fraction]], the last PROGRESS_WINDOW_S
             "ALTER TABLE sources ADD COLUMN default_music_mood TEXT DEFAULT 'chill'",
             "ALTER TABLE sources ADD COLUMN silence_trim INTEGER DEFAULT 0",
             "ALTER TABLE sources ADD COLUMN punch_in_zoom INTEGER DEFAULT 1",
@@ -1402,11 +1404,21 @@ def set_video_duration(video_id: int, duration_s: float):
         conn.execute("UPDATE videos SET duration_s = ? WHERE id = ?", (duration_s, video_id))
 
 
+# The ETA uses the speed over this window, so a slow start does not inflate it for the rest of the stage.
+PROGRESS_WINDOW_S = 600
+
+
 def set_stage_progress(video_id: int, fraction: float):
     """Record how far the running stage is (0..1). The ETA extrapolates from it."""
+    fraction = min(max(fraction, 0.0), 1.0)
+    now = time.time()
     with get_connection() as conn:
-        conn.execute("UPDATE stage_timings SET progress = ? WHERE video_id = ? AND finished_at IS NULL",
-                     (min(max(fraction, 0.0), 1.0), video_id))
+        row = conn.execute("SELECT progress_samples FROM stage_timings WHERE video_id = ? AND finished_at IS NULL",
+                           (video_id,)).fetchone()
+        samples = json.loads(row[0]) if row and row[0] else []
+        samples = [s for s in samples if now - s[0] <= PROGRESS_WINDOW_S] + [[now, fraction]]
+        conn.execute("UPDATE stage_timings SET progress = ?, progress_samples = ? WHERE video_id = ? AND finished_at IS NULL",
+                     (fraction, json.dumps(samples), video_id))
 
 
 def estimate_remaining_seconds(jobs: List[Dict[str, Any]]) -> Dict[int, Optional[float]]:
@@ -1429,8 +1441,8 @@ def estimate_remaining_seconds(jobs: List[Dict[str, Any]]) -> Dict[int, Optional
             if r["duration_s"]:
                 s["per_s"].append(r["secs"] / r["duration_s"])
         hist = {st: (median(s["per_s"]) if s["per_s"] else None, median(s["flat"])) for st, s in runs.items()}
-        running = {r["video_id"]: (r["started_at"], r["progress"]) for r in conn.execute(
-            "SELECT video_id, started_at, progress FROM stage_timings WHERE finished_at IS NULL")}
+        running = {r["video_id"]: (r["started_at"], r["progress"], r["progress_samples"]) for r in conn.execute(
+            "SELECT video_id, started_at, progress, progress_samples FROM stage_timings WHERE finished_at IS NULL")}
 
     def expected(stage: str, duration: Optional[float]) -> float:
         per_s, flat = hist.get(stage, (None, None))
@@ -1449,10 +1461,13 @@ def estimate_remaining_seconds(jobs: List[Dict[str, Any]]) -> Dict[int, Optional
         duration = j.get("duration_s") or _meta_duration(j["id"])
         i = PIPELINE_STAGES.index(j["stage"])
         exp_now = expected(j["stage"], duration)
-        started_at, progress = running.get(j["id"], (None, None))
+        started_at, progress, samples = running.get(j["id"], (None, None, None))
         elapsed = (now - datetime.fromisoformat(started_at)).total_seconds() if started_at else 0.0
         if progress and progress >= 0.02 and elapsed > 0:
             left_now = elapsed * (1 - progress) / progress
+            recent = json.loads(samples) if samples else []
+            if len(recent) >= 2 and recent[-1][0] - recent[0][0] >= 60 and recent[-1][1] > recent[0][1]:
+                left_now = (1 - recent[-1][1]) * (recent[-1][0] - recent[0][0]) / (recent[-1][1] - recent[0][1])
         else:
             # Past the expected time with no progress signal: keep a small remainder, not zero.
             left_now = max(exp_now - elapsed, 0.1 * exp_now)

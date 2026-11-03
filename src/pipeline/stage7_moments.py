@@ -65,7 +65,8 @@ class _MultiKeyClient:
 
     def __init__(self, keys: List[str]):
         self._keys = list(keys)
-        self._clients = [genai.Client(api_key=k) for k in keys]
+        # A hung request never errors, so the retry loop never runs: cap each call at 5 minutes (ms).
+        self._clients = [genai.Client(api_key=k, http_options=types.HttpOptions(timeout=300_000)) for k in keys]
         self.models = self
 
     def generate_content(self, model: str, **kwargs: Any) -> Any:

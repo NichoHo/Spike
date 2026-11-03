@@ -46,6 +46,18 @@ def test_eta_with_progress_extrapolates_from_elapsed():
     assert eta[vid] == pytest.approx(100 + AFTER_TRANSCRIBE, abs=2)
 
 
+def test_eta_uses_recent_speed_not_the_slow_start():
+    import json, time
+    vid = _running_job(7200)  # two hours in, but only recently up to speed
+    set_stage_progress(vid, 0.1)
+    now = time.time()  # last 5 min: 0.2 -> 0.3 of the stage, so 0.7 left takes 2100 s
+    with get_connection() as conn:
+        conn.execute("UPDATE stage_timings SET progress = 0.3, progress_samples = ? WHERE video_id = ?",
+                     (json.dumps([[now - 300, 0.2], [now, 0.3]]), vid))
+    eta = estimate_remaining_seconds([{"id": vid, "status": "running", "stage": "transcribe", "duration_s": 3600}])
+    assert eta[vid] == pytest.approx(2100 + AFTER_TRANSCRIBE, abs=2)
+
+
 def test_eta_history_uses_median_so_one_stalled_run_does_not_skew_it():
     vid = _running_job(0)
     for i, secs in enumerate([360, 360, 360, 360 * 50]):  # three normal runs, one stalled
