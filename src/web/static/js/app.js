@@ -813,6 +813,9 @@ function initClaudeApproval() {
       if (current === req.id && dlg.open) return;
       current = req.id;
       dlg.querySelector("[data-claude-approval-label]").textContent = req.label;
+      const overload = req.kind === "overload";  // Gemini kept answering 503: no quota text, no reset time
+      dlg.querySelector("[data-claude-approval-quota]").hidden = overload;
+      dlg.querySelector("[data-claude-approval-overload]").hidden = !overload;
       // The reset moment comes from the server (midnight Pacific); only its display uses this device's clock.
       const reset = new Date(resets_at * 1000);
       const hours = Math.max(0, (reset - Date.now()) / 3600000);

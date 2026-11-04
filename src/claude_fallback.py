@@ -62,15 +62,16 @@ def _all_keys_out(model: Optional[str]) -> bool:
     return gemini_budget.left(model) == 0 or (bool(keys) and all(gemini_budget.key_capped(model, k) for k in keys))
 
 
-def _notify(label: str, model: Optional[str]) -> None:
+def _notify(label: str, model: Optional[str], kind: str = "quota") -> None:
     from src.config import PUBLIC_URL
     from src.notify import _post_webhook, get_active_webhook_url
-    if not _all_keys_out(model):
+    if kind == "quota" and not _all_keys_out(model):
         return  # one key out is not "Gemini used up": the other keys still serve the call
     url = get_active_webhook_url()
     if url:
+        why = "Gemini is overloaded" if kind == "overload" else "Gemini quota used up"
         try:
-            _post_webhook(url, f"**Gemini quota used up.** Spike will use your Claude plan in {WAIT_S // 60} min for: {label}\nDeny it to stop: <{PUBLIC_URL}/>")
+            _post_webhook(url, f"**{why}.** Spike will use your Claude plan in {WAIT_S // 60} min for: {label}\nDeny it to stop: <{PUBLIC_URL}/>")
         except Exception:
             pass
 
@@ -96,16 +97,17 @@ def answer(req_id: str, approve: bool, skip_today: bool) -> bool:
     return True
 
 
-def ask(label: str, detail: str, model: Optional[str] = None) -> bool:
-    """Block until the user approves or denies one Claude call. True right away when today is skipped."""
+def ask(label: str, detail: str, model: Optional[str] = None, kind: str = "quota") -> bool:
+    """Block until the user approves or denies one Claude call. True right away when today is skipped.
+    kind: "quota" (Gemini's daily quota is gone) or "overload" (Gemini kept answering 503); it picks the popup wording."""
     if paused():
         return False
     if get_setting(SKIP_KEY) == today():
         return True
-    req = {"id": uuid.uuid4().hex, "label": label, "detail": detail[:300], "status": "pending", "ts": time.time()}
+    req = {"id": uuid.uuid4().hex, "label": label, "detail": detail[:300], "kind": kind, "status": "pending", "ts": time.time()}
     set_setting(REQUEST_KEY, json.dumps(req))
     print(f"  [claude] Waiting for your OK in the web app to run on Claude: {label}")
-    _notify(label, model)
+    _notify(label, model, kind)
     deadline = time.time() + WAIT_S
     while time.time() < deadline:
         time.sleep(2)

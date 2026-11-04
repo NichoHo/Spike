@@ -92,15 +92,18 @@ class QuotaExhausted(RuntimeError):
     """The API key's quota is used up for hours (for example the free tier's daily request cap)."""
 
 
-def claude_instead(contents: Any, config: Any, purpose: str, claude_model: str = "haiku") -> Optional[Any]:
+def claude_instead(contents: Any, config: Any, purpose: str, claude_model: str = "haiku", overloaded: bool = False) -> Optional[Any]:
     """The same call on Claude (Pro plan) at the tier the call was meant for (Flash -> Sonnet, Flash-Lite -> Haiku), shaped like a Gemini response (.text holds the JSON). None when it
-    cannot run: a video or image call (Claude CLI cannot watch it), the user said no, or Claude failed."""
+    cannot run: a video or image call (Claude CLI cannot watch it), the user said no, or Claude failed.
+    overloaded: Gemini kept answering 503, not out of quota; only the popup wording differs."""
     from types import SimpleNamespace
     from src import claude_fallback
     from src.claude_cli import ClaudeError, run_claude
     if not isinstance(contents, str):
         return None
-    if not claude_fallback.ask(f"{purpose} (Claude {claude_model.capitalize()})", f"Gemini {DEFAULT_GEMINI_MODEL} is out of quota for today.", DEFAULT_GEMINI_MODEL):
+    why = "Gemini is overloaded (503) and did not recover after retries." if overloaded else f"Gemini {DEFAULT_GEMINI_MODEL} is out of quota for today."
+    if not claude_fallback.ask(f"{purpose} (Claude {claude_model.capitalize()})", why, None if overloaded else DEFAULT_GEMINI_MODEL,
+                               "overload" if overloaded else "quota"):
         print("  [claude] Fallback not approved; stopping as before.")
         return None
     system = getattr(config, "system_instruction", None) or "Follow the task and answer with the JSON it asks for."
@@ -194,7 +197,9 @@ def generate_content_with_retry(
 
 def judge_generate(client: genai.Client, contents: Any, config: Any, purpose: str = "") -> Any:
     """Judge call on Flash. When Flash's daily quota is gone (or the budget says so), the same call runs on
-    Flash-Lite instead of failing the whole job, and on Claude Sonnet (Flash's tier) when Flash-Lite is out too."""
+    Flash-Lite instead of failing the whole job, and on Claude Sonnet (Flash's tier) when Flash-Lite is out too.
+    When Gemini stays overloaded (503) through every retry, it goes to Claude Sonnet the same way, after the same
+    approval popup (auto-approved after 5 minutes)."""
     model = JUDGE_GEMINI_MODEL if gemini_budget.left(JUDGE_GEMINI_MODEL) > 0 else DEFAULT_GEMINI_MODEL
     try:
         return generate_content_with_retry(client=client, model=model, contents=contents, config=config, purpose=purpose,
@@ -206,6 +211,15 @@ def judge_generate(client: genai.Client, contents: Any, config: Any, purpose: st
         print(f"  [stage 7] {model} quota is used up for today; judging with {DEFAULT_GEMINI_MODEL}")
         return generate_content_with_retry(client=client, model=DEFAULT_GEMINI_MODEL, contents=contents, config=config, purpose=purpose,
                                           claude_model="sonnet")
+    except Exception as e:
+        s = str(e).lower()
+        if not ("503" in s or "unavailable" in s or "high demand" in s):
+            raise
+        print(f"  [stage 7] {model} is overloaded (503) after every retry; asking to judge with Claude")
+        out = claude_instead(contents, config, purpose or "a Gemini judge call", "sonnet", overloaded=True)
+        if out is None:
+            raise
+        return out
 
 
 def format_timestamp(seconds: float) -> str:
