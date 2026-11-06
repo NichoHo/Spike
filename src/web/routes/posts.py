@@ -145,7 +145,6 @@ async def post_clip_page(
             "page_width": "narrow",
             "user": user,
             "clip": clip,
-            "blocked": False,
             "no_permission": no_permission,
             "anime_unlisted": anime_unlisted_clip,
             "accounts": accounts,

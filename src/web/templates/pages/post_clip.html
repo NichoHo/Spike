@@ -16,24 +16,7 @@
 </header>
 
 <div class="stack stack--lg" style="max-width: var(--content-narrow);">
-  {% if blocked %}
-    <!-- Blueprint §12: Hard Permission Block Alert -->
-    <div class="alert alert--danger" role="alert">
-      {{ ui.icon("warning-circle", 20) }}
-      <div>
-        <div class="alert__title">Posting permanently blocked</div>
-        <div class="alert__body">
-          Source <strong>{{ clip.source_name or 'Source' }}</strong> is configured with <code>permission = 'none'</code> (private review only).
-          Per licensing and compliance rules, commercial or platform posting is prohibited for this source.
-        </div>
-      </div>
-    </div>
-
-    <div style="margin-top: var(--space-4);">
-      <a href="/clips/{{ clip.id }}" class="btn btn--secondary">Return to clip</a>
-    </div>
-
-  {% elif not accounts %}
+  {% if not accounts %}
     <div class="alert alert--warning" role="alert">
       {{ ui.icon("warning", 20) }}
       <div>
