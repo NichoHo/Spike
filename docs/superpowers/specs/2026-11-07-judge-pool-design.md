@@ -89,7 +89,7 @@ The Gemini lane is **down** when a task fails all its retries with 503 or "unava
    - In the default mode, Claude takes tasks only while Gemini is down.
    - With Claude off and Gemini down past the limit, the pool raises the job error.
    - Per-group percentiles: two groups with different score scales give the same order inside each group.
-2. Warm-cache replay with `scripts/eval_stage7.py` on one eval VOD gives the same candidates as before. This proves the change does not alter results.
+2. `scripts/stage7_snapshot.py` runs stage 7 on one frozen eval VOD with a fixed fake judge (answers from a hash of each window) and no live calls. Its output before and after the change is the same. This proves the change does not alter results. (The saved judge answers cannot do this check: they use the v2 prompt, and the current judge uses v3, so a replay would call the LLM for every moment.)
 3. One cold run on one eval VOD. Report the stage 7 time against the 71 min median, and the count of 503s, 429s and Claude calls.
 4. The full test suite stays green (328 passed before this change).
 
