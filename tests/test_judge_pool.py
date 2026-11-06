@@ -151,3 +151,16 @@ def test_on_result_sees_every_task_once():
 def test_unknown_stored_mode_reads_as_the_default():
     set_setting(jp.HELP_KEY, "bogus")
     assert jp.help_mode() == "down"
+
+
+def test_settings_saves_only_known_claude_help_modes():
+    from starlette.testclient import TestClient
+    from src.web.app import app
+
+    client = TestClient(app)
+    client.post("/settings/claude-help", data={"mode": "always"}, follow_redirects=False)
+    assert jp.help_mode() == "always"
+    client.post("/settings/claude-help", data={"mode": "everything"}, follow_redirects=False)
+    assert jp.help_mode() == "always"  # an unknown value from the form is ignored
+    page = client.get("/settings").text
+    assert "Claude help for the judge" in page and '<option value="always" selected>' in page

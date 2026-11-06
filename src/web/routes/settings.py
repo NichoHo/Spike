@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from starlette.status import HTTP_303_SEE_OTHER
 
 from src.config import (
+    CLAUDE_LANE_DAILY_CAP,
     DEFAULT_WHISPER_MODEL,
     WHISPER_COMPUTE_TYPE,
     DEFAULT_GEMINI_MODEL,
@@ -31,6 +32,7 @@ from src.concepts import EMOTIONS
 from src.notify import get_active_webhook_url, verify_discord_webhook
 from src.pov import add_to_bank, delete_from_bank, load_bank
 from src import platform_auth
+from src.judge_pool import HELP_KEY, HELP_MODES, help_mode
 from src.web.auth import get_current_user, require_admin
 
 
@@ -76,6 +78,8 @@ async def settings_page(
             "connect_options": platform_auth.connect_options(),
             "accounts_notice": request.query_params.get("notice", ""),
             "accounts_error": request.query_params.get("error", ""),
+            "claude_help": help_mode(),
+            "claude_lane_cap": CLAUDE_LANE_DAILY_CAP,
         },
     )
 
@@ -145,6 +149,16 @@ async def save_discord_webhook(
     user: Dict[str, Any] = Depends(require_admin),
 ):
     set_setting("discord_webhook_url", webhook_url.strip())
+    return RedirectResponse(url="/settings", status_code=HTTP_303_SEE_OTHER)
+
+
+@router.post("/settings/claude-help")
+async def save_claude_help(
+    mode: str = Form("down"),
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    if mode in HELP_MODES:  # form values are untrusted: only the three known modes are stored
+        set_setting(HELP_KEY, mode)
     return RedirectResponse(url="/settings", status_code=HTTP_303_SEE_OTHER)
 
 
