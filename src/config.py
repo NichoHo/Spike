@@ -176,6 +176,9 @@ LLM_WEIGHT_WITH_CHAT = 0.30  # 0.5 ranked worse on the 9-VOD eval set; chat acti
 PICK_SPACING_S = 45.0  # ranked picks sit at least this far apart, like the chat baseline's peaks: ten picks around one busy spot waste nine slots
 CHAT_RESCUE_PCT = 80.0  # a candidate the transcript judge threw out stays in the ranking when its chat activity is above this percentile of the VOD's candidates
 MIN_RAW_LLM_SCORE = 65.0  # Floor to prevent dull VODs from passing
+GEMINI_LANE_WORKERS = 3  # parallel Gemini calls in stage 7 (src/judge_pool.py); use 2 if the free tier answers 429 often
+CLAUDE_LANE_DAILY_CAP = 100  # judge pool calls on Claude per day: protects the Pro plan, which the user's own Claude use shares
+POOL_STALL_S = 1800.0  # a stage 7 pool with no finished call for this long fails the job
 AUTO_POST_MIN_LLM_SCORE = 70.0
 
 # ─── Phase 2: Vertical edit settings (Blueprint §7) ────────────────────────
