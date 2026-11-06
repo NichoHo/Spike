@@ -5,8 +5,10 @@ import json
 import pytest
 
 import src.pipeline.stage7_moments as s7
-from src.db import get_candidates, init_db, register_video
-from src.models import LLMJudgeResponse
+from src import judge_pool
+from src.db import get_candidates, init_db, register_video, set_setting
+from src.judge_pool import GeminiUnavailable
+from src.models import LLMJudgeResponse, VideoVerdict
 
 
 def test_ties_share_average_rank():
@@ -174,3 +176,44 @@ def test_video_gates_trim_and_line_proposals():
     assert p["origin"] == "stream_read" and p["clip_end"] - p["clip_start"] == s7.MIN_CLIP_DURATION_S
     assert s7.line_proposal({"start_line": 0, "end_line": 3}, meta, 200.0, "moment") is None
     assert s7.line_proposal({"start_line": 5, "end_line": 500}, meta, 200.0, "moment") is None
+
+
+def test_503_through_every_retry_raises_gemini_unavailable(monkeypatch):
+    monkeypatch.setattr(s7.time, "sleep", lambda s: None)
+    with pytest.raises(GeminiUnavailable):
+        s7.generate_content_with_retry(_FakeClient("503 unavailable high demand"), "m", "x", None, max_retries=2)
+
+
+def test_pool_calls_never_start_the_old_claude_popup(monkeypatch):
+    monkeypatch.setattr(s7.time, "sleep", lambda s: None)
+    monkeypatch.setattr(s7, "claude_instead", lambda *a, **k: pytest.fail("the per-call Claude popup started"))
+    quota = "429 RESOURCE_EXHAUSTED quota exceeded. Please retry in 7h33m11s."
+    with pytest.raises(s7.QuotaExhausted):
+        s7.generate_content_with_retry(_FakeClient(quota), s7.DEFAULT_GEMINI_MODEL, "x", None, allow_claude=False)
+
+
+def test_judge_hands_a_gemini_outage_to_the_pool(monkeypatch):
+    def down(*a, **k):
+        raise GeminiUnavailable("503 unavailable")
+
+    monkeypatch.setattr(s7, "get_gemini_client", lambda: None)
+    monkeypatch.setattr(s7, "generate_content_with_retry", down)
+    with pytest.raises(GeminiUnavailable):
+        s7.call_llm_judge(["L1 [00:01.0] hello"], "", {})
+
+
+def test_judge_on_claude_runs_once_on_haiku_with_the_strict_schema(monkeypatch):
+    seen = []
+    answer = LLMJudgeResponse(keep=True, why_funny="w", humor_type="absurd", score=72, punchline="p", title="t",
+                              hook_text="h", post_caption="c")
+
+    def fake_claude(system, prompt, schema, **kw):
+        seen.append((schema, kw.get("model")))
+        return answer.model_dump()
+
+    monkeypatch.setattr(s7, "get_gemini_client", lambda: None)
+    monkeypatch.setattr("src.claude_cli.run_claude", fake_claude)
+    res = s7.call_llm_judge(["L1 [00:01.0] hello"], "", {}, provider="claude")
+    assert res.score == 72 and len(seen) == 1
+    schema, model = seen[0]
+    assert model == "haiku" and set(schema["required"]) == set(LLMJudgeResponse.model_fields)

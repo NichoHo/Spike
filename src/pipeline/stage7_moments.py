@@ -50,6 +50,7 @@ from src.pipeline.anime_skip import drop_skipped
 from src.pipeline.stage6_signals import busiest_chat_seconds, chatters_per_second
 from src.models import LLMJudgeResponse, PairwiseCompareResponse, VideoVerdict
 from src import gemini_budget
+from src.judge_pool import GeminiUnavailable, Task, run_pool
 from src.db import get_json_column, insert_candidate
 from src.music import list_all_tracks, track_catalog_for_llm
 from src.profile import build_episodes, concept_terms, episode_of, fix_streamer, get_preset, profile_block, streamer_name
@@ -155,10 +156,12 @@ def generate_content_with_retry(
     delay_between_calls: float = 2.0,
     purpose: str = "",
     claude_model: str = "haiku",
+    allow_claude: bool = True,
 ) -> Any:
-    """Gemini call with retries. Raises QuotaExhausted for long quota waits and re-raises the last error
-    when retries run out (it never returns None). When Flash-Lite, the last Gemini option, is out of quota for
-    the day, a text-only call runs on Claude instead, after the user approves it (src/claude_fallback.py)."""
+    """Gemini call with retries. Raises QuotaExhausted for long quota waits, GeminiUnavailable when 503 lasts through
+    every retry, and re-raises any other last error (it never returns None). When Flash-Lite, the last Gemini option,
+    is out of quota for the day, a text-only call runs on Claude instead, after the user approves it
+    (src/claude_fallback.py). allow_claude=False skips that: the judge pool picks the provider itself."""
     time.sleep(delay_between_calls)
     last_err: Optional[Exception] = None
     for attempt in range(max_retries):
@@ -174,7 +177,7 @@ def generate_content_with_retry(
             err_str = str(e).lower()
             if "429" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
                 if _retry_delay_s(err_str) > 300:
-                    if model == DEFAULT_GEMINI_MODEL:
+                    if model == DEFAULT_GEMINI_MODEL and allow_claude:
                         out = claude_instead(contents, config, purpose or "a Gemini text call", claude_model)
                         if out is not None:
                             return out
@@ -192,6 +195,8 @@ def generate_content_with_retry(
             else:
                 print(f"  [stage 7] Gemini call failed permanently after {max_retries} attempts: {e}")
                 raise
+    if last_err is not None and any(s in str(last_err).lower() for s in ("503", "unavailable", "high demand")):
+        raise GeminiUnavailable(f"503 unavailable: {model} after {max_retries} attempts: {str(last_err)[:200]}") from last_err
     raise RuntimeError(f"Gemini call to {model} failed after {max_retries} attempts: {last_err}")
 
 
@@ -724,8 +729,10 @@ def call_llm_judge(
     creator_block: str = "",
     streamer: str = "",
     story: str = "",
+    provider: str = "gemini",
 ) -> Optional[LLMJudgeResponse]:
-    """Call the LLM judge (Gemini Flash) to evaluate a candidate clip window (Blueprint §6.3, §6.7)."""
+    """Call the LLM judge to evaluate a candidate clip window (Blueprint §6.3, §6.7). provider is the judge pool lane:
+    "gemini" (Flash-Lite, two runs averaged) or "claude" (Haiku, one run; the CLI has no temperature setting)."""
     client = get_gemini_client()
 
     transcript_text = "\n".join(formatted_lines)
@@ -824,6 +831,16 @@ Respond with JSON in exactly this field order:
 }}
 """
 
+    if provider == "claude":  # a ClaudeError goes to the judge pool, which hands the moment back to Gemini
+        from src.claude_cli import require_all, run_claude
+        out = run_claude(system_instruction, prompt, require_all(LLMJudgeResponse.model_json_schema()),
+                         label="judge one moment", model="haiku")
+        try:
+            return LLMJudgeResponse.model_validate(out)
+        except ValidationError as e:
+            print(f"  [stage 7] Claude judge answer did not fit the schema: {e}")
+            return None
+
     # Blueprint §6.3: Run twice and average the scores to reduce noise
     responses = []
 
@@ -840,10 +857,13 @@ Respond with JSON in exactly this field order:
                     temperature=0.3,
                 ),
                 purpose="score one candidate moment" + (f" near {formatted_lines[0].split(']')[0].split('[')[-1]}" if formatted_lines else ""),
+                allow_claude=False,
             )
             responses.append(LLMJudgeResponse.model_validate_json(resp.text))
-        except QuotaExhausted:
-            raise
+        except (QuotaExhausted, GeminiUnavailable):
+            if not responses:
+                raise  # the judge pool waits for Gemini or gives the moment to Claude
+            break  # keep the one answer: the pool must not judge this moment again
         except Exception as e:
             print(f"  [stage 7] Judge scoring run note: {e}")
 
@@ -929,8 +949,8 @@ Judge it as a stranger scrolling short-form video who has never seen this creato
                                         media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW),
         )
         return VideoVerdict.model_validate_json(resp.text)
-    except QuotaExhausted:
-        raise
+    except (QuotaExhausted, GeminiUnavailable):
+        raise  # the judge pool waits for Gemini: Claude cannot watch video
     except Exception as e:
         print(f"  [stage 7] Note: video judge skipped for {start_s:.0f}-{end_s:.0f}s: {e}")
         return None
