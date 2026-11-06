@@ -260,3 +260,48 @@ def test_stage7_judges_on_claude_while_gemini_is_down_and_stores_the_judge(tmp_p
     assert len(rows) == 4 and {r["judge_model"] for r in rows} == {"claude-haiku"}
     cache = json.loads((tmp_path / "judge_cache.json").read_text())
     assert {v["judge_model"] for k, v in cache.items() if k.startswith("v3:")} == {"claude-haiku"}
+
+
+def test_chunk_scan_runs_on_claude_while_gemini_is_down(monkeypatch):
+    transcript = {"segments": [{"start": i * 2.0, "end": i * 2.0 + 2.0, "text": f"line {i}", "words": []}
+                               for i in range(150)]}
+
+    def down(*a, **k):
+        raise GeminiUnavailable("503 unavailable")
+
+    seen = []
+
+    def fake_claude(system, prompt, schema, **kw):
+        seen.append(schema)
+        return {"moments": [{"start_line": 3, "end_line": 12, "topic": "a bit"}], "hubris": []}
+
+    monkeypatch.setattr(s7, "get_gemini_client", lambda: None)
+    monkeypatch.setattr(s7, "generate_content_with_retry", down)
+    monkeypatch.setattr("src.claude_cli.run_claude", fake_claude)
+    monkeypatch.setattr(judge_pool, "PROBE_START_S", 0.01)
+    monkeypatch.setattr(judge_pool, "PROBE_MAX_S", 0.02)
+    monkeypatch.setattr(judge_pool.claude_fallback, "ask", lambda *a, **k: True)
+    set_setting(judge_pool.CLAUDE_USED_KEY, "")
+    set_setting(judge_pool.HELP_KEY, "down")
+    try:
+        props = s7.propose_transcript_chunks(transcript, 300.0)
+    finally:
+        set_setting(judge_pool.HELP_KEY, "off")
+    assert props and all(p["type"] == "moment" for p in props)
+    assert seen and seen[0] is s7.CHUNK_SCHEMA
+
+
+def test_video_judge_waits_for_gemini_instead_of_skipping(monkeypatch):
+    calls = []
+
+    def flaky(meta, start_s, end_s, story, streamer, find_play=False):
+        calls.append(start_s)
+        if len(calls) == 1:
+            raise GeminiUnavailable("503 unavailable")
+        return VideoVerdict(visible=True, standalone=True, reaction="peak", ends_on_reaction=True, score=80)
+
+    monkeypatch.setattr(s7, "video_judge", flaky)
+    monkeypatch.setattr(judge_pool, "PROBE_START_S", 0.01)
+    out = s7.run_pool([s7.Task(lambda p: s7.video_judge({}, 1.0, 20.0, "", ""), claude_ok=False)], seed=1,
+                      down_errors=(s7.QuotaExhausted, GeminiUnavailable))
+    assert out[0][0] == "gemini" and out[0][1].score == 80 and len(calls) == 2
