@@ -29,7 +29,7 @@ def test_layout_segments_for():
     assert layout_segments_for("face_track", [{"t": 101.5, "layout": "letterbox"}], 100.0, 120.0, [(100.0, 102.0)]) == [(0.0, "face_track")]
 
 
-def test_render_with_layout_switches(tmp_path: Path, capfd):
+def test_render_with_layout_switches(tmp_path: Path, capsys):
     sec = tmp_path / "section.mp4"
     subprocess.run([
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
@@ -48,7 +48,7 @@ def test_render_with_layout_switches(tmp_path: Path, capfd):
         layout_changes=[{"t": 107.0, "layout": "face_track"}, {"t": 110.0, "layout": "letterbox"}],
     )
     assert ok
-    assert "primary render failed" not in capfd.readouterr().out  # not the center-crop fallback
+    assert "primary render failed" not in capsys.readouterr().out  # not the center-crop fallback
     probe = json.loads(subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
          "stream=width,height:format=duration", "-of", "json", str(out)],
@@ -89,7 +89,7 @@ def _duration(path: Path) -> float:
     ).stdout)
 
 
-def test_render_with_several_zooms_a_cut_and_a_moved_section_start(tmp_path: Path, capfd):
+def test_render_with_several_zooms_a_cut_and_a_moved_section_start(tmp_path: Path, capsys):
     """Zooms in split (facecam panel only) and center, a manual cut, and a section that starts 12 s before the clip."""
     sec = _section(tmp_path)
     for layout in ("split", "center"):
@@ -102,7 +102,7 @@ def test_render_with_several_zooms_a_cut_and_a_moved_section_start(tmp_path: Pat
             extra_cuts=[(114.5, 115.5)],
             section_start_s=100.0,
         )
-        assert ok and "primary render failed" not in capfd.readouterr().out
+        assert ok and "primary render failed" not in capsys.readouterr().out
         assert abs(_duration(out) - 7.0) < 0.3   # 8 s clip minus the 1 s cut
 
 

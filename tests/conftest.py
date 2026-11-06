@@ -16,9 +16,15 @@ import src.db as db
 
 _test_db = Path(tempfile.mkdtemp(prefix="spike_test_")) / "spike.db"
 if db.DB_PATH.exists():
-    # backup() gives a consistent copy even while the real app has the DB open in WAL mode.
-    with sqlite3.connect(db.DB_PATH) as src, sqlite3.connect(_test_db) as dst:
+    # backup() gives a consistent copy even while the real app has the DB open in WAL mode. Both connections are
+    # closed at once: `with` on a sqlite3 connection only commits, so the real DB stayed open for the whole session
+    # (see pytest.ini for how a stray native write reached an open DB handle).
+    src, dst = sqlite3.connect(db.DB_PATH), sqlite3.connect(_test_db)
+    try:
         src.backup(dst)
+    finally:
+        src.close()
+        dst.close()
 db.DB_PATH = _test_db
 db.init_db()
 db.set_setting("claude_help", "off")  # the judge pool never calls the real Claude CLI from a test
