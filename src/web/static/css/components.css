@@ -543,6 +543,7 @@ fieldset.field > legend { padding: 0; margin-bottom: var(--space-2); }
 .layout-option:hover { border-color: var(--color-border-hover); }
 .layout-picker input:checked + .layout-option { border-color: var(--color-accent-text); background: var(--color-accent-subtle); }
 .layout-picker input:focus-visible + .layout-option { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.layout-picker input:disabled + .layout-option { opacity: 0.5; cursor: not-allowed; }
 .layout-option__name { font-size: 13px; font-weight: 500; color: var(--color-text); }
 .layout-option__desc { font-size: 12px; line-height: 16px; color: var(--color-text-muted); }
 .layout-option__quota {

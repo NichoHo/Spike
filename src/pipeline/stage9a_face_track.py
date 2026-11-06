@@ -472,7 +472,7 @@ def track_faces(
     if not any(bb is not None for bb in raw):
         # Fallback: static centre crop (sized, so the render crops instead of showing the whole frame)
         return [{
-            "t_s": 0.0, "cx_px": src_w / 2.0, "cy_px": src_h / 2.0,
+            "t_s": 0.0, "cx_px": src_w / 2.0, "cy_px": src_h / 2.0, "no_face": True,
             "crop_w_px": round(crop_w_px, 1), "crop_h_px": round(crop_h_px, 1),
         }], []
 

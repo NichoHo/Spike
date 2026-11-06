@@ -28,6 +28,7 @@ from src.db import (
     create_or_update_clip,
     set_clip_render_state,
     set_clip_layout_changes,
+    set_clip_no_face,
     list_review_clips,
     log_event,
 )
@@ -44,8 +45,8 @@ _event_ids = count(1)
 _EPOCH = int(time.time())  # changes on restart; event ids restart at 1 then
 
 
-def _push_render_event(user_login: str, clip_id: int, title: str, ok: bool) -> None:
-    _render_events.append({"id": next(_event_ids), "user": user_login, "clip_id": clip_id, "title": title, "ok": ok})
+def _push_render_event(user_login: str, clip_id: int, title: str, ok: bool, note: str = "") -> None:
+    _render_events.append({"id": next(_event_ids), "user": user_login, "clip_id": clip_id, "title": title, "ok": ok, "note": note})
 
 
 @router.get("/api/render-events")
@@ -612,6 +613,7 @@ def _rerender_job(
     new_thumb_file = renders_dir / f"clip_{cand_id}_v{new_version}_thumb.jpg"
     concept = "single"
     concept_saved: Dict[str, Any] = {}
+    face_note = ""
 
     try:
         if prepare:
@@ -640,6 +642,19 @@ def _rerender_job(
                     switches = plan[1:]
                 else:  # no AI: keep the user's switches and use the face-size heuristic for the opening layout
                     p = {**p, "layout": resolve_layout("auto", sec_file, ai=False)[0]}
+
+            # Face track with no face in the clip would show gameplay: go back to the previous layout
+            # (auto when that was Face track too), drop Face track switches, and lock the option on the page.
+            if "face_track" in {p["layout"], *(s["layout"] for s in switches)}:
+                from src.pipeline.stage9a_face_track import get_video_dimensions, track_faces
+                w, h = get_video_dimensions(sec_file)
+                no_face = bool(track_faces(sec_file, end_s - start_s + 10, w, h)[0][0].get("no_face"))
+                set_clip_no_face(clip_id, no_face)
+                if no_face:
+                    prev = clip.get("layout")
+                    p = {**p, "layout": prev if prev not in (None, "", "face_track") else "auto"}
+                    switches = [s for s in switches if s["layout"] != "face_track"]
+                    face_note = "No face detected, so Face track was turned off for this clip. Layout set back to " + p["layout"] + "."
 
             # Edited caption text: unchanged words keep their timing, changed spots are re-spread
             # (see _retime_edit). Saved so later re-renders keep the edit.
@@ -744,4 +759,4 @@ def _rerender_job(
     if clean_hook and clean_hook != (clip.get("cand_hook") or ""):
         update_candidate_hook(cand_id, clean_hook)
     log_event("info", f"Clip #{clip_id} re-rendered (v{new_version}, {concept}, {p['layout']}, {p['caption_style']}) by {user_login}")
-    _push_render_event(user_login, clip_id, clip_title, True)
+    _push_render_event(user_login, clip_id, clip_title, True, face_note)

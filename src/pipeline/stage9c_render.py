@@ -65,7 +65,7 @@ from src.config import (
     ZOOM_MAX,
     ZOOM_OUT_DURATION,
 )
-from src.db import create_or_update_clip, set_clip_layout_changes
+from src.db import create_or_update_clip, set_clip_layout_changes, set_clip_no_face
 from src.music import (
     get_random_track_for_mood,
     resolve_music_path,
@@ -842,6 +842,7 @@ def run_stage9c_render(
                 resolve_music_path(cand["music_track"]) if cand.get("music_track") else None
             ) or get_random_track_for_mood(cand.get("mood") or default_mood)
 
+        render_info: Dict[str, Any] = {}
         success = render_single_vertical_clip(
             sec_file=sec_file,
             out_file=out_file,
@@ -849,6 +850,7 @@ def run_stage9c_render(
             clip_start=clip_start,
             clip_end=clip_end,
             layout=clip_layout,
+            info=render_info,
             caption_style=caption_style,
             all_words=cand_words if captions_on else [],
             facecam_box=clip_facecam,
@@ -876,7 +878,7 @@ def run_stage9c_render(
                     candidate_id=cand_id,
                     file_path=str(out_file),
                     thumb_path=str(thumb_file),
-                    layout=clip_layout,
+                    layout=render_info.get("layout", clip_layout),
                     caption_style=caption_style,
                     trim_start_s=clip_start,
                     trim_end_s=clip_end,
@@ -889,6 +891,9 @@ def run_stage9c_render(
                     zooms=json.dumps(cand.get("zooms") or []),
                 )
                 cand["clip_id"] = clip_id
+                if render_info.get("no_face"):
+                    set_clip_no_face(clip_id, True)
+                    layout_changes = [c for c in layout_changes or [] if c.get("layout") != "face_track"]
                 if layout_changes:  # the review editor shows and edits these like hand-made switches
                     set_clip_layout_changes(clip_id, json.dumps(layout_changes))
             except Exception as e:
@@ -934,9 +939,11 @@ def render_single_vertical_clip(
     section_start_s: Optional[float] = None,
     overlay_events: Optional[List[Dict[str, Any]]] = None,
     sfx: Optional[List[Dict[str, Any]]] = None,
+    info: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Renders a single vertical clip from a downloaded section video file.
+    info: when Face track finds no face, it is filled with no_face=True and the clip is rendered with Auto instead.
     Supports interactive adjustments to trims, layout, captions, music, silence trim, and zoom.
     silence_trim: False/"off", True/"natural" (cut pauses > 1.5 s, or > silence_trim_s).
     caption_y: None places captions on the split seam, or at 68% height for other layouts.
@@ -990,6 +997,19 @@ def render_single_vertical_clip(
 
     # Letterbox title card
     src_w, src_h = get_video_dimensions(sec_file)
+    tracked = None
+    if "face_track" in used:
+        tracked = track_faces(sec_file, effective_dur + 10, src_w, src_h)
+        if tracked[0][0].get("no_face"):  # no face to follow: Auto instead (never Face track again)
+            tracked = None
+            layout, cam = resolve_layout("auto", sec_file)
+            layout = "center" if layout == "face_track" else layout
+            facecam_box = facecam_box or cam
+            layout_changes = [c for c in layout_changes or [] if c.get("layout") != "face_track"]
+            segments = layout_segments_for(layout, layout_changes, clip_start, clip_end, cut_intervals)
+            used = {lay for _, lay in segments}
+            if info is not None:
+                info.update(no_face=True, layout="auto")
     title_png: Optional[Path] = None
     if letterbox_style == "title" and "letterbox" in used:
         card_text = _mask_profanity(title_text) if profanity_mask else title_text
@@ -1016,7 +1036,7 @@ def render_single_vertical_clip(
     raw_keyframes: List[Dict[str, Any]] = []
     caption_words = words
     if "face_track" in used:
-        raw_keyframes, speakers = track_faces(sec_file, effective_dur + 10, src_w, src_h)
+        raw_keyframes, speakers = tracked
         if speakers:
             caption_words = [{**w, "speaker": speaker_at(speakers, float(w.get("start", 0)) - sec_start)} for w in words]
 

@@ -272,7 +272,7 @@
           <h4 class="edit-group__title" id="g-framing">Framing</h4>
           <div class="field">
             <span class="field__label">Layout</span>
-            {{ ui.layout_picker('layout', clip.layout or 'split', clip.letterbox_style or 'blur', auto=true) }}
+            {{ ui.layout_picker('layout', clip.layout or 'split', clip.letterbox_style or 'blur', auto=true, no_face=clip.no_face) }}
             <p class="field__help">Auto lets the AI pick the layout and any switches again when you re-render, replacing the switches below.</p>
           </div>
 
@@ -387,7 +387,7 @@
           <span class="timecode-lg" id="playhead-tc" aria-live="off">0:00.0</span>
         </div>
         <select id="switch-layout" class="select" aria-label="Layout to switch to">
-          <option value="face_track">Face track</option>
+          <option value="face_track"{% if clip.no_face %} disabled{% endif %}>Face track{% if clip.no_face %} (no face detected){% endif %}</option>
           <option value="split">Split</option>
           <option value="center">Center</option>
           <option value="letterbox">Letterbox</option>

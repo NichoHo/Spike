@@ -175,7 +175,8 @@
 {# Radio card pickers with a visual preview. `current` is the selected value. #}
 {# letterbox_style: pass "title" or "blur" to show the letterbox style toggle under the picker. #}
 {# auto: true adds an Auto tile first (the AI picks the layout and mid-clip switches on render). #}
-{% macro layout_picker(prefix, current, letterbox_style=none, auto=false) -%}
+{# no_face: true greys out Face track ("No face detected"). #}
+{% macro layout_picker(prefix, current, letterbox_style=none, auto=false, no_face=false) -%}
   {%- set ai_left = layout_ai_left() -%}
   {%- set layouts = ([("auto", "Auto", "AI picks for each clip.")] if auto else []) + [
     ("split", "Split", "Streamer on top, game below."),
@@ -185,7 +186,7 @@
   ] -%}
   <div class="layout-picker">
     {%- for value, name, desc in layouts %}
-      <input type="radio" name="layout" id="{{ prefix }}-{{ value }}" value="{{ value }}" {% if current == value %}checked{% endif %}>
+      <input type="radio" name="layout" id="{{ prefix }}-{{ value }}" value="{{ value }}" {% if current == value %}checked{% endif %}{% if no_face and value == "face_track" %} disabled{% endif %}>
       <label for="{{ prefix }}-{{ value }}" class="layout-option">
         <span class="layout-thumb layout-thumb--{{ value }}" aria-hidden="true">
           {%- if value == "auto" %}<span class="lt-cam"></span><span class="lt-content"></span><span class="lt-auto">A</span>
@@ -196,7 +197,7 @@
           <span class="lt-caption"></span>
         </span>
         <span class="layout-option__name">{{ name }}</span>
-        <span class="layout-option__desc">{{ desc }}</span>
+        <span class="layout-option__desc">{% if no_face and value == "face_track" %}No face detected in this clip.{% else %}{{ desc }}{% endif %}</span>
         {%- if value == "auto" %}<span class="layout-option__quota">{% if ai_left > 0 %}{{ ai_left }} of {{ layout_ai_limit() }} Gemini calls left today{% else %}Gemini is out, uses your Claude Pro plan{% endif %}</span>{% endif %}
       </label>
     {%- endfor %}

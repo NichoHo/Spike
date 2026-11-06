@@ -258,6 +258,7 @@ function initRenderNotifications() {
           href: "/clips/" + e.clip_id,
           exp: Date.now() + TTL,
         });
+        if (e.note) queue({ id: e.id + "@" + data.epoch + "n", msg: e.note, kind: "danger", href: "/clips/" + e.clip_id, exp: Date.now() + 15000 });
       });
       sessionStorage.setItem(KEY, data.epoch + ":" + data.last);
       await pollFinder();

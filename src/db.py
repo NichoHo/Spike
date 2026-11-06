@@ -248,6 +248,7 @@ def init_db():
             "ALTER TABLE clips ADD COLUMN show_hook INTEGER DEFAULT 0",  # hook title burned into the video
             "ALTER TABLE clips ADD COLUMN layout_changes TEXT",  # JSON [{t, layout}] mid-clip layout switches
             "ALTER TABLE clips ADD COLUMN letterbox_style TEXT DEFAULT 'blur'",
+            "ALTER TABLE clips ADD COLUMN no_face INTEGER DEFAULT 0",  # 1 once Face track found no face in this clip
             "ALTER TABLE candidates ADD COLUMN cuts TEXT",  # JSON [[start_s, end_s]] removed from the clip (stream seconds)
             "ALTER TABLE candidates ADD COLUMN payoff_t REAL",  # stream second of the payoff line, the default zoom spot
             "ALTER TABLE clips ADD COLUMN cuts TEXT",  # JSON [[start_s, end_s]]; edited on the clip page and by "Ask the editor"
@@ -767,6 +768,11 @@ def set_clip_render_state(clip_id: int, status: str) -> bool:
 def set_clip_layout_changes(clip_id: int, layout_changes_json: Optional[str]) -> None:
     with get_connection() as conn:
         conn.execute("UPDATE clips SET layout_changes = ? WHERE id = ?", (layout_changes_json, clip_id))
+
+
+def set_clip_no_face(clip_id: int, no_face: bool) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE clips SET no_face = ? WHERE id = ?", (1 if no_face else 0, clip_id))
 
 
 def reset_stuck_renders() -> int:
