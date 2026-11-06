@@ -752,10 +752,14 @@ def _rerender_job(
         sfx=json.dumps(sfx) if sfx is not None else None,
     )
     set_clip_layout_changes(clip_id, json.dumps(switches) if switches else None)
-    # Drop the superseded version so re-renders don't pile up on disk
+    # Drop the superseded version so re-renders don't pile up on disk. Windows refuses while a browser still
+    # streams the old file; that must not abort the job before the hook, the log and the toast below.
     for old in (clip.get("file_path"), clip.get("thumb_path")):
         if old and Path(old) not in (new_out_file, new_thumb_file):
-            Path(old).unlink(missing_ok=True)
+            try:
+                Path(old).unlink(missing_ok=True)
+            except OSError:  # ponytail: a locked file stays until scripts/prune_storage.py sweeps it
+                pass
     if clean_hook and clean_hook != (clip.get("cand_hook") or ""):
         update_candidate_hook(cand_id, clean_hook)
     log_event("info", f"Clip #{clip_id} re-rendered (v{new_version}, {concept}, {p['layout']}, {p['caption_style']}) by {user_login}")

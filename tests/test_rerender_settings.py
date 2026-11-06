@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
-from src.db import create_or_update_clip, get_clip, get_connection, init_db, insert_candidate, register_video, set_clip_render_state
+from src.db import (create_or_update_clip, get_clip, get_clip_with_details, get_connection, init_db, insert_candidate,
+                    register_video, set_clip_render_state)
 from src.web.app import app
 
 
@@ -83,6 +84,30 @@ def test_rerender_applies_every_setting(env, monkeypatch):
     html = env["c"].get(f"/clips/{env['clip']}").text
     assert f"/media/clip/{env['clip']}/stream?v=2" in html
     assert env["c"].get(f"/media/clip/{env['clip']}/stream").headers["cache-control"] == "no-cache"
+
+
+def test_clip_page_locks_while_rendering_and_a_locked_old_file_does_not_abort_the_job(env, monkeypatch):
+    # An edit made while rendering used to block the reload forever, so the player kept the old version
+    set_clip_render_state(env["clip"], "rendering")
+    html = env["c"].get(f"/clips/{env['clip']}").text
+    assert '<fieldset class="card__body edit-groups" disabled>' in html and "location.reload()" in html
+    set_clip_render_state(env["clip"], "ready")
+    assert '<fieldset class="card__body edit-groups" disabled>' not in env["c"].get(f"/clips/{env['clip']}").text
+
+    # Windows refuses to delete the old render while the player still streams it
+    real_unlink = Path.unlink
+    def locked(self, *a, **k):
+        if self.name == f"clip_{env['cand']}.mp4":
+            raise PermissionError(32, "The process cannot access the file because it is being used by another process")
+        return real_unlink(self, *a, **k)
+    monkeypatch.setattr(Path, "unlink", locked)
+    res = env["c"].post(f"/clips/{env['clip']}/rerender", data={
+        "start_s": "27", "end_s": "36", "layout": "letterbox", "caption_style": "bold_pop", "hook_text": "new hook", "layout_changes": "[]",
+    }, follow_redirects=False)
+    assert res.status_code == 303
+    clip = get_clip_with_details(env["clip"])
+    assert clip["version"] == 2 and clip["cand_hook"] == "new hook"  # saved after the failed delete
+    assert any(e["clip_id"] == env["clip"] and e["ok"] for e in env["c"].get("/api/render-events?after=0").json()["events"])
 
 
 def test_review_page_keeps_a_rerendering_clip_with_a_spinner(env):

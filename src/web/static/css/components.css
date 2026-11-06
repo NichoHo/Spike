@@ -883,6 +883,8 @@ a.time-chip:focus-visible { outline: 2px solid var(--color-focus); outline-offse
 
 /* Clip page: re-render form groups, cut editor rows, music list */
 .edit-groups { display: flex; flex-direction: column; gap: var(--space-8); }
+fieldset.edit-groups { border: 0; margin: 0; min-width: 0; }
+fieldset.edit-groups:disabled { opacity: 0.6; }  /* the clip page's settings while a re-render runs */
 .edit-group { display: flex; flex-direction: column; gap: var(--space-4); }
 .edit-group[hidden], .edit-group [hidden] { display: none !important; }  /* .stack and .row would otherwise beat [hidden] */
 .edit-group__title { font-size: 12px; line-height: 16px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); padding-bottom: var(--space-2); border-bottom: 1px solid var(--color-border); }

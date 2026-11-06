@@ -164,7 +164,8 @@
         <p class="card__description">Changes here apply when you re-render.</p>
       </div>
 
-      <div class="card__body edit-groups">
+      <!-- Locked while rendering: it shows the version in the player, and an edit made now could never be applied -->
+      <fieldset class="card__body edit-groups" {% if clip.status == 'rendering' %}disabled{% endif %}>
         <input type="hidden" name="zooms" id="zooms-field">
         <input type="hidden" name="cuts" id="cuts-field">
         <input type="hidden" name="concept" id="f-concept">
@@ -361,12 +362,12 @@
             <input type="hidden" name="sfx" id="sfx-field">
           </div>
         </section>
-      </div>
+      </fieldset>
 
       <div class="card__footer">
         <span class="card__footer-note">
           <span class="dirty-note" id="dirty-note" role="status" hidden>Unsaved changes. Re-render to apply them.</span>
-          Version {{ clip.version or 1 }} · {% if clip.status == 'rendering' %}Rendering in the background. You can leave this page.{% else %}Renders in about a minute.{% endif %}</span>
+          {% if clip.status == 'rendering' %}Rendering your changes. The player and settings show version {{ clip.version or 1 }} until it is done, then the page reloads.{% else %}Version {{ clip.version or 1 }} · Renders in about a minute.{% endif %}</span>
         <button type="submit" class="btn btn--primary" {% if clip.status == 'rendering' %}disabled{% endif %} onclick="this.classList.add('is-loading')">
           {{ ui.icon("arrow-clockwise", 16) }}
           <span>Re-render clip</span>
@@ -502,7 +503,7 @@
 </div>
 
 {% if clip.status == 'rendering' %}
-<script>setTimeout(function tick() { if (isDirty()) setTimeout(tick, 4000); else location.reload(); }, 4000);  // never drop edits made while it renders</script>
+<script>setTimeout(() => location.reload(), 4000);  // the edit form is locked while rendering, so a reload loses nothing</script>
 {% endif %}
 
 <footer style="margin-top: var(--space-8); padding-top: var(--space-4); border-top: 1px solid var(--color-border); font-size: 13px; color: var(--color-text-muted);">
