@@ -269,6 +269,7 @@ def init_db():
             "ALTER TABLE candidates ADD COLUMN humor_type TEXT",
             "ALTER TABLE candidates ADD COLUMN why_funny TEXT",
             "ALTER TABLE candidates ADD COLUMN status_reason TEXT",  # why a candidate is low_score or rejected
+            "ALTER TABLE candidates ADD COLUMN judge_model TEXT",  # model that judged the transcript (src/judge_pool.py); NULL before it
             "ALTER TABLE sources ADD COLUMN creator_profile TEXT",  # JSON, see src/profile.py
             "ALTER TABLE sources ADD COLUMN learned_prefs TEXT",  # JSON list of up to 10 strings
             "ALTER TABLE sources ADD COLUMN letterbox_style TEXT DEFAULT 'title'",  # "title" (white bars + title) or "blur"
@@ -567,8 +568,8 @@ def insert_candidate(video_id: int, cand: Dict[str, Any]) -> int:
                 video_id, peak_t, start_s, end_s, origin, chat_mood,
                 signal_score, llm_score, final_score, av_score,
                 punchline, features, title, hook_text, post_caption,
-                hashtags, reason, mood, needs_context, status, humor_type, why_funny, status_reason, cuts, payoff_t, segments, zooms, concept, concept_spec
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                hashtags, reason, mood, needs_context, status, humor_type, why_funny, status_reason, cuts, payoff_t, segments, zooms, concept, concept_spec, judge_model
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
             (
@@ -601,6 +602,7 @@ def insert_candidate(video_id: int, cand: Dict[str, Any]) -> int:
                 json.dumps(cand["zooms"]) if cand.get("zooms") is not None else None,
                 cand.get("concept") or "single",
                 json.dumps(cand["concept_spec"]) if cand.get("concept_spec") else None,
+                cand.get("judge_model"),
             )
         )
         return cur.fetchone()[0]

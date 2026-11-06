@@ -1090,6 +1090,24 @@ def percentile_avg_rank(values: List[float]) -> List[float]:
     return out
 
 
+def percentile_by_group(values: List[float], groups: List[str]) -> List[float]:
+    """percentile_avg_rank within each group. Gemini and Claude score on different scales, and the judge pool gives
+    each a random sample of moments, so a moment is ranked against moments of its own judge."""
+    out = [0.0] * len(values)
+    for g in set(groups):
+        idx = [i for i, x in enumerate(groups) if x == g]
+        for i, p in zip(idx, percentile_avg_rank([values[i] for i in idx])):
+            out[i] = p
+    return out
+
+
+CLAUDE_JUDGE = "claude-haiku"  # judge_model of a moment the judge pool's Claude lane judged
+
+
+def judge_model_name(provider: str) -> str:
+    return CLAUDE_JUDGE if provider == "claude" else DEFAULT_GEMINI_MODEL
+
+
 EDITOR_POOL = 20
 EDITOR_REACTIONS = 6
 
@@ -1265,7 +1283,9 @@ def run_stage7_moments(
     evaluated = []   # kept by the judge with valid length: these compete for selection
     judged = []      # everything the judge answered for, stored in the DB
 
-    for cand_idx, cand in enumerate(all_candidates, 1):
+    # Each candidate's window, transcript lines and chat excerpt
+    prepared = []
+    for cand in all_candidates:
         peak_t = cand.get("peak_t", (cand["context_start"] + cand["context_end"]) / 2.0)
         ctx_st, ctx_et = max(0.0, peak_t - 90.0), min(duration_s, peak_t + 45.0)  # [p-90, p+45]
 
@@ -1284,24 +1304,38 @@ def run_stage7_moments(
                 if any(ctx_st <= ts <= ctx_et for ts in c.get("timestamps", []))
             ][:10]
             comments_str = "\n".join(relevant_comments)
+        prepared.append({"cand": cand, "lines": lines, "line_meta": line_meta, "comments": comments_str,
+                         "window": f"{format_timestamp(ctx_st)}-{format_timestamp(ctx_et)}",
+                         "key": f"v3:{ctx_st:.1f}-{ctx_et:.1f}"})  # v3: answers from the funny-only prompt are not reused
 
-        print(f"  [stage 7] Judging candidate {cand_idx}/{len(all_candidates)} ({format_timestamp(ctx_st)}-{format_timestamp(ctx_et)})...")
-        # Judge answers are saved as they come in, so a retry after a crash or quota stop does not ask again
-        cache_key = f"v3:{ctx_st:.1f}-{ctx_et:.1f}"  # v3: answers from the funny-only prompt are not reused
-        if cache_key in judge_cache:
-            judge_res = LLMJudgeResponse.model_validate(judge_cache[cache_key])
-        else:
-            judge_res = call_llm_judge(
-                lines, comments_str, cand.get("signals_at_peak", {}), has_chat=has_chat,
-                music_catalog=music_catalog, creator_block=creator_block, streamer=streamer, story=story,
-            )
-            if judge_res:
-                judge_cache[cache_key] = judge_res.model_dump()
-                judge_cache_path.write_text(json.dumps(judge_cache), encoding="utf-8")
+    # Judge the windows with no saved answer, in parallel on Gemini and Claude (src/judge_pool.py). Answers are saved
+    # as they come in, so a retry after a crash or quota stop does not ask again.
+    todo = [p for p in prepared if p["key"] not in judge_cache]
 
-        if not judge_res:
+    def judge_one(p: Dict[str, Any], provider: str) -> Optional[LLMJudgeResponse]:
+        print(f"  [stage 7] Judging {p['window']} on {provider}...")
+        return call_llm_judge(
+            p["lines"], p["comments"], p["cand"].get("signals_at_peak", {}), has_chat=has_chat,
+            music_catalog=music_catalog, creator_block=creator_block, streamer=streamer, story=story, provider=provider,
+        )
+
+    def save_judge(i: int, provider: str, res: Optional[LLMJudgeResponse]) -> None:
+        if res:
+            judge_cache[todo[i]["key"]] = {**res.model_dump(), "judge_model": judge_model_name(provider)}
+            judge_cache_path.write_text(json.dumps(judge_cache), encoding="utf-8")
+
+    print(f"  [stage 7] Judging {len(todo)} of {len(prepared)} candidates ({len(prepared) - len(todo)} answers saved)...")
+    run_pool([Task(lambda prov, p=p: judge_one(p, prov)) for p in todo], seed=video_id, label="judge calls",
+             down_errors=(QuotaExhausted, GeminiUnavailable), on_result=save_judge)
+
+    # In the original candidate order, so the result never depends on which call finished first
+    for p in prepared:
+        cand, lines, line_meta = p["cand"], p["lines"], p["line_meta"]
+        entry = judge_cache.get(p["key"])
+        if not entry:
             unjudged += 1
             continue
+        judge_res = LLMJudgeResponse.model_validate(entry)
 
         edges = compute_edges(line_meta, judge_res, preset, series)
         if edges["net_dur"] > preset["max_len"]:
@@ -1345,6 +1379,7 @@ def run_stage7_moments(
             "peak_jump": float(np.max(series[2][0][int(snapped_st):int(snapped_et) + 1], initial=0.0)),
             "baseline": matches_baseline(judge_res.humor_type, baseline),
             "crowd": bool(cand.get("crowd")),
+            "judge_model": entry.get("judge_model", DEFAULT_GEMINI_MODEL),  # answers saved before the pool are Gemini's
         }
         # Numbered lines around the clip, kept for the editor pass (dropped before storing)
         keep_i = [i for i, lm in enumerate(line_meta) if lm["end"] >= snapped_st - 12 and lm["start"] <= snapped_et + 8]
@@ -1384,7 +1419,7 @@ def run_stage7_moments(
     # the signal score, the same weights as the final ranking
     w_llm = LLM_WEIGHT_WITH_CHAT if has_chat else LLM_WEIGHT_WITHOUT_CHAT
     blend = {id(c): w_llm * t + (1.0 - w_llm) * s + chat_peak_boost(c, chat_peaks) for c, t, s in zip(
-        evaluated, percentile_avg_rank([c["text_score"] for c in evaluated]),
+        evaluated, percentile_by_group([c["text_score"] for c in evaluated], [c["judge_model"] for c in evaluated]),
         percentile_avg_rank([c["raw_signal_score"] for c in evaluated]))}
     watched = 0
     shortlist, _ = dedupe(sorted(evaluated, key=lambda c: (c["crowd"], blend[id(c)]), reverse=True), gap_s=PICK_SPACING_S)
@@ -1419,7 +1454,7 @@ def run_stage7_moments(
         # The order is the transcript score blended with chat. The video verdict only vetoes (a failed check puts the
         # clip under every clip that passed) or boosts (a real peak): its own 0-100 score bunches under the floor
         # (9 of the 13 watched top-10 moments scored 15 to 55), so as an order it threw real moments away.
-        txt_pcts = percentile_avg_rank([c["text_score"] for c in evaluated])
+        txt_pcts = percentile_by_group([c["text_score"] for c in evaluated], [c["judge_model"] for c in evaluated])
         sig_pcts = percentile_avg_rank([c["raw_signal_score"] for c in evaluated])
         for c, t_pct, s_pct in zip(evaluated, txt_pcts, sig_pcts):
             c["llm_score"] = int(round(c["raw_llm_score"]))

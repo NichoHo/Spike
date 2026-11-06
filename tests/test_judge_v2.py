@@ -48,7 +48,7 @@ def test_judge_fields_are_ordered_and_coerced():
     assert LLMJudgeResponse.model_validate({**r.model_dump(), "humor_type": "Skill"}).humor_type == "skill"
 
 
-def test_stage7_stores_every_judged_candidate(tmp_path, monkeypatch):
+def test_stage7_stores_every_judged_candidate(tmp_path, monkeypatch, judge_by_window):
     init_db()
     vid = register_video("url", f"https://example.test/{tmp_path.name}")
     transcript = {"duration": 400, "segments": [
@@ -56,16 +56,15 @@ def test_stage7_stores_every_judged_candidate(tmp_path, monkeypatch):
     peaks = [{"peak_t": float(t), "signal_score_raw": 1.0 + t / 1000, "context_start": t - 40.0, "context_end": t + 40.0,
               "clip_start": t - 10.0, "clip_end": t + 10.0, "origin": "signal", "signals_at_peak": {}}
              for t in (60, 140, 220, 300)]
-    # judge answers in order: great, mediocre, not funny, plain rage with no contrast
-    answers = iter([(80, True, "absurd"), (60, True, "absurd"), (30, False, "other"), (90, True, "rage")])
+    # judge answers per peak: great, mediocre, not funny, plain rage with no contrast
+    answers = [(80, True, "absurd"), (60, True, "absurd"), (30, False, "other"), (90, True, "rage")]
 
-    def fake_judge(lines, comments, sigs, **kw):
-        score, keep, humor = next(answers)
+    def build(score, keep, humor):
         return LLMJudgeResponse(keep=keep, why_funny="because", humor_type=humor, score=score, topic_start_line=8, setup_start_line=10,
                                 payoff_line=18, reaction_end_line=22,
                                 punchline="p", title="The streamer loses", hook_text="h", post_caption="c")
 
-    monkeypatch.setattr(s7, "call_llm_judge", fake_judge)
+    monkeypatch.setattr(s7, "call_llm_judge", judge_by_window([60, 140, 220, 300], answers, build))
     monkeypatch.setattr(s7, "read_whole_stream", lambda *a, **k: ("", []))
     monkeypatch.setattr(s7, "propose_transcript_chunks", lambda *a, **k: [
         {"type": "hubris", "peak_t": 390.0, "clip_start": 385.0, "clip_end": 395.0, "topic": "I never lose"}])
@@ -217,3 +216,47 @@ def test_judge_on_claude_runs_once_on_haiku_with_the_strict_schema(monkeypatch):
     assert res.score == 72 and len(seen) == 1
     schema, model = seen[0]
     assert model == "haiku" and set(schema["required"]) == set(LLMJudgeResponse.model_fields)
+
+
+def test_percentiles_rank_each_judge_against_itself():
+    vals, groups = [10, 20, 30, 70, 80, 90], ["g", "g", "g", "c", "c", "c"]
+    assert s7.percentile_by_group(vals, groups) == s7.percentile_avg_rank([10, 20, 30]) * 2
+    assert s7.percentile_by_group([5, 1, 3], ["g", "g", "g"]) == s7.percentile_avg_rank([5, 1, 3])
+
+
+def test_stage7_judges_on_claude_while_gemini_is_down_and_stores_the_judge(tmp_path, monkeypatch):
+    init_db()
+    vid = register_video("url", f"https://example.test/{tmp_path.name}")
+    transcript = {"duration": 400, "segments": [
+        {"start": i * 2.0, "end": i * 2.0 + 2.0, "text": f"line {i}", "words": []} for i in range(200)]}
+    peaks = [{"peak_t": float(t), "signal_score_raw": 1.0, "context_start": t - 40.0, "context_end": t + 40.0,
+              "clip_start": t - 10.0, "clip_end": t + 10.0, "origin": "signal", "signals_at_peak": {}}
+             for t in (60, 140, 220, 300)]
+
+    def judge(lines, comments, sigs, provider="gemini", **kw):
+        if provider == "gemini":
+            raise GeminiUnavailable("503 unavailable")
+        return LLMJudgeResponse(keep=True, why_funny="w", humor_type="absurd", score=70, topic_start_line=8,
+                                setup_start_line=10, payoff_line=18, reaction_end_line=22, punchline="p",
+                                title="t", hook_text="h", post_caption="c")
+
+    monkeypatch.setattr(s7, "call_llm_judge", judge)
+    monkeypatch.setattr(s7, "read_whole_stream", lambda *a, **k: ("", []))
+    monkeypatch.setattr(s7, "propose_transcript_chunks", lambda *a, **k: [])
+    monkeypatch.setattr(s7, "build_episodes", lambda *a, **k: [])
+    monkeypatch.setattr(s7, "pairwise_rerank", lambda c, name="": c)
+    monkeypatch.setattr("src.editor.run_claude", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no editor in this test")))
+    monkeypatch.setattr(judge_pool, "PROBE_START_S", 0.01)
+    monkeypatch.setattr(judge_pool, "PROBE_MAX_S", 0.02)
+    monkeypatch.setattr(judge_pool.claude_fallback, "ask", lambda *a, **k: True)
+    set_setting(judge_pool.CLAUDE_USED_KEY, "")
+    set_setting(judge_pool.HELP_KEY, "down")
+    try:
+        s7.run_stage7_moments(vid, tmp_path, {"duration": 400, "webpage_url": ""}, transcript,
+                              {"peaks": peaks, "has_chat": False}, [])
+    finally:
+        set_setting(judge_pool.HELP_KEY, "off")
+    rows = [r for r in get_candidates(vid) if r["status"] != "hubris"]
+    assert len(rows) == 4 and {r["judge_model"] for r in rows} == {"claude-haiku"}
+    cache = json.loads((tmp_path / "judge_cache.json").read_text())
+    assert {v["judge_model"] for k, v in cache.items() if k.startswith("v3:")} == {"claude-haiku"}

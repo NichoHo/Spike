@@ -258,16 +258,14 @@ def _stage7_inputs(tmp_path):
     return vid, transcript, peaks
 
 
-def _patch_stage7(monkeypatch, scores):
-    answers = iter(scores)
-
-    def fake_judge(lines, comments, sigs, **kw):
-        score, humor = next(answers)
+def _patch_stage7(monkeypatch, scores, judge_by_window):
+    def build(score, humor):
         return LLMJudgeResponse(keep=True, why_funny="because", humor_type=humor, score=score, topic_start_line=30,
                                 setup_start_line=32, payoff_line=45, reaction_end_line=48, punchline="p",
                                 title="Speed loses", hook_text="h", post_caption="c", contrast=True)
 
-    monkeypatch.setattr(s7, "call_llm_judge", fake_judge)
+    # scores[i] belongs to the i-th peak of _stage7_inputs; stage 7 judges in parallel, so not in call order
+    monkeypatch.setattr(s7, "call_llm_judge", judge_by_window([200, 400, 1300, 1700], scores, build))
     monkeypatch.setattr(s7, "read_whole_stream", lambda *a, **k: ("", []))
     monkeypatch.setattr(s7, "propose_transcript_chunks", lambda *a, **k: [
         {"type": "hubris", "peak_t": 334.0, "clip_start": 330.0, "clip_end": 338.0, "topic": "I never lose"}])
@@ -276,9 +274,9 @@ def _patch_stage7(monkeypatch, scores):
     monkeypatch.setattr(s7, "pairwise_rerank", lambda c, name="": c)
 
 
-def test_stage7_stores_a_story_with_segment_ids_and_marks_its_components(tmp_path, monkeypatch):
+def test_stage7_stores_a_story_with_segment_ids_and_marks_its_components(tmp_path, monkeypatch, judge_by_window):
     vid, transcript, peaks = _stage7_inputs(tmp_path)
-    _patch_stage7(monkeypatch, [(80, "rage"), (75, "rage"), (70, "absurd"), (90, "rage")])
+    _patch_stage7(monkeypatch, [(80, "rage"), (75, "rage"), (70, "absurd"), (90, "rage")], judge_by_window)
     captured = {}
 
     def fake_claude(system, prompt, schema, video_id=None, label=""):
@@ -307,9 +305,9 @@ def test_stage7_stores_a_story_with_segment_ids_and_marks_its_components(tmp_pat
     assert json.loads((tmp_path / "candidates.json").read_text())[0]["id"] in rows
 
 
-def test_stage7_falls_back_to_the_gemini_ranking_when_claude_fails(tmp_path, monkeypatch):
+def test_stage7_falls_back_to_the_gemini_ranking_when_claude_fails(tmp_path, monkeypatch, judge_by_window):
     vid, transcript, peaks = _stage7_inputs(tmp_path)
-    _patch_stage7(monkeypatch, [(80, "absurd"), (75, "cringe"), (70, "roast"), (90, "deadpan")])
+    _patch_stage7(monkeypatch, [(80, "absurd"), (75, "cringe"), (70, "roast"), (90, "deadpan")], judge_by_window)
     monkeypatch.setattr("src.editor.run_claude", lambda *a, **k: (_ for _ in ()).throw(ClaudeError("plan limit reached")))
     ctx = {"profile": {"display_name": "Speed"}, "preset": PRESET}
     picked = s7.run_stage7_moments(vid, tmp_path, {"duration": 3000, "webpage_url": ""}, transcript,
