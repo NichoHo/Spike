@@ -1,5 +1,48 @@
 # Spike: Learnings
 
+## 2026-11-07: Judge pool (detection overhaul, step 1)
+
+- **Built:** `src/judge_pool.py`. Stage 7's chunk scan, judge and video
+  judge run in parallel (3 Gemini workers). One Claude Haiku worker helps
+  while Gemini is down (setting "Claude help for the judge": down, always,
+  off; 100 calls a day). Each moment stores `judge_model`, and the ranking
+  compares transcript scores within one judge's group. Spec and plan:
+  `docs/superpowers/specs|plans/2026-11-07-judge-pool*`.
+- **Learned:** stage 7 is about 80% of job time (median 71 min per job,
+  ~37 min per stream hour, 16 runs), all from one-at-a-time LLM calls.
+  Most Gemini 503s are blips that recover in 5 to 15 s.
+- **Learned:** the frozen judge caches in `data/eval_rerun/` are v2. The
+  judge is v3 since Nov 4, so any eval replay calls the LLM for every
+  moment. `scripts/stage7_snapshot.py` checks refactors instead: a fixed
+  fake judge on real stream data, no LLM calls, same output before and after.
+- **Learned:** `scripts/prune_storage.py` without `--skip-eval` deletes
+  every eval `chat.json` (all are over 5 MB). It did on Nov 3. All 14 were
+  re-downloaded on Nov 7.
+- **Learned:** the DB has no reviewed clips (22 ready, 0 approved or
+  rejected). Approve never feeds `record_feedback`, and pasted-link videos
+  have no source, so they never learn.
+- **Measured (cold run, YonnaJay VOD 2896358710, 90-min slice, 3 workers):**
+  stage 7 took 42.8 min against about 55 min serial, so 1.3x, not 3x. It
+  hit 78 free-tier 429 retries, so the per-minute limit caps speed, not the
+  call count. Workers set to 2 after it (not re-measured). Gemini was down
+  twice; Claude judged nothing, because the approval popup waits up to
+  5 min and Gemini came back first. Recall@10 was 0.10 (chat 0.20); the
+  October run found 0.40 on this VOD with the v2 prompt. One VOD is noise,
+  but the v3 prompt needs a full eval.
+- **Learned:** the test DB got corrupted in full runs. MediaPipe's native
+  log line ("inference_feedback_manager.cc") was found inside its pages.
+  pytest's fd-level capture swaps stdout/stderr handles; on Windows a freed
+  handle number was reused by an SQLite connection, so the native log write
+  went into the DB. Fix: `pytest.ini` uses `--capture=sys`, render tests use
+  `capsys`, and `conftest.py` closes its backup connections (before, the
+  real `data/spike.db` stayed open for the whole test run).
+- **Open:** pace Gemini calls to the free-tier per-minute limit instead of
+  retrying 429s with 15 to 45 s waits.
+- **Open:** next steps in the overhaul order: label store with one-tap
+  reject reasons and gold clips, eval chat kept out of pruning, learned
+  first-stage scorer trained on community clips, batched judge only if the
+  eval shows it helps.
+
 ## 2026-11-04: Automatic POV picks turned off
 
 - **Learned:** auto POV made corny clips. Its sources are baseline
