@@ -30,6 +30,7 @@ def env(tmp_path, monkeypatch):
     init_db()
     monkeypatch.chdir(Path(__file__).resolve().parent.parent)
     vroot = Path(__file__).resolve().parent.parent / "data" / f"_test_videos_{tmp_path.name}"   # never the real data/videos
+    shutil.rmtree(vroot, ignore_errors=True)  # left by a run that crashed before its teardown
     vroot.mkdir(parents=True)
     for mod in ("src.config", "src.web.routes.clips", "src.web.routes.review"):
         monkeypatch.setattr(f"{mod}.VIDEOS_DIR", vroot, raising=False)
@@ -62,7 +63,11 @@ def env(tmp_path, monkeypatch):
 
 
 def test_rerender_applies_every_setting(env, monkeypatch):
+    import src.pipeline.stage9a_face_track as ft
     import src.pipeline.stage9c_render as r9
+    # The test section is a colour chart; give it a face so Face track is kept (see the no-face test below)
+    monkeypatch.setattr(ft, "_detect_faces_mediapipe", lambda path, dur, *a, **k: [(0.4, 0.3, 0.2, 0.3)] * int(dur * ft.FACE_DETECT_FPS))
+    monkeypatch.setattr(ft, "_multi_face_share", lambda *a: 0.0)
     used = {}
     real_track = r9.track_faces
     monkeypatch.setattr(r9, "track_faces", lambda *a, **k: used.setdefault("faces", real_track(*a, **k)))
@@ -84,6 +89,16 @@ def test_rerender_applies_every_setting(env, monkeypatch):
     html = env["c"].get(f"/clips/{env['clip']}").text
     assert f"/media/clip/{env['clip']}/stream?v=2" in html
     assert env["c"].get(f"/media/clip/{env['clip']}/stream").headers["cache-control"] == "no-cache"
+
+
+def test_face_track_with_no_face_falls_back_to_the_previous_layout(env):
+    res = env["c"].post(f"/clips/{env['clip']}/rerender", data={
+        "start_s": "28", "end_s": "35", "layout": "face_track", "caption_style": "bold_pop", "layout_changes": "[]",
+    }, follow_redirects=False)
+    assert res.status_code == 303
+    clip = get_clip(env["clip"])
+    assert clip["layout"] == "letterbox" and clip["no_face"] == 1   # the colour chart has no face
+    assert re.search(r'value="face_track"[^>]*disabled', env["c"].get(f"/clips/{env['clip']}").text)
 
 
 def test_clip_page_locks_while_rendering_and_a_locked_old_file_does_not_abort_the_job(env, monkeypatch):

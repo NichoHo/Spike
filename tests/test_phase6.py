@@ -15,6 +15,7 @@ Exit criteria:
 
 import os
 import json
+import re
 import tempfile
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -216,14 +217,15 @@ def test_permission_none_permanently_blocked(dummy_media_file):
     assert resp.status_code == 403
     assert "Posting permanently blocked" in resp.text
 
-    # Path 5: Web UI GET /clips/{id}/post renders blocked warning and hides form
+    # Path 5: Web UI GET /clips/{id}/post warns and asks for a confirmation; scheduling is off (no one would confirm then)
     get_resp = client.get(
         f"/clips/{clip_id}/post",
         headers={"Tailscale-User-Login": "admin@local"},
     )
     assert get_resp.status_code == 200
-    assert "Posting permanently blocked" in get_resp.text
-    assert "<form" not in get_resp.text
+    assert "private review only" in get_resp.text
+    assert 'name="confirm_no_permission"' in get_resp.text
+    assert re.search(r'id="timing-scheduled"[^>]*disabled', get_resp.text)
 
 
 # ── Test 3: TikTok Upload-to-Inbox (Blueprint §8.1, §8.2) ─────────────────────

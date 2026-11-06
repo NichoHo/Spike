@@ -1,6 +1,7 @@
 """Concepts in the web app: picker, switching, POV captions, re-render and Ask the editor through the real renderer."""
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -41,6 +42,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.chdir(Path(__file__).resolve().parent.parent)
     # tmp_path sits outside the project, but ffmpeg gets ASS files as relative paths: keep the video dir inside it
     vroot = Path(__file__).resolve().parent.parent / "data" / f"_test_videos_{tmp_path.name}"   # never the real data/videos
+    shutil.rmtree(vroot, ignore_errors=True)  # left by a run that crashed before its teardown
     vroot.mkdir(parents=True)
     monkeypatch.setattr("src.config.VIDEOS_DIR", vroot)
     vid = register_video("url", f"{YT}&{tmp_path.name}", title="Test stream")
@@ -78,7 +80,6 @@ def env(tmp_path, monkeypatch):
     clip_id = create_or_update_clip(candidate_id=cand, file_path=str(clip_file), thumb_path="", trim_start_s=27.0, trim_end_s=36.0,
                                     zooms="[]", cuts="[]")
     yield {"c": TestClient(app), "vid": vid, "ids": ids, "hubris": hubris, "cand": cand, "clip": clip_id, "dir": vdir}
-    import shutil
     shutil.rmtree(vroot, ignore_errors=True)
 
 
@@ -247,8 +248,7 @@ def test_settings_pov_bank_adds_and_deletes_captions_by_hand(env):
     assert len(load_bank()) == before
 
 
-def test_review_grid_shows_a_concept_badge_and_the_pov_caption(env):
+def test_review_grid_shows_a_concept_badge(env):
     create_or_update_clip(candidate_id=env["cand"], file_path=get_clip(env["clip"])["file_path"], thumb_path="", concept="pov",
                           overlay=json.dumps({"pov_text": "POV: you said one more round at midnight"}))
-    html = env["c"].get("/").text
-    assert ">POV<" in html and "POV: you said one more round at midnight" in html
+    assert ">POV<" in env["c"].get("/").text   # the card shows the concept; the caption is on the clip page

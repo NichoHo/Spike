@@ -63,15 +63,17 @@ def clip(tmp_path, monkeypatch):
     (vdir / "sections" / f"section_{cand}.json").write_text(json.dumps({"start_s": 100.0}))
     clip_file = vdir / "renders" / f"clip_{cand}.mp4"
     clip_file.write_bytes((vdir / "sections" / f"section_{cand}.mp4").read_bytes())
-    clip_id = create_or_update_clip(candidate_id=cand, file_path=str(clip_file), thumb_path="", trim_start_s=105.0, trim_end_s=113.0,
+    thumb = vdir / "renders" / f"clip_{cand}_thumb.jpg"
+    thumb.write_bytes(bytes.fromhex("ffd8ffd9"))  # an empty JPEG
+    clip_id = create_or_update_clip(candidate_id=cand, file_path=str(clip_file), thumb_path=str(thumb), trim_start_s=105.0, trim_end_s=113.0,
                                     zooms=json.dumps([{"t": 108.0, "scale": 1.2, "hold_s": 1.5}]), cuts=json.dumps([]))
     return {"client": TestClient(app), "video": vid, "cand": cand, "low": low, "clip": clip_id, "dir": vdir}
 
 
 def test_review_page_shows_stream_time_and_other_moments(clip):
+    page = clip["client"].get(f"/clips/{clip['clip']}").text   # the stream time sits on the clip page, not the Review card
+    assert "t=105s" in page and ">1:45" in page                 # 1:45 links to the source
     html = clip["client"].get("/").text
-    assert 'href="' + YT + '&amp;t=105s"' in html or YT + "&t=105s" in html   # 1:45 links to the source
-    assert ">1:45" in html
     assert "Other moments (1)" in html and "Quiet bit" in html and "raw score 58 below 65" in html
     assert "15:00 - 15:30" in html             # the moment shows its end, not just its start
     assert f'action="/candidates/{clip["low"]}/render"' in html

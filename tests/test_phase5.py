@@ -27,6 +27,7 @@ from src.config import (
     SILENCE_TRIM_BREATH_S,
     OUTPUT_LOUDNESS_TARGET,
 )
+from tests.test_step7 import clip  # noqa: F401  a synthetic clip in a temp folder, never a real one
 from src.db import (
     init_db,
     get_connection,
@@ -218,22 +219,22 @@ def test_source_phase5_defaults_persistence():
 
 # ── 5. Interactive Re-Render API with Phase 5 Options ─────────────────────────
 
-def test_rerender_endpoint_with_phase5_features():
+def test_rerender_endpoint_with_phase5_features(clip):
     """Verify POST /clips/{id}/rerender accepts music, silence_trim, punch_in_zoom and produces render."""
     client = TestClient(app)
     headers = {"Tailscale-User-Login": "admin@local"}
 
-    # Use existing candidate 1 from previous stages
-    clip_row = get_clip_with_details(1)
+    cid = clip["clip"]  # its section covers stream time 100 to 120 s
+    clip_row = get_clip_with_details(cid)
     assert clip_row is not None
 
     music_track_path = str(get_random_track_for_mood("chill"))
 
     response = client.post(
-        "/clips/1/rerender",
+        f"/clips/{cid}/rerender",
         data={
-            "start_s": "5.0",
-            "end_s": "18.0",
+            "start_s": "104.0",
+            "end_s": "117.0",
             "layout": "center",
             "caption_style": "karaoke",
             "hook_text": "Phase 5 Test Hook",
@@ -246,9 +247,9 @@ def test_rerender_endpoint_with_phase5_features():
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert response.headers["location"] == "/clips/1"
+    assert response.headers["location"] == f"/clips/{cid}"
 
-    updated_clip = dict(get_clip(1))
+    updated_clip = dict(get_clip(cid))
     assert updated_clip["version"] >= 2
     assert updated_clip["silence_trim"] == 1
     assert updated_clip["punch_in_zoom"] == 1
@@ -262,7 +263,7 @@ def test_rerender_endpoint_with_phase5_features():
 
 # ── 6. Spot Check of 10 Clips (Speech is Never Masked by Music) ───────────────
 
-def test_spot_check_10_clips_music_never_masks_speech():
+def test_spot_check_10_clips_music_never_masks_speech(clip):
     """
     Blueprint Phase 5 Exit Criterion:
     'Done when: music never masks speech on a spot check of 10 clips, and
@@ -271,7 +272,7 @@ def test_spot_check_10_clips_music_never_masks_speech():
     Renders/checks 10 clip segments with ducked music across various moods
     and verifies that speech audio level is at least 15 dB louder than ducked music.
     """
-    sec_file = Path("data/videos/1/sections/section_1.mp4")
+    sec_file = clip["dir"] / "sections" / f"section_{clip['cand']}.mp4"  # synthetic: stream 100 to 120 s, a tone as the voice
     assert sec_file.exists(), "Test section file must exist"
 
     all_tracks = list_all_tracks()
@@ -286,7 +287,7 @@ def test_spot_check_10_clips_music_never_masks_speech():
             track_info = all_tracks[i % len(all_tracks)]
             music_file = Path(track_info["path"])
 
-            clip_start = 5.0 + (i * 0.8)
+            clip_start = 102.0 + (i * 0.8)
             clip_end = clip_start + 8.0  # 8s test window
 
             out_file = temp_dir / f"spot_clip_{i}.mp4"
@@ -304,6 +305,7 @@ def test_spot_check_10_clips_music_never_masks_speech():
                 music_track=str(music_file),
                 silence_trim=False,
                 punch_in_zoom=True,
+                section_start_s=100.0,
             )
             assert success is True
             assert out_file.exists()

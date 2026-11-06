@@ -28,6 +28,7 @@ from src.db import (
 from src.notify import verify_discord_webhook, send_job_ready_notification
 from src.worker import claim_next_job
 from src.web.app import app
+from tests.test_step7 import clip  # noqa: F401  a synthetic clip in a temp folder, never a real one
 
 
 @pytest.fixture(scope="module")
@@ -73,15 +74,15 @@ def test_auth_tailscale_headers_and_fallback(client):
 
 # ── 2. Screen Rendering ───────────────────────────────────────────────────────
 
-def test_all_screens_render_200(client):
+def test_all_screens_render_200(client, clip):
     endpoints = ["/", "/new", "/sources", "/jobs", "/jobs/table", "/settings"]
     for path in endpoints:
         res = client.get(path)
         assert res.status_code == 200, f"Endpoint {path} failed with {res.status_code}"
         assert len(res.text) > 200, f"Endpoint {path} returned suspiciously empty body"
 
-    # Detail view for existing clip 1
-    res_clip = client.get("/clips/1")
+    # Detail view of a clip
+    res_clip = client.get(f"/clips/{clip['clip']}")
     assert res_clip.status_code == 200
     assert "Why this clip" in res_clip.text
     assert "Re-render clip" in res_clip.text
@@ -209,10 +210,11 @@ def test_target_clips_auto_vs_explicit(client):
     from src.db import get_connection
 
     def submit(count):
-        client.post("/new/submit", data={"tab": "url", "url": "https://www.youtube.com/watch?v=x", "target_clips": count},
-                    follow_redirects=False)
+        # A new link each time: the same link updates its old row, and empty settings are stored as NULL
+        url = f"https://www.youtube.com/watch?v=tc{os.urandom(4).hex()}"
+        client.post("/new/submit", data={"tab": "url", "url": url, "target_clips": count}, follow_redirects=False)
         with get_connection() as conn:
-            return json.loads(conn.execute("SELECT settings FROM videos ORDER BY id DESC LIMIT 1").fetchone()[0])
+            return json.loads(conn.execute("SELECT settings FROM videos WHERE url = ?", (url,)).fetchone()[0] or "{}")
 
     assert "target_clips" not in submit("")  # Auto: stage 6 picks from video length
     assert submit("4")["target_clips"] == 4
@@ -221,36 +223,37 @@ def test_target_clips_auto_vs_explicit(client):
 
 # ── 6. Clip Lifecycle, Streaming & Download ───────────────────────────────────
 
-def test_clip_lifecycle_and_download(client):
+def test_clip_lifecycle_and_download(client, clip):
+    cid = clip["clip"]
     # Stream
-    res_stream = client.get("/media/clip/1/stream")
+    res_stream = client.get(f"/media/clip/{cid}/stream")
     assert res_stream.status_code == 200
     assert res_stream.headers.get("content-type") == "video/mp4"
 
     # Thumb
-    res_thumb = client.get("/media/clip/1/thumb")
+    res_thumb = client.get(f"/media/clip/{cid}/thumb")
     assert res_thumb.status_code == 200
     assert res_thumb.headers.get("content-type") == "image/jpeg"
 
     # Download attachment
-    res_dl = client.get("/clips/1/download")
+    res_dl = client.get(f"/clips/{cid}/download")
     assert res_dl.status_code == 200
     assert "attachment" in res_dl.headers.get("content-disposition", "")
 
     # Approve
-    res_app = client.post("/clips/1/approve", follow_redirects=False)
+    res_app = client.post(f"/clips/{cid}/approve", follow_redirects=False)
     assert res_app.status_code == 303
-    assert get_clip(1)["status"] == "approved"
+    assert get_clip(cid)["status"] == "approved"
 
     # Reject
-    res_rej = client.post("/clips/1/reject", data={"reason": "punchline cutoff"}, follow_redirects=False)
+    res_rej = client.post(f"/clips/{cid}/reject", data={"reason": "punchline cutoff"}, follow_redirects=False)
     assert res_rej.status_code == 303
-    c1 = get_clip(1)
+    c1 = get_clip(cid)
     assert c1["status"] == "rejected"
     assert c1["reject_reason"] == "punchline cutoff"
 
     # Reset
-    update_clip_status(1, "ready")
+    update_clip_status(cid, "ready")
 
 
 # ── 7. Discord Webhook Helper ─────────────────────────────────────────────────

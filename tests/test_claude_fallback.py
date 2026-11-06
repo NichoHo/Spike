@@ -61,7 +61,7 @@ def test_no_answer_runs_on_claude(monkeypatch):
 def test_claude_instead_returns_gemini_shaped_text_and_skips_video(monkeypatch):
     from types import SimpleNamespace
     import src.claude_cli
-    monkeypatch.setattr(cf, "ask", lambda purpose, detail, model=None: True)
+    monkeypatch.setattr(cf, "ask", lambda *a, **k: True)
     used = []
     monkeypatch.setattr(src.claude_cli, "run_claude",
                         lambda system, prompt, schema, label="", model="sonnet": used.append(model) or {"keep": True})
@@ -70,7 +70,7 @@ def test_claude_instead_returns_gemini_shaped_text_and_skips_video(monkeypatch):
     s7.claude_instead("read the stream", None, "read the stream", claude_model="sonnet")
     assert used == ["haiku", "sonnet"]  # Flash-Lite calls -> Haiku, Flash calls -> Sonnet
     assert s7.claude_instead(["video part", "text"], None, "watch a clip") is None
-    monkeypatch.setattr(cf, "ask", lambda purpose, detail, model=None: False)
+    monkeypatch.setattr(cf, "ask", lambda *a, **k: False)
     assert s7.claude_instead("judge this", None, "score one moment") is None
 
 

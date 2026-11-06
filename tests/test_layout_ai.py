@@ -72,12 +72,12 @@ def test_budget_counts_per_model_resets_daily_and_auto_stops_at_zero(monkeypatch
     assert gb.left("flash") == 2
 
 
-def test_auto_tile_disabled_when_out_of_calls(monkeypatch):
+def test_auto_tile_falls_back_to_claude_when_out_of_calls(monkeypatch):
     from src.web.app import templates
     monkeypatch.setitem(templates.env.globals, "layout_ai_left", lambda: 0)
     ui = templates.env.get_template("macros/ui.html").make_module()  # fresh: .module caches its globals
     html = str(ui.layout_picker("layout", "auto", "title", auto=True))
-    assert re.search(r'value="auto"\s+disabled', html) and "layout-option__quota--out" in html
+    assert not re.search(r'value="auto"[^>]*disabled', html) and "uses your Claude Pro plan" in html
     monkeypatch.setitem(templates.env.globals, "layout_ai_left", lambda: 7)
     ui = templates.env.get_template("macros/ui.html").make_module()
     assert "7 of" in str(ui.layout_picker("layout", "auto", "title", auto=True))
@@ -94,7 +94,7 @@ def test_judge_falls_back_to_flash_lite_when_flash_quota_is_gone(monkeypatch):
     monkeypatch.setattr("src.config.GEMINI_DAILY_LIMITS", {"flash": 5})
     calls = []
 
-    def fake(client, model, contents, config):
+    def fake(client, model, contents, config, **kw):
         calls.append(model)
         if model == "flash":
             raise s7.QuotaExhausted("429")
@@ -114,7 +114,7 @@ def test_second_gemini_key_takes_over_when_the_first_hits_its_daily_quota(monkey
     used = []
 
     class Fake:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **kw):
             self.key, self.models = api_key, self
 
         def generate_content(self, model, **kw):
@@ -148,7 +148,7 @@ def test_per_key_limit_is_learned_from_real_use(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_DAILY_LIMITS", {model: 2})  # the starting guess: 2 per key
 
     class Fake:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **kw):
             self.key, self.models = api_key, self
 
         def generate_content(self, model, **kw):

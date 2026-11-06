@@ -20,7 +20,7 @@ def test_source_presets_use_the_saved_ones_else_the_old_columns():
 def test_switches_count_as_on_only_when_sent_and_profanity_is_always_masked():
     p = parse_presets("split", None, "on", "off", "title", "karaoke")
     assert p == {"layout": "split", "letterbox_style": "title", "captions": False, "caption_style": "karaoke",
-                 "profanity_mask": True, "music": True, "cut_pauses": "off"}
+                 "profanity_mask": True, "music": True, "cut_pauses": "off", "ai_cuts": False}
     assert parse_presets("auto", "on", "auto", "auto", "blur", "bold_pop")["captions"] is True
     with pytest.raises(HTTPException):
         parse_presets("nope", "on", "auto", "auto", "blur", "bold_pop")
