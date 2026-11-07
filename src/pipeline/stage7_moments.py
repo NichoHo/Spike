@@ -53,7 +53,9 @@ from src import gemini_budget
 from src.judge_pool import GeminiUnavailable, Task, run_pool
 from src.db import get_json_column, insert_candidate
 from src.music import list_all_tracks, track_catalog_for_llm
-from src.profile import build_episodes, concept_terms, episode_of, fix_streamer, get_preset, profile_block, streamer_name
+from src.profile import (build_episodes, channel_key, concept_terms, episode_of, fix_streamer, get_preset, profile_block,
+                         streamer_name)
+from src import labels
 
 
 class _MultiKeyClient:
@@ -767,6 +769,7 @@ def call_llm_judge(
     streamer: str = "",
     story: str = "",
     provider: str = "gemini",
+    examples: str = "",
 ) -> Optional[LLMJudgeResponse]:
     """Call the LLM judge to evaluate a candidate clip window (Blueprint §6.3, §6.7). provider is the judge pool lane:
     "gemini" (Flash-Lite, two runs averaged) or "claude" (Haiku, one run; the CLI has no temperature setting)."""
@@ -822,7 +825,7 @@ Editing choices for the vertical cut:
     prompt = f"""Creator context:
 {creator_block or 'None'}
 
-What happens across the whole stream:
+{(examples + chr(10) + chr(10)) if examples else ''}What happens across the whole stream:
 {story or 'Unknown'}
 
 Evaluate this candidate moment:
@@ -1248,6 +1251,8 @@ def run_stage7_moments(
     has_chat = signals_data.get("has_chat", False)
     chat_offset_s = float(signals_data.get("chat_offset_s", DEFAULT_CHAT_OFFSET_S))
     creator_block = profile_block(profile_ctx)
+    # The team's gold shorts and this channel's recent verdicts, once per job (src/labels.py)
+    examples = labels.examples_block(channel_key(meta), ((profile_ctx or {}).get("profile") or {}).get("creator_type"))
     streamer = streamer_name(profile_ctx, meta)
     baseline = ((profile_ctx or {}).get("profile") or {}).get("baseline_behaviors") or []
     all_words = [w for seg in transcript.get("segments", []) for w in seg.get("words", [])]
@@ -1355,6 +1360,7 @@ def run_stage7_moments(
         return call_llm_judge(
             p["lines"], p["comments"], p["cand"].get("signals_at_peak", {}), has_chat=has_chat,
             music_catalog=music_catalog, creator_block=creator_block, streamer=streamer, story=story, provider=provider,
+            examples=examples,
         )
 
     def save_judge(i: int, provider: str, res: Optional[LLMJudgeResponse]) -> None:

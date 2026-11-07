@@ -86,7 +86,16 @@ def _cut(text: Optional[str], n: int) -> str:
 
 def examples_block(channel: str, category: Optional[str]) -> str:
     """The team's examples for the transcript judge: up to 3 ready gold shorts (this stream's category first, then
-    "any"), then the 2 newest approved and 2 newest rejected clips of this channel. Empty when there are none."""
+    "any"), then the 2 newest approved and 2 newest rejected clips of this channel. Empty when there are none, and
+    when the labels cannot be read: examples are optional, so they never stop a job."""
+    try:
+        return _examples_block(channel, category)
+    except Exception as e:  # e.g. a database that init_db has not migrated yet
+        print(f"  [labels] Judge examples skipped: {e}")
+        return ""
+
+
+def _examples_block(channel: str, category: Optional[str]) -> str:
     gold = [g for g in list_labels("gold", status="ready") if g["category"] in (category, "any")]
     gold.sort(key=lambda g: g["category"] != category)  # stable: this category first, each part stays newest first
     lines = [f'Standard [{g["humor_type"] or "other"}]: "{_cut(g["transcript"], 300)}" Works because: {_cut(g["why"], 200)}'

@@ -196,3 +196,26 @@ def test_an_uploaded_short_is_read_then_deleted(gold):
     (row,) = _labels()
     assert row["status"] == "ready" and row["source_url"] == "clip.mp4" and row["category"] == "gaming"
     assert gold["seen"]["part"][2] == labels.GOLD_MAX_S and list(gold["uploads"].iterdir()) == []
+
+
+def test_the_judge_prompt_carries_the_examples_block(monkeypatch):
+    import src.pipeline.stage7_moments as s7
+
+    sent = []
+
+    def capture(client, model, contents, config, **kw):
+        sent.append(contents)
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(s7, "get_gemini_client", lambda: None)
+    monkeypatch.setattr(s7, "generate_content_with_retry", capture)
+    s7.call_llm_judge(["L1 [00:01.0] hello"], "", {}, examples="EXAMPLES FROM THE TEAM")
+    assert sent and "EXAMPLES FROM THE TEAM" in sent[0]
+
+
+def test_examples_never_stop_a_job(monkeypatch):
+    def broken(*a, **k):
+        raise RuntimeError("no such table: labels")
+
+    monkeypatch.setattr(labels, "list_labels", broken)
+    assert labels.examples_block("twitch:kai", "irl") == ""
