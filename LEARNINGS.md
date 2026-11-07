@@ -36,8 +36,18 @@
   went into the DB. Fix: `pytest.ini` uses `--capture=sys`, render tests use
   `capsys`, and `conftest.py` closes its backup connections (before, the
   real `data/spike.db` stayed open for the whole test run).
-- **Open:** pace Gemini calls to the free-tier per-minute limit instead of
-  retrying 429s with 15 to 45 s waits.
+- **Built (same day):** `gemini_budget.pace()` keeps each model under its
+  per-minute limit (guess 15, replaced by the `quotaValue` of Google's first
+  per-minute 429). A 429 waits Google's `retryDelay`; a `PerDay` 429 is the
+  daily cap even when its delay is short. 4 workers, no fixed 2 s pause.
+- **Measured (same VOD, cold, paced, 4 workers):** stage 7 took 20.0 min
+  (42.8 unpaced with 3 workers, about 55 serial), with 1 429 and no 503.
+  The 15-a-minute guess never drew a per-minute 429. Recall@10 0.20 (chat
+  0.20); the 0.10 before was run-to-run noise, so judge one VOD with care.
+- **Open (found, not fixed):** the autopost daily cap counts posts by the
+  Pacific date, but posts store UTC times. From 16:00 to 24:00 Pacific the
+  cap counts nothing, and `test_phase6::test_autopost_rules_score_floors_and_cap`
+  fails in that window.
 - **Open:** next steps in the overhaul order: label store with one-tap
   reject reasons and gold clips, eval chat kept out of pruning, learned
   first-stage scorer trained on community clips, batched judge only if the
