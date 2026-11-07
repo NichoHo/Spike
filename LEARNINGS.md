@@ -1,5 +1,25 @@
 # Spike: Learnings
 
+## 2026-11-07: Label store (detection overhaul, step 2)
+
+- **Learned:** the Reject dialog never had a reason field (the route took
+  `reason`, the form never sent it), and deleting a video cascades to its
+  candidates and clips, so every verdict died with its video. That is why
+  the DB had 0 reasons and 0 reviewed clips.
+- **Built:** a `labels` table with no foreign keys (`src/labels.py`).
+  Reject has one-tap reason chips plus a note; both approve paths and reject
+  save a snapshot (clip text, judge's read, scores, channel key, creator
+  type). Settings has a Standards card: a TikTok, YouTube or Instagram link
+  (or an upload) of a short the team admires; Gemini watches it once in the
+  background and keeps only text. The transcript judge gets up to 3 gold
+  shorts of the stream's category plus this channel's 2 newest approved and
+  2 newest rejected clips, wrapped as untrusted examples.
+- **Learned:** the real DB gets the `labels` table only when the app or the
+  worker runs `init_db`. Scripts that call stage 7 directly skip it, so
+  `examples_block` returns no examples on any error instead of failing a job.
+- **Open:** measure whether the examples help: rerun the eval after adding
+  gold shorts and some verdicts (about 6 VODs a day on the free tier).
+
 ## 2026-11-07: Judge pool (detection overhaul, step 1)
 
 - **Built:** `src/judge_pool.py`. Stage 7's chunk scan, judge and video
