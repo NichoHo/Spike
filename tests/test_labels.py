@@ -121,3 +121,78 @@ def test_the_reject_dialog_offers_the_reason_chips(clip):
 
     html = TestClient(app).get(f"/clips/{clip['clip']}").text
     assert 'name="tags" value="needs_context"' in html and "Funny part not in the clip" in html and 'name="note"' in html
+
+
+GOLD_READ = {"title": "Streamer falls off his chair", "transcript": "no no no", "why_it_works": "calm, then chaos",
+             "humor_type": "absurd", "hook": "He did not see it coming"}
+
+
+@pytest.fixture
+def gold(monkeypatch, tmp_path):
+    """Gold intake with the download and Gemini faked; uploads land in tmp_path."""
+    from types import SimpleNamespace
+    from google.genai import types
+    from starlette.testclient import TestClient
+    import src.pipeline.stage7_moments as s7
+    import src.web.routes.settings as settings_routes
+    from src.web.app import app
+
+    init_db()
+    with get_connection() as conn:
+        conn.execute("DELETE FROM labels")
+    seen = {}
+
+    def download(url, folder):
+        seen["url"] = url
+        f = folder / "gold.mp4"
+        f.write_bytes(b"video")
+        return f, {"duration": 42.0, "view_count": 123456}
+
+    monkeypatch.setattr(labels, "_download", download)
+    monkeypatch.setattr(s7, "clip_video_part", lambda meta, a, b: seen.update(part=(meta["local_path"], a, b)) or types.Part(text="VIDEO"))
+    monkeypatch.setattr(s7, "get_gemini_client", lambda: None)
+    monkeypatch.setattr(s7, "judge_generate", lambda client, contents, config, purpose="": SimpleNamespace(text=json.dumps(GOLD_READ)))
+    monkeypatch.setattr(settings_routes, "UPLOADS_DIR", tmp_path)
+    return {"client": TestClient(app), "seen": seen, "uploads": tmp_path}
+
+
+def test_a_short_link_becomes_a_ready_gold_label(gold):
+    r = gold["client"].post("/settings/standards", data={"url": "https://www.tiktok.com/@a/video/1", "category": "irl"},
+                            follow_redirects=False)
+    assert r.status_code == 303 and "standards_error" not in r.headers["location"]
+    (row,) = _labels()
+    assert (row["kind"], row["status"], row["category"]) == ("gold", "ready", "irl")
+    assert (row["title"], row["transcript"], row["why"], row["humor_type"], row["hook"], row["views"]) == (
+        GOLD_READ["title"], "no no no", "calm, then chaos", "absurd", "He did not see it coming", 123456)
+    assert gold["seen"]["url"] == "https://www.tiktok.com/@a/video/1" and gold["seen"]["part"][1:] == (0.0, 42.0)
+    assert "Streamer falls off his chair" in gold["client"].get("/settings").text
+
+    gold["client"].post(f"/settings/standards/{row['id']}/delete", follow_redirects=False)
+    assert _labels() == []
+
+
+def test_links_from_other_hosts_and_other_files_are_refused(gold):
+    for data, files in (({"url": "https://evil.example/x.mp4"}, None), ({"url": "file:///C:/secret.mp4"}, None),
+                        ({}, {"file": ("x.exe", b"MZ", "application/octet-stream")}), ({}, None)):
+        r = gold["client"].post("/settings/standards", data=data, files=files, follow_redirects=False)
+        assert r.status_code == 303 and "standards_error" in r.headers["location"]
+    assert _labels() == [] and list(gold["uploads"].iterdir()) == []
+
+
+def test_a_failed_download_is_kept_with_its_error(gold, monkeypatch):
+    def broken(url, folder):
+        raise RuntimeError("login required")
+
+    monkeypatch.setattr(labels, "_download", broken)
+    gold["client"].post("/settings/standards", data={"url": "https://www.instagram.com/reel/abc"}, follow_redirects=False)
+    (row,) = _labels()
+    assert row["status"] == "failed" and "login required" in row["error"] and row["category"] == "any"
+
+
+def test_an_uploaded_short_is_read_then_deleted(gold):
+    r = gold["client"].post("/settings/standards", data={"category": "gaming"},
+                            files={"file": ("clip.mp4", b"\x00\x00video", "video/mp4")}, follow_redirects=False)
+    assert r.status_code == 303
+    (row,) = _labels()
+    assert row["status"] == "ready" and row["source_url"] == "clip.mp4" and row["category"] == "gaming"
+    assert gold["seen"]["part"][2] == labels.GOLD_MAX_S and list(gold["uploads"].iterdir()) == []

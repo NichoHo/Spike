@@ -4,8 +4,10 @@ Blueprint §10.6, §10.10 & DESIGN.md §10.10.
 """
 
 import urllib.parse
+import uuid
+from pathlib import Path
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, Request, Depends, Form, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Request, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from starlette.status import HTTP_303_SEE_OTHER
 
@@ -16,6 +18,7 @@ from src.config import (
     DEFAULT_GEMINI_MODEL,
     DATA_DIR,
     DB_PATH,
+    UPLOADS_DIR,
 )
 from src.db import (
     list_users,
@@ -27,7 +30,12 @@ from src.db import (
     list_review_clips,
     list_accounts,
     delete_account,
+    delete_label,
+    get_label,
+    list_labels,
+    save_label,
 )
+from src.labels import GOLD_CATEGORIES, GOLD_EXTS, GOLD_MAX_BYTES, analyze_gold, gold_url_ok
 from src.concepts import EMOTIONS
 from src.notify import get_active_webhook_url, verify_discord_webhook
 from src.pov import add_to_bank, delete_from_bank, load_bank
@@ -80,6 +88,9 @@ async def settings_page(
             "accounts_error": request.query_params.get("error", ""),
             "claude_help": help_mode(),
             "claude_lane_cap": CLAUDE_LANE_DAILY_CAP,
+            "gold_labels": [dict(r) for r in list_labels("gold")],
+            "gold_categories": GOLD_CATEGORIES,
+            "standards_error": request.query_params.get("standards_error", ""),
         },
     )
 
@@ -160,6 +171,58 @@ async def save_claude_help(
     if mode in HELP_MODES:  # form values are untrusted: only the three known modes are stored
         set_setting(HELP_KEY, mode)
     return RedirectResponse(url="/settings", status_code=HTTP_303_SEE_OTHER)
+
+
+def _standards_back(error: str = "") -> RedirectResponse:
+    query = f"?standards_error={urllib.parse.quote(error)}" if error else ""
+    return RedirectResponse(url=f"/settings{query}#standards", status_code=HTTP_303_SEE_OTHER)
+
+
+@router.post("/settings/standards")
+async def add_standard(
+    background_tasks: BackgroundTasks,
+    url: str = Form(""),
+    category: str = Form("any"),
+    file: Optional[UploadFile] = File(None),
+    user: Dict[str, Any] = Depends(require_admin),
+):
+    """Add a short the team holds up as the standard: a link from an allowed host, or an uploaded video file. Gemini
+    reads it in the background (src/labels.analyze_gold); until then the card shows it as reading."""
+    category = category if category in GOLD_CATEGORIES else "any"
+    url = url.strip()
+    if file and file.filename:
+        ext = Path(file.filename).suffix.lower()
+        if ext not in GOLD_EXTS:
+            return _standards_back(f"Upload a video file ({', '.join(sorted(GOLD_EXTS))}).")
+        dest = UPLOADS_DIR / f"gold_{uuid.uuid4().hex}{ext}"  # never the user's file name in the path
+        size = 0
+        with open(dest, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > GOLD_MAX_BYTES:
+                    break
+                out.write(chunk)
+        if size > GOLD_MAX_BYTES:
+            dest.unlink(missing_ok=True)
+            return _standards_back("That file is over 200 MB.")
+        label_id = save_label({"kind": "gold", "category": category, "source_url": file.filename[:200], "status": "processing"})
+        background_tasks.add_task(analyze_gold, label_id, str(dest))
+    elif url:
+        if not gold_url_ok(url):
+            return _standards_back("Paste a TikTok, YouTube or Instagram link.")
+        label_id = save_label({"kind": "gold", "category": category, "source_url": url, "status": "processing"})
+        background_tasks.add_task(analyze_gold, label_id)
+    else:
+        return _standards_back("Paste a link or pick a video file.")
+    return _standards_back()
+
+
+@router.post("/settings/standards/{label_id}/delete")
+async def delete_standard(label_id: int, user: Dict[str, Any] = Depends(require_admin)):
+    label = get_label(label_id)
+    if label and label["kind"] == "gold":  # this route never deletes a review verdict
+        delete_label(label_id)
+    return _standards_back()
 
 
 @router.post("/settings/discord/test")

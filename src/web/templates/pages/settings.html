@@ -51,6 +51,56 @@
     </div>
   </form>
 
+  <!-- Standards: shorts the team admires; the transcript judge sees them as examples (src/labels.py) -->
+  <div class="card" id="standards">
+    <div class="card__header">
+      <h2 class="card__title">Standards</h2>
+      <p class="card__description">Shorts your team admires, from any clipper. Gemini reads each one once, and the judge sees up to 3 from the stream's category as examples of your taste.</p>
+    </div>
+    <div class="card__body stack">
+      {% if standards_error %}{{ ui.alert("danger", "Short not added", standards_error) }}{% endif %}
+      <form method="post" action="/settings/standards" enctype="multipart/form-data" class="stack stack--sm">
+        <div class="field">
+          <label class="field__label" for="gold-url">Link</label>
+          <input type="url" name="url" id="gold-url" class="input" autocomplete="off" placeholder="https://www.tiktok.com/@clipper/video/…">
+          <p class="field__help">TikTok, YouTube or Instagram. Instagram often needs a login: if the link fails, upload the file instead.</p>
+        </div>
+        <div class="field">
+          <label class="field__label" for="gold-file">Or a video file <span class="field__optional">(up to 200 MB)</span></label>
+          <input type="file" name="file" id="gold-file" accept=".mp4,.mov,.mkv,.webm">
+        </div>
+        <div class="row" style="align-items: flex-end; gap: var(--space-3);">
+          <div class="field" style="flex: 1;">
+            <label class="field__label" for="gold-category">Streams it fits</label>
+            <select name="category" id="gold-category" class="select" autocomplete="off">
+              {% for c in gold_categories %}<option value="{{ c }}">{{ "Any stream" if c == "any" else c | replace("_", " ") | capitalize }}</option>{% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn--primary">Add short</button>
+        </div>
+      </form>
+      {% if gold_labels %}
+      <ul class="bank-list" aria-label="Standards">
+        {% for g in gold_labels %}
+        <li class="bank-list__row">
+          <span class="badge">{{ "Any stream" if g.category == "any" else (g.category or "any") | replace("_", " ") | capitalize }}</span>
+          <span class="bank-list__text">
+            {% if g.status == "processing" %}Reading {{ g.source_url }}…
+            {% elif g.status == "failed" %}Could not read {{ g.source_url }}: {{ g.error }}
+            {% else %}{{ g.title or g.hook }}{% if g.views %} <span class="muted">({{ "{:,}".format(g.views) }} views)</span>{% endif %}{% endif %}
+          </span>
+          <form method="post" action="/settings/standards/{{ g.id }}/delete">
+            <button type="submit" class="btn btn--ghost btn--sm" aria-label="Delete standard: {{ g.title or g.source_url }}">Delete</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted small">No standards yet. The judge works from your review verdicts alone until you add some.</p>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Users Table Card -->
   <div class="card">
     <div class="card__header row row--between">
