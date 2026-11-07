@@ -7,12 +7,50 @@ Only the Auto layout checks it; the pipeline never blocks on it.
 
 import hashlib
 import threading
+import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
+from typing import Deque, Dict
 
 from src import config
 from src.db import get_setting, set_setting
 
 _lock = threading.Lock()
+
+PACE_WINDOW_S = 62.0  # Google counts requests per minute; 2 s of slack for network jitter
+_calls: Dict[str, Deque[float]] = {}  # model -> start times of this process's calls in the last window
+
+
+def rpm(model: str) -> int:
+    """Requests per minute the model gets: Google's own number from a per-minute 429 (learn_rpm), else the guess."""
+    learned = get_setting(f"gemini_rpm:{model}") or ""
+    return int(learned) if learned.isdigit() and int(learned) > 0 else config.GEMINI_RPM_GUESS
+
+
+def learn_rpm(model: str, n: int) -> None:
+    """Store the per-minute request limit a 429 named (quotaValue). 0 forgets it. Never raises."""
+    try:
+        set_setting(f"gemini_rpm:{model}", str(n))
+    except Exception:
+        pass
+
+
+def pace(model: str) -> None:
+    """Wait until one more request fits in the model's per-minute limit, then count it, so calls stay under the limit
+    instead of drawing 429s. Thread-safe (the judge pool calls it from several threads).
+    ponytail: per process; the worker makes nearly every call. Share it through the DB if the web app's calls grow."""
+    limit = rpm(model)
+    while True:
+        with _lock:
+            q = _calls.setdefault(model, deque())
+            now = time.monotonic()
+            while q and now - q[0] >= PACE_WINDOW_S:
+                q.popleft()
+            if len(q) < limit:
+                q.append(now)
+                return
+            wait = PACE_WINDOW_S - (now - q[0])
+        time.sleep(wait)
 
 
 try:

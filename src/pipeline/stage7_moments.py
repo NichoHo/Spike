@@ -133,18 +133,27 @@ def _unstring(v: Any) -> Any:
 
 
 def _retry_delay_s(err_str: str) -> float:
-    """Seconds from a 'Please retry in 7h33m11.04s' hint, 0 when there is none."""
+    """Seconds Google says to wait: the longer of a 'Please retry in 7h33m11.04s' hint and a RetryInfo
+    "'retryDelay': '46s'" detail, 0 when there is neither."""
+    waits = [float(s) for s in re.findall(r"retrydelay'?\"?\s*:\s*'?\"?([\d.]+)s", err_str, re.IGNORECASE)]
     m = re.search(r"retry in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", err_str)
-    if not m:
-        return 0.0
-    h, mi, sec = m.groups()
-    return int(h or 0) * 3600 + int(mi or 0) * 60 + float(sec or 0)
+    if m:
+        h, mi, sec = m.groups()
+        waits.append(int(h or 0) * 3600 + int(mi or 0) * 60 + float(sec or 0))
+    return max(waits, default=0.0)
 
 
 def _daily_cap(err: Exception) -> bool:
-    """A 429 that says the wait is hours long: the key's daily quota, not a per-minute limit."""
+    """A 429 for the key's daily quota, not a per-minute limit: its quotaId says PerDay (its retryDelay can still be
+    under a minute), or the wait is hours long."""
     s = str(err).lower()
-    return ("429" in s or "quota" in s or "resource_exhausted" in s) and _retry_delay_s(s) > 300
+    return ("429" in s or "quota" in s or "resource_exhausted" in s) and ("perday" in s or _retry_delay_s(s) > 300)
+
+
+def _minute_request_limit(err_str: str) -> int:
+    """The quotaValue of a per-minute request quota named in a 429 (GenerateRequestsPerMinute...), 0 for any other."""
+    m = re.search(r"generaterequestsperminute.*?quotavalue'?\"?\s*:\s*'?\"?(\d+)", err_str, re.IGNORECASE | re.DOTALL)
+    return int(m.group(1)) if m else 0
 
 
 def generate_content_with_retry(
@@ -153,19 +162,22 @@ def generate_content_with_retry(
     contents: Any,
     config: Any,
     max_retries: int = 4,
-    delay_between_calls: float = 2.0,
+    delay_between_calls: float = 0.0,
     purpose: str = "",
     claude_model: str = "haiku",
     allow_claude: bool = True,
 ) -> Any:
-    """Gemini call with retries. Raises QuotaExhausted for long quota waits, GeminiUnavailable when 503 lasts through
-    every retry, and re-raises any other last error (it never returns None). When Flash-Lite, the last Gemini option,
-    is out of quota for the day, a text-only call runs on Claude instead, after the user approves it
-    (src/claude_fallback.py). allow_claude=False skips that: the judge pool picks the provider itself."""
-    time.sleep(delay_between_calls)
+    """Gemini call with retries. Each attempt waits its turn under the model's per-minute limit (gemini_budget.pace).
+    Raises QuotaExhausted for the daily quota, GeminiUnavailable when 503 lasts through every retry, and re-raises any
+    other last error (it never returns None). When Flash-Lite, the last Gemini option, is out of quota for the day, a
+    text-only call runs on Claude instead, after the user approves it (src/claude_fallback.py). allow_claude=False skips
+    that: the judge pool picks the provider itself."""
+    if delay_between_calls:
+        time.sleep(delay_between_calls)
     last_err: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
+            gemini_budget.pace(model)
             gemini_budget.spend(model)
             return client.models.generate_content(
                 model=model,
@@ -176,13 +188,17 @@ def generate_content_with_retry(
             last_err = e
             err_str = str(e).lower()
             if "429" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
-                if _retry_delay_s(err_str) > 300:
+                if _daily_cap(e):
                     if model == DEFAULT_GEMINI_MODEL and allow_claude:
                         out = claude_instead(contents, config, purpose or "a Gemini text call", claude_model)
                         if out is not None:
                             return out
                     raise QuotaExhausted(f"{model}: {str(e)[:300]}") from e
-                wait_time = 15.0 * (attempt + 1)
+                limit = _minute_request_limit(err_str)
+                if limit and limit != gemini_budget.rpm(model):  # pace to Google's own number from now on
+                    gemini_budget.learn_rpm(model, limit)
+                    print(f"  [stage 7] {model} allows {limit} requests a minute; pacing to that")
+                wait_time = _retry_delay_s(err_str) or 15.0 * (attempt + 1)
                 print(f"  [stage 7] Rate limit hit (429), waiting {wait_time:.0f}s before retry (attempt {attempt + 1}/{max_retries})...")
                 time.sleep(wait_time)
             elif "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
