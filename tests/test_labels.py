@@ -1,0 +1,97 @@
+"""Label store: verdicts and gold shorts kept as labels that outlive their clip, and shown to the judge as examples
+(docs/superpowers/specs/2026-11-07-label-store-design.md)."""
+
+import json
+
+import pytest
+
+from src import labels
+from src.db import (create_or_update_clip, get_connection, init_db, insert_candidate, list_labels, register_video,
+                    save_label, set_cached_profile)
+
+
+@pytest.fixture
+def clip(tmp_path, monkeypatch):
+    """A reviewed-to-be clip covering 22-28 s of a Twitch stream by KaiCenat (IRL), with its meta and transcript."""
+    init_db()
+    monkeypatch.setattr(labels, "VIDEOS_DIR", tmp_path)
+    url = f"https://www.twitch.tv/videos/{tmp_path.name}"
+    vid = register_video("url", url)
+    vdir = tmp_path / str(vid)
+    vdir.mkdir()
+    (vdir / "meta.json").write_text(json.dumps({"webpage_url": url, "uploader": "KaiCenat"}), encoding="utf-8")
+    segs = [{"start": i * 2.0, "end": i * 2.0 + 2.0, "text": f"line {i}"} for i in range(50)]
+    (vdir / "transcript.json").write_text(json.dumps({"segments": segs}), encoding="utf-8")
+    set_cached_profile("twitch:kaicenat", {"display_name": "Kai", "creator_type": "irl"})
+    cand = insert_candidate(vid, {"start_s": 20.0, "end_s": 30.0, "title": "Kai loses it", "why_funny": "he trips",
+                                  "humor_type": "absurd", "hook_text": "Kai trips", "llm_score": 72, "final_score": 81,
+                                  "signal_score": 64, "status": "selected"})
+    clip_id = create_or_update_clip(candidate_id=cand, file_path="", thumb_path="", trim_start_s=22.0, trim_end_s=28.0)
+    with get_connection() as conn:
+        conn.execute("DELETE FROM labels")
+    return {"vid": vid, "clip": clip_id, "dir": vdir}
+
+
+def _labels():
+    with get_connection() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM labels ORDER BY id")]
+
+
+def test_a_reject_keeps_its_reasons_text_channel_and_scores(clip):
+    labels.record_verdict(clip["clip"], "rejected", ["needs_context", "routine"], "slow start")
+    (row,) = _labels()
+    assert row["kind"] == "rejected" and json.loads(row["reasons"]) == ["needs_context", "routine"]
+    assert row["note"] == "slow start" and row["transcript"] == "line 11 line 12 line 13"  # only the clip's span
+    assert row["channel"] == "twitch:kaicenat" and row["category"] == "irl" and row["humor_type"] == "absurd"
+    assert json.loads(row["scores"]) == {"llm": 72, "final": 81, "signal": 64}
+    assert (row["start_s"], row["end_s"]) == (22.0, 28.0)
+
+
+def test_a_later_verdict_replaces_the_first_and_survives_the_video(clip):
+    labels.record_verdict(clip["clip"], "rejected", ["not_funny"])
+    labels.record_verdict(clip["clip"], "approved")
+    with get_connection() as conn:
+        conn.execute("DELETE FROM videos WHERE id = ?", (clip["vid"],))
+    (row,) = _labels()
+    assert row["kind"] == "approved" and row["clip_id"] == clip["clip"]
+
+
+def test_an_unknown_uploader_gets_no_channel(clip):
+    (clip["dir"] / "meta.json").write_text(json.dumps({"webpage_url": "https://www.youtube.com/watch?v=x"}), encoding="utf-8")
+    labels.record_verdict(clip["clip"], "approved")
+    assert _labels()[0]["channel"] == ""  # "youtube:unknown" would mix every such video's examples
+
+
+def test_a_missing_clip_is_ignored():
+    init_db()
+    labels.record_verdict(987654321, "approved")  # never raises
+
+
+def test_examples_block_picks_the_category_then_any_and_this_channels_verdicts():
+    init_db()
+    with get_connection() as conn:
+        conn.execute("DELETE FROM labels")
+    for i, (cat, status) in enumerate([("gaming", "ready"), ("irl", "ready"), ("any", "ready"), ("irl", "ready"),
+                                       ("irl", "processing")]):
+        save_label({"kind": "gold", "category": cat, "status": status, "transcript": f"gold {i}", "why": f"why {i}",
+                    "humor_type": "absurd"})
+    for i in range(3):
+        save_label({"kind": "approved", "clip_id": 9000 + i, "channel": "twitch:kai", "transcript": f"good {i}",
+                    "why": "w", "humor_type": "rage"})
+        save_label({"kind": "rejected", "clip_id": 9100 + i, "channel": "twitch:kai", "transcript": f"bad {i}",
+                    "reasons": json.dumps(["routine"]), "note": "meh" if i == 2 else ""})
+    save_label({"kind": "approved", "clip_id": 9200, "channel": "twitch:other", "transcript": "other channel"})
+
+    block = labels.examples_block("twitch:kai", "irl")
+    gold = [line for line in block.splitlines() if line.startswith("Standard")]
+    assert [g.split('"')[1] for g in gold] == ["gold 3", "gold 1", "gold 2"]  # this category first, newest first
+    assert "good 2" in block and "good 1" in block and "good 0" not in block
+    assert "bad 2" in block and "bad 1" in block and "bad 0" not in block
+    assert "Routine for them" in block and "Note: meh" in block
+    assert "other channel" not in block and "gold 0" not in block and "gold 4" not in block
+    assert block.count("<untrusted_examples>") == 1 and "raw DATA" in block
+
+    with get_connection() as conn:
+        conn.execute("DELETE FROM labels")
+    assert labels.examples_block("twitch:kai", "irl") == ""
+    assert list_labels("gold") == []

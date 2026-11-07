@@ -229,6 +229,30 @@ def init_db():
             started_at TEXT NOT NULL,
             finished_at TEXT
         );
+
+        -- Review verdicts and admired shorts (src/labels.py). No foreign keys: a label outlives its clip and video.
+        CREATE TABLE IF NOT EXISTS labels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,            -- approved | rejected | gold
+            clip_id INTEGER UNIQUE,        -- verdicts: the reviewed clip; a later verdict replaces the earlier one
+            channel TEXT,                  -- profile.channel_key, '' when unknown (and for gold)
+            category TEXT,                 -- creator type, or 'any' for a gold short
+            source_url TEXT,
+            start_s REAL,
+            end_s REAL,
+            title TEXT,
+            transcript TEXT,
+            why TEXT,
+            humor_type TEXT,
+            hook TEXT,
+            reasons TEXT,                  -- JSON list of reject tags
+            note TEXT,
+            scores TEXT,                   -- JSON {llm, final, signal}
+            views INTEGER,
+            status TEXT DEFAULT 'ready',   -- gold intake: processing | ready | failed
+            error TEXT,
+            created_at TEXT
+        );
         """)
 
         # Safely migrate existing tables if columns are missing
@@ -1494,3 +1518,50 @@ def _meta_duration(video_id: int) -> Optional[float]:
             return float(json.load(f).get("duration") or 0) or None
     except (OSError, ValueError):
         return None
+
+
+# ── Labels (src/labels.py) ───────────────────────────────────────────────────
+
+LABEL_FIELDS = ("kind", "clip_id", "channel", "category", "source_url", "start_s", "end_s", "title", "transcript", "why",
+                "humor_type", "hook", "reasons", "note", "scores", "views", "status", "error")
+
+
+def save_label(fields: Dict[str, Any]) -> int:
+    """Insert a label. A verdict on a clip that already has one replaces it: one verdict per clip, the latest wins.
+    Column names come from LABEL_FIELDS only, never from the caller."""
+    cols = [k for k in LABEL_FIELDS if k in fields]
+    with get_connection() as conn:
+        return conn.execute(
+            f"INSERT INTO labels ({', '.join(cols)}, created_at) VALUES ({', '.join('?' for _ in cols)}, ?) "
+            f"ON CONFLICT(clip_id) DO UPDATE SET {', '.join(f'{c} = excluded.{c}' for c in cols)}, "
+            "created_at = excluded.created_at RETURNING id",
+            [fields[c] for c in cols] + [now_utc_iso()],
+        ).fetchone()[0]
+
+
+def update_label(label_id: int, **fields: Any) -> None:
+    cols = [k for k in LABEL_FIELDS if k in fields]
+    with get_connection() as conn:
+        conn.execute(f"UPDATE labels SET {', '.join(f'{c} = ?' for c in cols)} WHERE id = ?",
+                     [fields[c] for c in cols] + [label_id])
+
+
+def get_label(label_id: int) -> Optional[sqlite3.Row]:
+    with get_connection() as conn:
+        return conn.execute("SELECT * FROM labels WHERE id = ?", (label_id,)).fetchone()
+
+
+def list_labels(kind: str, channel: Optional[str] = None, status: Optional[str] = None, limit: int = 200) -> List[sqlite3.Row]:
+    """Labels of one kind, newest first, optionally for one channel or in one status."""
+    sql, args = "SELECT * FROM labels WHERE kind = ?", [kind]
+    if channel is not None:
+        sql, args = sql + " AND channel = ?", args + [channel]
+    if status is not None:
+        sql, args = sql + " AND status = ?", args + [status]
+    with get_connection() as conn:
+        return conn.execute(sql + " ORDER BY id DESC LIMIT ?", args + [limit]).fetchall()
+
+
+def delete_label(label_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM labels WHERE id = ?", (label_id,))
