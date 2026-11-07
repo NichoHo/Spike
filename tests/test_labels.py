@@ -95,3 +95,29 @@ def test_examples_block_picks_the_category_then_any_and_this_channels_verdicts()
         conn.execute("DELETE FROM labels")
     assert labels.examples_block("twitch:kai", "irl") == ""
     assert list_labels("gold") == []
+
+
+def test_reject_keeps_known_tags_and_the_note_and_approve_saves_a_label(clip):
+    from starlette.testclient import TestClient
+    from src.web.app import app
+
+    client = TestClient(app)
+    r = client.post(f"/clips/{clip['clip']}/reject", data={"tags": ["needs_context", "bogus"], "note": "late"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    (row,) = _labels()
+    assert row["kind"] == "rejected" and json.loads(row["reasons"]) == ["needs_context"] and row["note"] == "late"
+    with get_connection() as conn:
+        assert conn.execute("SELECT reject_reason FROM clips WHERE id = ?", (clip["clip"],)).fetchone()[0] == "Needs context; late"
+
+    client.post(f"/clips/{clip['clip']}/approve", follow_redirects=False)
+    (row,) = _labels()
+    assert row["kind"] == "approved"
+
+
+def test_the_reject_dialog_offers_the_reason_chips(clip):
+    from starlette.testclient import TestClient
+    from src.web.app import app
+
+    html = TestClient(app).get(f"/clips/{clip['clip']}").text
+    assert 'name="tags" value="needs_context"' in html and "Funny part not in the clip" in html and 'name="note"' in html

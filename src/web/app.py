@@ -60,6 +60,8 @@ templates.env.globals["static_v"] = lambda name: int((STATIC_DIR / name).stat().
 from src import config as _config, gemini_budget as _gemini_budget, layout_ai as _layout_ai  # noqa: E402  (Auto layout daily call budget, shown on the pickers)
 templates.env.globals["layout_ai_left"] = _layout_ai.calls_left
 templates.env.globals["layout_ai_limit"] = lambda: _gemini_budget.limit(_config.LAYOUT_GEMINI_MODEL)
+from src.labels import REJECT_TAGS as _REJECT_TAGS  # noqa: E402  (the Reject dialog's reason chips)
+templates.env.globals["reject_tags"] = _REJECT_TAGS
 
 
 def _nav_badges() -> dict:

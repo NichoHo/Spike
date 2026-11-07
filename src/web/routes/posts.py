@@ -211,6 +211,8 @@ async def post_clip_action(
     ]
     if approve:
         update_clip_status(clip_id, "approved", user_id=user.get("id"))
+        from src.labels import record_verdict
+        record_verdict(clip_id, "approved")
         log_event("info", f"Clip #{clip_id} approved by {user['login']}")
     if timing == "now":
         return _start_uploads(post_ids, background_tasks, acknowledged)

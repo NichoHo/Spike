@@ -11,7 +11,7 @@ import time
 from collections import deque
 from itertools import count
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, BackgroundTasks, Request, Depends, Form, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -20,6 +20,7 @@ from starlette.status import HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 from src.concepts import CONCEPTS
 from src.config import SILENCE_TRIM_S, VIDEOS_DIR
 from src.cleanup import delete_rejected_clip_files
+from src.labels import REJECT_TAGS, record_verdict
 from src.db import (
     get_clip_with_details,
     update_clip_status,
@@ -229,6 +230,7 @@ async def approve_clip_action(
 ):
     """Mark clip as approved."""
     update_clip_status(clip_id, "approved", user_id=user.get("id"))
+    record_verdict(clip_id, "approved")
     log_event("info", f"Clip #{clip_id} approved by {user['login']}")
 
     # If there's a next ready clip, navigate to it, else home
@@ -243,12 +245,18 @@ async def approve_clip_action(
 async def reject_clip_action(
     clip_id: int,
     background_tasks: BackgroundTasks,
+    tags: List[str] = Form([]),
+    note: str = Form(""),
     reason: Optional[str] = Form(""),
     user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """Mark clip as rejected with optional feedback reason."""
-    clean_reason = (reason or "").strip()
+    """Mark clip as rejected with its one-tap reasons and an optional note (the old `reason` field reads as the note).
+    The verdict is saved as a label before the files go."""
+    tags = [t for t in dict.fromkeys(tags) if t in REJECT_TAGS]  # form input is untrusted: known tags only, once each
+    note = (note or reason or "").strip()[:300]
+    clean_reason = "; ".join([REJECT_TAGS[t] for t in tags] + ([note] if note else []))
     clip_row = get_clip_with_details(clip_id)
+    record_verdict(clip_id, "rejected", tags, note)
     update_clip_status(clip_id, "rejected", user_id=user.get("id"), reject_reason=clean_reason)
     if clip_row and clip_row["status"] != "rendering":  # a running re-render would recreate files
         delete_rejected_clip_files(dict(clip_row))

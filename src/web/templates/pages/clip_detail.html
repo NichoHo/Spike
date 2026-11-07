@@ -685,9 +685,19 @@ document.getElementById("approve-schedule")?.addEventListener("click", (e) => {
 <!-- Reject Dialog (DESIGN.md §9.15) -->
 <dialog id="reject-dialog" class="dialog">
   <form method="post" action="/clips/{{ clip.id }}/reject">
-    <div class="dialog__body">
+    <div class="dialog__body stack">
       <h2 class="dialog__title">Reject clip?</h2>
-      <p class="dialog__text">This clip and its files will be permanently deleted and removed from the review queue.</p>
+      <p class="dialog__text">This clip and its files will be permanently deleted and removed from the review queue. Why it missed teaches the judge.</p>
+      <fieldset class="chip-field">
+        <legend class="field__label">What was wrong <span class="field__optional">(optional)</span></legend>
+        <div class="chip-row">
+          {% for key, text in reject_tags.items() %}<label class="chip chip--toggle"><input type="checkbox" name="tags" value="{{ key }}">{{ text }}</label>{% endfor %}
+        </div>
+      </fieldset>
+      <div class="field">
+        <label class="field__label" for="reject-note">Note <span class="field__optional">(optional)</span></label>
+        <textarea id="reject-note" name="note" class="textarea" rows="2" maxlength="300" autocomplete="off" placeholder="What would have made it work…"></textarea>
+      </div>
     </div>
     <div class="dialog__footer">
       <button type="button" class="btn btn--secondary" data-close-dialog>Cancel</button>
