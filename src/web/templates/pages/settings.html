@@ -69,7 +69,16 @@
           <label class="field__label" for="gold-file">Or a video file <span class="field__optional">(up to 200 MB)</span></label>
           <input type="file" name="file" id="gold-file" accept=".mp4,.mov,.mkv,.webm">
         </div>
-        <div class="row" style="align-items: flex-end; gap: var(--space-3);">
+        <fieldset class="chip-field" style="margin-top: var(--space-2);">
+          <legend class="field__label">Why you like it <span class="field__optional">(optional)</span></legend>
+          <div class="chip-row">
+            {% for key, text in like_tags.items() %}<label class="chip chip--toggle"><input type="checkbox" name="likes" value="{{ key }}">{{ text }}</label>{% endfor %}
+            <button type="button" class="btn btn--ghost btn--sm" id="gold-other-add">{{ ui.icon("plus", 14) }}<span>Add other reason</span></button>
+          </div>
+          <div class="stack stack--sm" id="gold-others"></div>
+          <template id="gold-other-tpl"><input type="text" name="other" class="input" maxlength="100" autocomplete="off" aria-label="Other reason" placeholder="e.g. the slow zoom on his face…"></template>
+        </fieldset>
+        <div class="row" style="align-items: flex-end; gap: var(--space-3); margin-top: var(--space-2);">
           <div class="field" style="flex: 1;">
             <label class="field__label" for="gold-category">Streams it fits</label>
             <select name="category" id="gold-category" class="select" autocomplete="off">
@@ -88,6 +97,7 @@
             {% if g.status == "processing" %}Reading {{ g.source_url }}…
             {% elif g.status == "failed" %}Could not read {{ g.source_url }}: {{ g.error }}
             {% else %}{{ g.title or g.hook }}{% if g.views %} <span class="muted">({{ "{:,}".format(g.views) }} views)</span>{% endif %}{% endif %}
+            {% if g.likes %}<span class="bank-list__sub">Liked for: {{ g.likes | join(", ") }}</span>{% endif %}
           </span>
           <form method="post" action="/settings/standards/{{ g.id }}/delete">
             <button type="submit" class="btn btn--ghost btn--sm" aria-label="Delete standard: {{ g.title or g.source_url }}">Delete</button>
@@ -346,6 +356,15 @@
 
 
 <script>
+// Standards: each "+ Other" click adds one free-text reason, up to 5 (the server keeps 5 of 100 characters each)
+document.getElementById("gold-other-add").addEventListener("click", (e) => {
+  const list = document.getElementById("gold-others");
+  const input = document.getElementById("gold-other-tpl").content.firstElementChild.cloneNode();
+  list.append(input);
+  input.focus();
+  e.currentTarget.hidden = list.children.length >= 5;
+});
+
 async function testWebhook() {
   const url = document.getElementById("field-webhook").value;
   if (!url) {

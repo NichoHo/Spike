@@ -87,7 +87,7 @@ def test_examples_block_picks_the_category_then_any_and_this_channels_verdicts()
     assert [g.split('"')[1] for g in gold] == ["gold 3", "gold 1", "gold 2"]  # this category first, newest first
     assert "good 2" in block and "good 1" in block and "good 0" not in block
     assert "bad 2" in block and "bad 1" in block and "bad 0" not in block
-    assert "Routine for them" in block and "Note: meh" in block
+    assert "Routine for them" in block and "Note: meh" in block and "Team likes" not in block
     assert "other channel" not in block and "gold 0" not in block and "gold 4" not in block
     assert block.count("<untrusted_examples>") == 1 and "raw DATA" in block
 
@@ -169,6 +169,19 @@ def test_a_short_link_becomes_a_ready_gold_label(gold):
 
     gold["client"].post(f"/settings/standards/{row['id']}/delete", follow_redirects=False)
     assert _labels() == []
+
+
+def test_a_standard_keeps_the_reasons_the_team_picked(gold):
+    others = ["  the  zoom on his face ", "", "x" * 300, "r3", "r4", "r5", "r6"]
+    gold["client"].post("/settings/standards", data={"url": "https://youtu.be/abc", "other": others,
+                        "likes": ["relatable", "bogus", "relatable", "strong_hook"]}, follow_redirects=False)
+    (row,) = _labels()
+    assert json.loads(row["reasons"]) == ["relatable", "strong_hook", "the zoom on his face", "x" * 100, "r3", "r4", "r5"]
+
+    html = gold["client"].get("/settings").text
+    assert 'name="likes" value="stands_alone"' in html and 'id="gold-other-add"' in html
+    assert "Liked for: Relatable, Hooks in the first seconds, the zoom on his face" in html
+    assert "Team likes it for: Relatable; Hooks in the first seconds; the zoom on his face;" in labels.examples_block("", "irl")
 
 
 def test_links_from_other_hosts_and_other_files_are_refused(gold):

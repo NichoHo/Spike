@@ -7,7 +7,7 @@ so they outlive the clip, the video and storage pruning. The transcript judge se
 import json
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 from pydantic import BaseModel
@@ -25,6 +25,17 @@ REJECT_TAGS = {
     "missed_payoff": "Funny part not in the clip",
     "other": "Other",
 }
+LIKE_TAGS = {  # why the team admires a standard; several mirror a reject reason
+    "strong_hook": "Hooks in the first seconds",
+    "stands_alone": "Makes sense without context",
+    "surprise": "Unexpected or out of character",
+    "big_reaction": "Big reaction",
+    "relatable": "Relatable",
+    "quotable": "Quotable line",
+    "clean_cut": "Starts and ends at the right spot",
+    "tight": "Short, no dead air",
+}
+OTHER_MAX, OTHER_CHARS = 5, 100  # free-text reasons kept per standard, and characters per reason
 TEXT_MAX = 600  # transcript characters kept per label
 GOLD_CATEGORIES = ("any",) + CREATOR_TYPES
 GOLD_HOSTS = ("youtube.com", "youtu.be", "tiktok.com", "instagram.com")
@@ -79,9 +90,19 @@ def record_verdict(clip_id: int, verdict: str, tags: Sequence[str] = (), note: s
         print(f"  [labels] Verdict on clip #{clip_id} not saved: {e}")
 
 
+def reason_texts(raw: Optional[str], names: Dict[str, str]) -> List[str]:
+    """A label's stored reasons as words: known tags by their name, free-text reasons as typed."""
+    return [names.get(t, t) for t in json.loads(raw or "[]")]
+
+
 def _cut(text: Optional[str], n: int) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
+def _liked(gold: Any) -> str:
+    likes = "; ".join(reason_texts(gold["reasons"], LIKE_TAGS))
+    return f" Team likes it for: {_cut(likes, 300).rstrip('.')}." if likes else ""
 
 
 def examples_block(channel: str, category: Optional[str]) -> str:
@@ -98,14 +119,14 @@ def examples_block(channel: str, category: Optional[str]) -> str:
 def _examples_block(channel: str, category: Optional[str]) -> str:
     gold = [g for g in list_labels("gold", status="ready") if g["category"] in (category, "any")]
     gold.sort(key=lambda g: g["category"] != category)  # stable: this category first, each part stays newest first
-    lines = [f'Standard [{g["humor_type"] or "other"}]: "{_cut(g["transcript"], 300)}" Works because: {_cut(g["why"], 200)}'
-             for g in gold[:3]]
+    lines = [f'Standard [{g["humor_type"] or "other"}]: "{_cut(g["transcript"], 300)}"{_liked(g)} '
+             f'Works because: {_cut(g["why"], 200)}' for g in gold[:3]]
     if channel:
         for r in list_labels("approved", channel=channel, limit=2):
             lines.append(f'Approved here [{r["humor_type"] or "other"}]: "{_cut(r["transcript"], 300)}" '
                          f'Why: {_cut(r["why"], 200)}')
         for r in list_labels("rejected", channel=channel, limit=2):
-            why = "; ".join(REJECT_TAGS.get(t, t) for t in json.loads(r["reasons"] or "[]")) or "no reason given"
+            why = "; ".join(reason_texts(r["reasons"], REJECT_TAGS)) or "no reason given"
             note = f" Note: {_cut(r['note'], 150)}" if r["note"] else ""
             lines.append(f'Rejected here ({why}): "{_cut(r["transcript"], 300)}"{note}')
     if not lines:

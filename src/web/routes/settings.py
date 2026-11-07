@@ -3,10 +3,11 @@ Spike: Settings & administration routes.
 Blueprint §10.6, §10.10 & DESIGN.md §10.10.
 """
 
+import json
 import urllib.parse
 import uuid
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Request, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from starlette.status import HTTP_303_SEE_OTHER
@@ -35,7 +36,8 @@ from src.db import (
     list_labels,
     save_label,
 )
-from src.labels import GOLD_CATEGORIES, GOLD_EXTS, GOLD_MAX_BYTES, analyze_gold, gold_url_ok
+from src.labels import (GOLD_CATEGORIES, GOLD_EXTS, GOLD_MAX_BYTES, LIKE_TAGS, OTHER_CHARS, OTHER_MAX, analyze_gold,
+                        gold_url_ok, reason_texts)
 from src.concepts import EMOTIONS
 from src.notify import get_active_webhook_url, verify_discord_webhook
 from src.pov import add_to_bank, delete_from_bank, load_bank
@@ -88,8 +90,9 @@ async def settings_page(
             "accounts_error": request.query_params.get("error", ""),
             "claude_help": help_mode(),
             "claude_lane_cap": CLAUDE_LANE_DAILY_CAP,
-            "gold_labels": [dict(r) for r in list_labels("gold")],
+            "gold_labels": [{**dict(r), "likes": reason_texts(r["reasons"], LIKE_TAGS)} for r in list_labels("gold")],
             "gold_categories": GOLD_CATEGORIES,
+            "like_tags": LIKE_TAGS,
             "standards_error": request.query_params.get("standards_error", ""),
         },
     )
@@ -183,13 +186,19 @@ async def add_standard(
     background_tasks: BackgroundTasks,
     url: str = Form(""),
     category: str = Form("any"),
+    likes: List[str] = Form([]),
+    other: List[str] = Form([]),
     file: Optional[UploadFile] = File(None),
     user: Dict[str, Any] = Depends(require_admin),
 ):
-    """Add a short the team holds up as the standard: a link from an allowed host, or an uploaded video file. Gemini
-    reads it in the background (src/labels.analyze_gold); until then the card shows it as reading."""
+    """Add a short the team holds up as the standard: a link from an allowed host, or an uploaded video file, with the
+    optional reasons the team likes it. Gemini reads it in the background (src/labels.analyze_gold); until then the
+    card shows it as reading."""
     category = category if category in GOLD_CATEGORIES else "any"
     url = url.strip()
+    likes = [t for t in dict.fromkeys(likes) if t in LIKE_TAGS]  # form input is untrusted: known tags only, once each
+    others = [o for o in dict.fromkeys(" ".join(o.split())[:OTHER_CHARS].strip() for o in other) if o][:OTHER_MAX]
+    fields = {"kind": "gold", "category": category, "status": "processing", "reasons": json.dumps(likes + others)}
     if file and file.filename:
         ext = Path(file.filename).suffix.lower()
         if ext not in GOLD_EXTS:
@@ -205,12 +214,12 @@ async def add_standard(
         if size > GOLD_MAX_BYTES:
             dest.unlink(missing_ok=True)
             return _standards_back("That file is over 200 MB.")
-        label_id = save_label({"kind": "gold", "category": category, "source_url": file.filename[:200], "status": "processing"})
+        label_id = save_label({**fields, "source_url": file.filename[:200]})
         background_tasks.add_task(analyze_gold, label_id, str(dest))
     elif url:
         if not gold_url_ok(url):
             return _standards_back("Paste a TikTok, YouTube or Instagram link.")
-        label_id = save_label({"kind": "gold", "category": category, "source_url": url, "status": "processing"})
+        label_id = save_label({**fields, "source_url": url})
         background_tasks.add_task(analyze_gold, label_id)
     else:
         return _standards_back("Paste a link or pick a video file.")
