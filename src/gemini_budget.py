@@ -10,7 +10,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Deque, Dict
+from typing import Deque, Dict, Tuple
 
 from src import config
 from src.db import get_setting, set_setting
@@ -70,6 +70,13 @@ def reset_at() -> float:
     """Unix time of the next quota reset: the coming midnight Pacific."""
     now = datetime.now(_PACIFIC)
     return (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).timestamp()
+
+
+def day_bounds_utc() -> Tuple[str, str]:
+    """Today's quota day (midnight to midnight Pacific) as UTC ISO strings [start, end), to compare with the UTC
+    timestamps the DB stores. A date prefix cannot: from 16:00 Pacific the UTC date is already tomorrow."""
+    start = datetime.now(_PACIFIC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return tuple(t.astimezone(timezone.utc).isoformat() for t in (start, start + timedelta(days=1)))
 
 
 def _key_tag(api_key: str) -> str:

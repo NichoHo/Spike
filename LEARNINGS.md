@@ -44,10 +44,11 @@
   (42.8 unpaced with 3 workers, about 55 serial), with 1 429 and no 503.
   The 15-a-minute guess never drew a per-minute 429. Recall@10 0.20 (chat
   0.20); the 0.10 before was run-to-run noise, so judge one VOD with care.
-- **Open (found, not fixed):** the autopost daily cap counts posts by the
-  Pacific date, but posts store UTC times. From 16:00 to 24:00 Pacific the
-  cap counts nothing, and `test_phase6::test_autopost_rules_score_floors_and_cap`
-  fails in that window.
+- **Fixed (same day):** the autopost daily cap matched the Pacific date as a
+  prefix of UTC timestamps, so from 16:00 to 24:00 Pacific it counted no
+  posts and never applied. It now counts between the Pacific day's UTC
+  bounds (`gemini_budget.day_bounds_utc`). The cap test pins its clock to
+  that window, so it fails on the old code at any hour.
 - **Open:** next steps in the overhaul order: label store with one-tap
   reject reasons and gold clips, eval chat kept out of pruning, learned
   first-stage scorer trained on community clips, batched judge only if the

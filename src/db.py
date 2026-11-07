@@ -1378,16 +1378,17 @@ def get_due_posts(as_of: Optional[str] = None) -> List[sqlite3.Row]:
         ).fetchall()
 
 
-def count_account_daily_posts(account_id: int, date_iso_prefix: str) -> int:
-    """Count posts created/posted for an account today (Blueprint §8.3 cap)."""
+def count_account_daily_posts(account_id: int, start_iso: str, end_iso: str) -> int:
+    """Count an account's posts created or posted in [start_iso, end_iso) (Blueprint §8.3 cap). The bounds are UTC
+    ISO strings like the stored timestamps (gemini_budget.day_bounds_utc), so plain string order is time order."""
     with get_connection() as conn:
         row = conn.execute(
             """
             SELECT COUNT(*) FROM posts
-            WHERE account_id = ? AND (created_at LIKE ? OR posted_at LIKE ?)
+            WHERE account_id = ? AND ((created_at >= ? AND created_at < ?) OR (posted_at >= ? AND posted_at < ?))
               AND status IN ('scheduled', 'uploading', 'posted', 'sent_to_inbox')
             """,
-            (account_id, f"{date_iso_prefix}%", f"{date_iso_prefix}%")
+            (account_id, start_iso, end_iso, start_iso, end_iso)
         ).fetchone()
         return row[0] if row else 0
 

@@ -296,7 +296,26 @@ def test_youtube_shorts_private_upload(dummy_media_file):
 
 # ── Test 5: Auto-Post Rules (§8.3) ────────────────────────────────────────────
 
-def test_autopost_rules_score_floors_and_cap(dummy_media_file):
+# 02:30 UTC on Nov 7 is 18:30 on Nov 6 in Pacific time. The cap's day is Pacific but posts store UTC times, so in this
+# window the two dates differ: a date-prefix match counted none of the day's posts and the cap never applied.
+_PACIFIC_EVENING = datetime(2026, 11, 7, 2, 30, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def pacific_evening(monkeypatch):
+    """Pin both clocks the cap reads: the quota day (gemini_budget) and the posts' UTC timestamps (db)."""
+    from src import db, gemini_budget
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return _PACIFIC_EVENING.astimezone(tz) if tz else _PACIFIC_EVENING.replace(tzinfo=None)
+
+    monkeypatch.setattr(gemini_budget, "datetime", Frozen)
+    monkeypatch.setattr(db, "now_utc_iso", lambda: _PACIFIC_EVENING.isoformat())
+
+
+def test_autopost_rules_score_floors_and_cap(dummy_media_file, pacific_evening):
     """
     Blueprint §8.3:
     - final_score >= 80
@@ -365,8 +384,8 @@ def test_autopost_rules_score_floors_and_cap(dummy_media_file):
     assert len(res_b) == 1
 
     # Now daily count is 3!
-    today_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    assert count_account_daily_posts(acc_id, today_prefix) == 3
+    from src import gemini_budget
+    assert count_account_daily_posts(acc_id, *gemini_budget.day_bounds_utc()) == 3
 
     # 4th clip must be skipped due to daily cap
     res_c = evaluate_clip_autopost(clip_c)

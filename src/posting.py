@@ -550,14 +550,14 @@ def evaluate_clip_autopost(
 
     scheduled_post_ids: List[int] = []
     # YouTube's daily upload quota resets at midnight Pacific, same as Gemini's, so the
-    # posting-cap "day" uses the shared Pacific helper rather than the machine's UTC day.
+    # posting-cap "day" is the Pacific day, as UTC bounds to match the stored UTC timestamps.
     from src import gemini_budget
-    today_prefix = gemini_budget.today()
+    day_start, day_end = gemini_budget.day_bounds_utc()
 
     for acc in accounts:
         acc_id = acc["id"]
         # Check daily posting cap (Blueprint §8.3: default 3 per day)
-        daily_count = count_account_daily_posts(acc_id, today_prefix)
+        daily_count = count_account_daily_posts(acc_id, day_start, day_end)
         if daily_count >= DEFAULT_DAILY_POST_CAP:
             continue
 
