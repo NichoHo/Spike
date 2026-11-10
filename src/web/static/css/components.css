@@ -597,8 +597,9 @@ fieldset.field > legend { padding: 0; margin-bottom: var(--space-2); }
 .info-panel[hidden], .lookup__list[hidden] { display: none; }
 .info-panel__title { color: var(--color-text); font-weight: 600; }
 .info-panel__title:not(:first-child) { margin-top: var(--space-3); }
-.info-panel ol { margin: var(--space-1) 0 var(--space-2) var(--space-5); padding: 0; }
-.info-panel code { font-family: var(--font-mono); font-size: 12px; color: var(--color-text); }
+.info-panel ol, .disclosure__body ol { margin: var(--space-1) 0 var(--space-2) var(--space-5); padding: 0; }
+.info-panel code, .disclosure__body code { font-family: var(--font-mono); font-size: 12px; color: var(--color-text); }
+.disclosure__body li + li { margin-top: var(--space-1); }
 .lookup { position: relative; }
 .lookup__list { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: var(--space-1); list-style: none; background: var(--color-surface); border: 1px solid var(--color-border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-popover); max-height: 280px; overflow-y: auto; }
 .lookup__item { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); cursor: pointer; }

@@ -88,6 +88,21 @@
           <button type="submit" class="btn btn--primary">Add short</button>
         </div>
       </form>
+      <details class="disclosure" id="share-standard">
+        <summary>{{ ui.icon("caret-right", 14) }} Add from your iPhone's share sheet</summary>
+        <div class="stack stack--sm disclosure__body small muted">
+          {% if not share_url.startswith("https://") %}{{ ui.alert("warning", "Your iPhone can't reach Spike yet", "Run tailscale serve on this PC, set SPIKE_PUBLIC_URL in .env to the address it gives, then restart Spike.") }}{% endif %}
+          <p>Set this up once in the Shortcuts app. Then tap Share on a TikTok, YouTube or Instagram short and pick Spike standard. It's saved for any stream with no reasons, and a notification says it worked. Tailscale must be on.</p>
+          <ol>
+            <li>In Shortcuts, tap <strong>+</strong> and name it <code>Spike standard</code>.</li>
+            <li>In its details, turn on <strong>Show in Share Sheet</strong> and let it receive <strong>URLs</strong> and <strong>Text</strong>.</li>
+            <li>Add <strong>Get Contents of URL</strong> with this address. Set Method to <strong>POST</strong> and Request Body to <strong>JSON</strong>, and add a Text field named <code>text</code> set to <strong>Shortcut Input</strong>.
+              <input type="text" class="input input--mono" readonly value="{{ share_url }}" aria-label="Address for the shortcut" autocomplete="off" spellcheck="false" translate="no" style="margin-top: var(--space-1);"></li>
+            <li>Add <strong>Show Notification</strong> set to <strong>Contents of URL</strong>.</li>
+          </ol>
+          <p>Not in the share sheet's first row? It's under More (Instagram: Share to…). Use Edit Actions there to pin it.</p>
+        </div>
+      </details>
       {% if gold_labels %}
       <ul class="bank-list" aria-label="Standards">
         {% for g in gold_labels %}

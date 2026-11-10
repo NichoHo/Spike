@@ -1,5 +1,26 @@
 # Spike: Learnings
 
+## 2026-11-10: Share a standard from the iPhone
+
+- **Built:** `POST /settings/standards/share` (admin, JSON `{"text"}`). An
+  iOS Shortcut ("Spike standard", steps on the Standards card) sends what
+  the share sheet gave; Spike keeps the first TikTok, YouTube or Instagram
+  link, without its query (`?si=`, `?igsh=` change per share), and reads it
+  like a Settings-card link. Same link twice adds nothing; a failed one is
+  read again. Spec: `docs/superpowers/specs/2026-11-10-share-standard-design.md`.
+- **Learned (verified):** Safari on iOS has no Web Share Target, so a web
+  app cannot sit in the iPhone share sheet (MDN). FastAPI 0.142 parses a
+  body as JSON only for a JSON `Content-Type` (`strict_content_type`), so a
+  form or `text/plain` post from another site gets 422.
+- **Learned (verified):** yt-dlp 2026.08.19 read a public Instagram reel
+  without a login. The Instagram Messaging API gives shared reels as
+  `ig_reel` attachments with a CDN `url`, and the Conversations API can be
+  polled (20 newest messages per thread), so a DM bot would not need a
+  public webhook. Not built: the Shortcut costs about the same taps.
+- **Open:** Tailscale is not installed on this PC, and `SPIKE_PUBLIC_URL`
+  is not set, so the iPhone cannot reach Spike yet. The Standards card
+  warns until it is.
+
 ## 2026-11-07: Label store (detection overhaul, step 2)
 
 - **Learned:** the Reject dialog never had a reason field (the route took

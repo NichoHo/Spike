@@ -9,7 +9,8 @@ import uuid
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Request, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, JSONResponse
+from pydantic import BaseModel, Field
 from starlette.status import HTTP_303_SEE_OTHER
 
 from src.config import (
@@ -19,6 +20,7 @@ from src.config import (
     DEFAULT_GEMINI_MODEL,
     DATA_DIR,
     DB_PATH,
+    PUBLIC_URL,
     UPLOADS_DIR,
 )
 from src.db import (
@@ -35,9 +37,10 @@ from src.db import (
     get_label,
     list_labels,
     save_label,
+    update_label,
 )
 from src.labels import (GOLD_CATEGORIES, GOLD_EXTS, GOLD_MAX_BYTES, LIKE_TAGS, OTHER_CHARS, OTHER_MAX, analyze_gold,
-                        gold_url_ok, reason_texts)
+                        gold_url_ok, reason_texts, shared_link)
 from src.concepts import EMOTIONS
 from src.notify import get_active_webhook_url, verify_discord_webhook
 from src.pov import add_to_bank, delete_from_bank, load_bank
@@ -94,6 +97,7 @@ async def settings_page(
             "gold_categories": GOLD_CATEGORIES,
             "like_tags": LIKE_TAGS,
             "standards_error": request.query_params.get("standards_error", ""),
+            "share_url": f"{PUBLIC_URL}/settings/standards/share",
         },
     )
 
@@ -224,6 +228,32 @@ async def add_standard(
     else:
         return _standards_back("Paste a link or pick a video file.")
     return _standards_back()
+
+
+class SharedText(BaseModel):
+    text: str = Field("", max_length=4000)
+
+
+@router.post("/settings/standards/share", response_class=PlainTextResponse)
+async def share_standard(body: SharedText, background_tasks: BackgroundTasks,
+                         user: Dict[str, Any] = Depends(require_admin)) -> str:
+    """The iPhone Shortcut's way in (docs/superpowers/specs/2026-11-10-share-standard-design.md): whatever the share
+    sheet sent, as JSON. JSON only, so a form on another site cannot post here: FastAPI refuses other content types.
+    Replies with one line for the Shortcut's notification."""
+    link = shared_link(body.text)
+    if not link:
+        return "No TikTok, YouTube or Instagram link in that."
+    same = [g for g in list_labels("gold") if g["source_url"] == link]
+    if any(g["status"] != "failed" for g in same):
+        return "Already a standard."
+    if same:  # shared again after a failed read: read it again
+        label_id = same[0]["id"]
+        update_label(label_id, status="processing", error=None)
+    else:
+        label_id = save_label({"kind": "gold", "category": "any", "status": "processing", "reasons": "[]",
+                               "source_url": link})
+    background_tasks.add_task(analyze_gold, label_id)
+    return "Saved. Gemini is reading it."
 
 
 @router.post("/settings/standards/{label_id}/delete")

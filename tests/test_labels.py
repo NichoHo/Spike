@@ -211,6 +211,62 @@ def test_an_uploaded_short_is_read_then_deleted(gold):
     assert gold["seen"]["part"][2] == labels.GOLD_MAX_S and list(gold["uploads"].iterdir()) == []
 
 
+def test_shared_link_finds_the_link_and_drops_per_share_tracking():
+    assert labels.shared_link("https://youtube.com/shorts/AbC_1?si=x9") == "https://youtube.com/shorts/AbC_1"
+    assert labels.shared_link("look https://www.instagram.com/reel/DQx/?igsh=MTE= lol") == "https://www.instagram.com/reel/DQx/"
+    assert labels.shared_link("https://www.youtube.com/watch?v=abc&t=5s#x") == "https://www.youtube.com/watch?v=abc"
+    assert labels.shared_link("see https://evil.example/a then https://vt.tiktok.com/ZS1/.") == "https://vt.tiktok.com/ZS1/"
+    assert labels.shared_link("no link here") is None and labels.shared_link("") is None
+
+
+def _share(client, text, **kw):
+    return client.post("/settings/standards/share", json={"text": text}, **kw)
+
+
+def test_a_shared_link_becomes_one_ready_standard(gold, monkeypatch):
+    r = _share(gold["client"], "https://youtube.com/shorts/AbC?si=one")
+    assert (r.status_code, r.text) == (200, "Saved. Gemini is reading it.")
+    (row,) = _labels()
+    assert (row["status"], row["category"], row["reasons"], row["source_url"]) == (
+        "ready", "any", "[]", "https://youtube.com/shorts/AbC")
+    assert _share(gold["client"], "https://youtube.com/shorts/AbC?si=two").text == "Already a standard."
+    assert _share(gold["client"], "just words").text == "No TikTok, YouTube or Instagram link in that."
+    assert len(_labels()) == 1
+
+
+def test_a_failed_shared_standard_is_read_again_when_shared_again(gold, monkeypatch):
+    works, calls = labels._download, []  # the fixture's fake download
+
+    def fails_once(url, folder):
+        calls.append(url)
+        if len(calls) == 1:
+            raise RuntimeError("login required")
+        return works(url, folder)
+
+    monkeypatch.setattr(labels, "_download", fails_once)
+    _share(gold["client"], "https://www.instagram.com/reel/abc/")
+    assert _labels()[0]["status"] == "failed"
+    assert _share(gold["client"], "https://www.instagram.com/reel/abc/?igsh=z").text == "Saved. Gemini is reading it."
+    (row,) = _labels()
+    assert row["status"] == "ready" and row["error"] is None and len(calls) == 2
+
+
+def test_share_refuses_forms_plain_text_and_members(gold):
+    from src.db import create_user
+    body = json.dumps({"text": "https://youtu.be/abc"})
+    assert gold["client"].post("/settings/standards/share", data={"text": "https://youtu.be/abc"}).status_code == 422
+    assert gold["client"].post("/settings/standards/share", content=body,
+                               headers={"Content-Type": "text/plain"}).status_code == 422
+    create_user("member@share.test", "Member", role="member")
+    r = _share(gold["client"], "https://youtu.be/abc", headers={"Tailscale-User-Login": "member@share.test"})
+    assert r.status_code == 403 and _labels() == []
+
+
+def test_settings_shows_the_shortcut_address(gold):
+    html = gold["client"].get("/settings").text
+    assert 'id="share-standard"' in html and "/settings/standards/share" in html
+
+
 def test_the_judge_prompt_carries_the_examples_block(monkeypatch):
     import src.pipeline.stage7_moments as s7
 

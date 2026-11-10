@@ -5,10 +5,11 @@ so they outlive the clip, the video and storage pruning. The transcript judge se
 """
 
 import json
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from pydantic import BaseModel
 
@@ -156,6 +157,18 @@ def gold_url_ok(url: str) -> bool:
     p = urlparse(url.strip())
     host = (p.hostname or "").lower()
     return p.scheme in ("http", "https") and any(host == h or host.endswith("." + h) for h in GOLD_HOSTS)
+
+
+def shared_link(text: str) -> Optional[str]:
+    """The first allowed link in what a phone's share sheet sent, without its query and fragment: share links carry
+    per-share tracking (?si=, ?igsh=), so the same short would look new each time. A YouTube watch link keeps its v."""
+    for raw in re.findall(r"https?://[^\s<>\"']+", text or ""):
+        url = raw.rstrip(".,!?)")
+        if gold_url_ok(url):
+            p = urlparse(url)
+            v = parse_qs(p.query).get("v")
+            return p._replace(query=urlencode({"v": v[0]}) if v else "", fragment="").geturl()
+    return None
 
 
 def _download(url: str, folder: Path) -> Tuple[Path, Dict[str, Any]]:
