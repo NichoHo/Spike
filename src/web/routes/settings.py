@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Request, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, JSONResponse
-from pydantic import BaseModel, Field
 from starlette.status import HTTP_303_SEE_OTHER
 
 from src.config import (
@@ -230,19 +229,27 @@ async def add_standard(
     return _standards_back()
 
 
-class SharedText(BaseModel):
-    text: str = Field("", max_length=4000)
+def _texts(value: Any) -> str:
+    """Every string in the Shortcut's JSON, under any key: iOS capitalizes a typed key ("Text"), and a share can be
+    a list."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        value = list(value.values())
+    return " ".join(_texts(v) for v in value) if isinstance(value, list) else ""
 
 
 @router.post("/settings/standards/share", response_class=PlainTextResponse)
-async def share_standard(body: SharedText, background_tasks: BackgroundTasks,
+async def share_standard(body: Dict[str, Any], background_tasks: BackgroundTasks,
                          user: Dict[str, Any] = Depends(require_admin)) -> str:
     """The iPhone Shortcut's way in (docs/superpowers/specs/2026-11-10-share-standard-design.md): whatever the share
-    sheet sent, as JSON. JSON only, so a form on another site cannot post here: FastAPI refuses other content types.
-    Replies with one line for the Shortcut's notification."""
-    link = shared_link(body.text)
-    if not link:
-        return "No TikTok, YouTube or Instagram link in that."
+    sheet sent, as a JSON object. JSON only, so a form on another site cannot post here: FastAPI refuses other content
+    types. Replies with one line for the Shortcut's notification."""
+    text = " ".join(_texts(body).split())[:4000]
+    link = shared_link(text)
+    if not link:  # say what arrived: the Shortcut is built by hand on a phone, and this is all its builder sees
+        return f"No TikTok, YouTube or Instagram link in: {text[:80]}" if text else \
+            "Spike got no text. In the Shortcut, set the field's value to Shortcut Input."
     same = [g for g in list_labels("gold") if g["source_url"] == link]
     if any(g["status"] != "failed" for g in same):
         return "Already a standard."

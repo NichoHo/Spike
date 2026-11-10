@@ -230,8 +230,16 @@ def test_a_shared_link_becomes_one_ready_standard(gold, monkeypatch):
     assert (row["status"], row["category"], row["reasons"], row["source_url"]) == (
         "ready", "any", "[]", "https://youtube.com/shorts/AbC")
     assert _share(gold["client"], "https://youtube.com/shorts/AbC?si=two").text == "Already a standard."
-    assert _share(gold["client"], "just words").text == "No TikTok, YouTube or Instagram link in that."
+    assert _share(gold["client"], "just  words").text == "No TikTok, YouTube or Instagram link in: just words"
+    assert _share(gold["client"], "").text.startswith("Spike got no text.")
     assert len(_labels()) == 1
+
+
+def test_share_finds_the_link_under_any_key_and_in_lists(gold):
+    for body in ({"Text": "https://youtu.be/k1"}, {"text": ["hi", {"u": "https://youtu.be/k2?si=x"}]}):
+        assert gold["client"].post("/settings/standards/share", json=body).text == "Saved. Gemini is reading it."
+    assert [r["source_url"] for r in _labels()] == ["https://youtu.be/k1", "https://youtu.be/k2"]
+    assert gold["client"].post("/settings/standards/share", json=["https://youtu.be/k3"]).status_code == 422
 
 
 def test_a_failed_shared_standard_is_read_again_when_shared_again(gold, monkeypatch):

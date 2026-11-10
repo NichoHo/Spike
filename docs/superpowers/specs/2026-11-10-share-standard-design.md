@@ -26,9 +26,12 @@ Settings card stays as it is.
 
 ## Endpoint
 
-`POST /settings/standards/share`, admin only, JSON body `{"text": "..."}`.
+`POST /settings/standards/share`, admin only, a JSON object such as
+`{"text": "..."}`.
 
-1. Take the first `http(s)` link in `text` that passes `gold_url_ok`.
+1. Take the first `http(s)` link that passes `gold_url_ok`, from every
+   string in the object under any key, lists included. iOS capitalizes a
+   key typed in Shortcuts (`Text`), and a share can be a list.
 2. Drop its query string and fragment: share links carry per-share
    tracking (`?si=`, `?igsh=`). A `v` parameter (YouTube watch links) is
    kept.
@@ -36,8 +39,10 @@ Settings card stays as it is.
    If one failed, read it again. Otherwise save a gold label (category
    `any`, no reasons) and start `analyze_gold` in the background.
 4. Reply with one plain-text line for the Shortcut to show:
-   `Saved. Gemini is reading it.`, `Already a standard.`, or
-   `No TikTok, YouTube or Instagram link in that.`
+   `Saved. Gemini is reading it.`, `Already a standard.`,
+   `No TikTok, YouTube or Instagram link in: <first 80 characters>`, or
+   `Spike got no text...` when nothing arrived. The phone is the only
+   place the Shortcut's builder sees what was sent.
 
 **Cross-site posts:** FastAPI 0.142 parses a body as JSON only when the
 `Content-Type` is JSON. A form from another site cannot send that without a

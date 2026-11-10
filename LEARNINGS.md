@@ -17,9 +17,22 @@
   `ig_reel` attachments with a CDN `url`, and the Conversations API can be
   polled (20 newest messages per thread), so a DM bot would not need a
   public webhook. Not built: the Shortcut costs about the same taps.
-- **Open:** Tailscale is not installed on this PC, and `SPIKE_PUBLIC_URL`
-  is not set, so the iPhone cannot reach Spike yet. The Standards card
-  warns until it is.
+- **Set up (2026-11-11):** Tailscale on the PC and the iPhone,
+  `tailscale serve --bg 8000` gives `https://nicho.taild5cd83.ts.net`
+  (Serve had to be enabled once from a link the CLI printed).
+  `SPIKE_PUBLIC_URL` is set and `nichoho@github` is an admin.
+- **Fixed:** the first shares all replied "no link". They reached Spike as
+  JSON but not under a lowercase `text` key (iOS capitalizes a typed key,
+  most likely). The endpoint now reads every string under any key, and the
+  no-link reply quotes what arrived.
+- **Learned:** some shares timed out on the phone but never reached Spike
+  (no access log line, no label), while Spike stayed fast. The loss is
+  between the iPhone and the PC, likely the phone's Tailscale tunnel (not
+  confirmed: the tailscaled log needs admin). A slow BackgroundTask does
+  not hold up the next request (tested with uvicorn 0.54, keep-alive).
+- **Open:** the first 6 shared standards failed: 5 on Gemini 503 overload
+  through every retry, 1 Instagram reel that needs a login (4 of 5 reels
+  downloaded without one). Sharing a failed link again reads it again.
 
 ## 2026-11-07: Label store (detection overhaul, step 2)
 
