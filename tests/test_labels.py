@@ -211,12 +211,14 @@ def test_an_uploaded_short_is_read_then_deleted(gold):
     assert gold["seen"]["part"][2] == labels.GOLD_MAX_S and list(gold["uploads"].iterdir()) == []
 
 
-def test_shared_link_finds_the_link_and_drops_per_share_tracking():
-    assert labels.shared_link("https://youtube.com/shorts/AbC_1?si=x9") == "https://youtube.com/shorts/AbC_1"
-    assert labels.shared_link("look https://www.instagram.com/reel/DQx/?igsh=MTE= lol") == "https://www.instagram.com/reel/DQx/"
-    assert labels.shared_link("https://www.youtube.com/watch?v=abc&t=5s#x") == "https://www.youtube.com/watch?v=abc"
-    assert labels.shared_link("see https://evil.example/a then https://vt.tiktok.com/ZS1/.") == "https://vt.tiktok.com/ZS1/"
-    assert labels.shared_link("no link here") is None and labels.shared_link("") is None
+def test_shared_links_finds_every_link_once_and_drops_per_share_tracking():
+    assert labels.shared_links("https://youtube.com/shorts/AbC_1?si=x9") == ["https://youtube.com/shorts/AbC_1"]
+    assert labels.shared_links("look https://www.instagram.com/reel/DQx/?igsh=MTE= lol") == ["https://www.instagram.com/reel/DQx/"]
+    assert labels.shared_links("https://www.youtube.com/watch?v=abc&t=5s#x") == ["https://www.youtube.com/watch?v=abc"]
+    assert labels.shared_links("see https://evil.example/a then https://vt.tiktok.com/ZS1/.") == ["https://vt.tiktok.com/ZS1/"]
+    assert labels.shared_links("https://youtu.be/a?si=1\nhttps://youtu.be/b https://youtu.be/a?si=2") == [
+        "https://youtu.be/a", "https://youtu.be/b"]
+    assert labels.shared_links("no link here") == [] and labels.shared_links("") == []
 
 
 def _share(client, text, **kw):
@@ -225,21 +227,30 @@ def _share(client, text, **kw):
 
 def test_a_shared_link_becomes_one_ready_standard(gold, monkeypatch):
     r = _share(gold["client"], "https://youtube.com/shorts/AbC?si=one")
-    assert (r.status_code, r.text) == (200, "Saved. Gemini is reading it.")
+    assert (r.status_code, r.text) == (200, "Spike: saved. Gemini is reading it.")
     (row,) = _labels()
     assert (row["status"], row["category"], row["reasons"], row["source_url"]) == (
         "ready", "any", "[]", "https://youtube.com/shorts/AbC")
-    assert _share(gold["client"], "https://youtube.com/shorts/AbC?si=two").text == "Already a standard."
-    assert _share(gold["client"], "just  words").text == "No TikTok, YouTube or Instagram link in: just words"
-    assert _share(gold["client"], "").text.startswith("Spike got no text.")
+    assert _share(gold["client"], "https://youtube.com/shorts/AbC?si=two").text == "Spike: already a standard."
+    assert _share(gold["client"], "just  words").text == "Spike: no TikTok, YouTube or Instagram link in: just words"
+    assert _share(gold["client"], "").text.startswith("Spike: nothing arrived.")
     assert len(_labels()) == 1
 
 
 def test_share_finds_the_link_under_any_key_and_in_lists(gold):
     for body in ({"Text": "https://youtu.be/k1"}, {"text": ["hi", {"u": "https://youtu.be/k2?si=x"}]}):
-        assert gold["client"].post("/settings/standards/share", json=body).text == "Saved. Gemini is reading it."
+        assert gold["client"].post("/settings/standards/share", json=body).text == "Spike: saved. Gemini is reading it."
     assert [r["source_url"] for r in _labels()] == ["https://youtu.be/k1", "https://youtu.be/k2"]
     assert gold["client"].post("/settings/standards/share", json=["https://youtu.be/k3"]).status_code == 422
+
+
+def test_a_queue_of_shares_made_while_spike_was_off_is_read_in_one_post(gold):
+    _share(gold["client"], "https://youtu.be/q1")
+    queue = "https://youtu.be/q1?si=a\nCheck this https://vt.tiktok.com/ZS2/\nhttps://www.instagram.com/reel/R3/?igsh=b"
+    assert _share(gold["client"], queue).text == "Spike: saved 2. Gemini is reading them. Already standards: 1."
+    assert [r["source_url"] for r in _labels()] == [
+        "https://youtu.be/q1", "https://vt.tiktok.com/ZS2/", "https://www.instagram.com/reel/R3/"]
+    assert _share(gold["client"], queue).text == "Spike: all 3 are already standards."
 
 
 def test_a_failed_shared_standard_is_read_again_when_shared_again(gold, monkeypatch):
@@ -254,7 +265,7 @@ def test_a_failed_shared_standard_is_read_again_when_shared_again(gold, monkeypa
     monkeypatch.setattr(labels, "_download", fails_once)
     _share(gold["client"], "https://www.instagram.com/reel/abc/")
     assert _labels()[0]["status"] == "failed"
-    assert _share(gold["client"], "https://www.instagram.com/reel/abc/?igsh=z").text == "Saved. Gemini is reading it."
+    assert _share(gold["client"], "https://www.instagram.com/reel/abc/?igsh=z").text == "Spike: saved. Gemini is reading it."
     (row,) = _labels()
     assert row["status"] == "ready" and row["error"] is None and len(calls) == 2
 

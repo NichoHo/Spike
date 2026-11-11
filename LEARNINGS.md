@@ -1,5 +1,17 @@
 # Spike: Learnings
 
+## 2026-11-11: Queue shared standards while Spike is off
+
+- **Built:** the Shortcut saves each share to `spike-queue.txt` on the
+  phone before it posts, and sends the whole file. The share endpoint now
+  takes every link in a post. Every reply starts with `Spike:`, and the
+  Shortcut deletes the queue only then, so `tailscale serve`'s 502 (PC on,
+  Spike down) or a dropped tunnel keeps the links for the next share.
+- **Not verified:** the new Shortcut steps were not run on an iPhone.
+  Recalled, not checked: a failed Get Contents of URL stops the run, and a
+  File in a Text action gives the file's text. Test once: share with Spike
+  off, start Spike, share again, expect `saved 2`.
+
 ## 2026-11-10: Share a standard from the iPhone
 
 - **Built:** `POST /settings/standards/share` (admin, JSON `{"text"}`). An

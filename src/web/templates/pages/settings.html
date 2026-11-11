@@ -95,11 +95,16 @@
           <p>Set this up once in the Shortcuts app. Then tap Share on a TikTok, YouTube or Instagram short and pick Spike standard. It's saved for any stream with no reasons, and a notification says it worked. Tailscale must be on.</p>
           <ol>
             <li>In Shortcuts, tap <strong>+</strong> and name it <code>Spike standard</code>.</li>
-            <li>In its details, turn on <strong>Show in Share Sheet</strong> and let it receive <strong>URLs</strong> and <strong>Text</strong>.</li>
-            <li>Add <strong>Get Contents of URL</strong> with this address. Set Method to <strong>POST</strong> and Request Body to <strong>JSON</strong>, and add a Text field named <code>text</code> set to <strong>Shortcut Input</strong>.
+            <li>In its details, turn on <strong>Show in Share Sheet</strong> and let it receive <strong>URLs</strong> and <strong>Text</strong>. Set <strong>If there's no input</strong> to <strong>Continue</strong>.</li>
+            <li>Add <strong>Get File</strong> from the <strong>Shortcuts</strong> folder, path <code>spike-queue.txt</code>. Turn off <strong>Error If Not Found</strong>.</li>
+            <li>Add <strong>Text</strong> with <strong>File</strong>, a new line, then <strong>Shortcut Input</strong>.</li>
+            <li>Add <strong>Save File</strong> to save that <strong>Text</strong> to the Shortcuts folder as <code>spike-queue.txt</code>. Turn off <strong>Ask Where to Save</strong> and turn on <strong>Overwrite If File Exists</strong>.</li>
+            <li>Add <strong>Get Contents of URL</strong> with this address. Set Method to <strong>POST</strong> and Request Body to <strong>JSON</strong>, and add a Text field named <code>text</code> set to <strong>Text</strong>.
               <input type="text" class="input input--mono" readonly value="{{ share_url }}" aria-label="Address for the shortcut" autocomplete="off" spellcheck="false" translate="no" style="margin-top: var(--space-1);"></li>
             <li>Add <strong>Show Notification</strong> set to <strong>Contents of URL</strong>.</li>
+            <li>Add <strong>If</strong> <strong>Contents of URL</strong> begins with <code>Spike:</code>, and inside it <strong>Delete Files</strong> on <strong>Saved File</strong> with <strong>Confirm Before Deleting</strong> off.</li>
           </ol>
+          <p>Spike off? The Shortcut stops with an error, but the link stays in <code>spike-queue.txt</code> and goes with your next share. To send the queue without sharing, run Spike standard from the Shortcuts app.</p>
           <p>Not in the share sheet's first row? It's under More (Instagram: Share to…). Use Edit Actions there to pin it.</p>
         </div>
       </details>

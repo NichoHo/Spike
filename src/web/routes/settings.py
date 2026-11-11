@@ -39,7 +39,7 @@ from src.db import (
     update_label,
 )
 from src.labels import (GOLD_CATEGORIES, GOLD_EXTS, GOLD_MAX_BYTES, LIKE_TAGS, OTHER_CHARS, OTHER_MAX, analyze_gold,
-                        gold_url_ok, reason_texts, shared_link)
+                        gold_url_ok, reason_texts, shared_links)
 from src.concepts import EMOTIONS
 from src.notify import get_active_webhook_url, verify_discord_webhook
 from src.pov import add_to_bank, delete_from_bank, load_bank
@@ -244,23 +244,32 @@ async def share_standard(body: Dict[str, Any], background_tasks: BackgroundTasks
                          user: Dict[str, Any] = Depends(require_admin)) -> str:
     """The iPhone Shortcut's way in (docs/superpowers/specs/2026-11-10-share-standard-design.md): whatever the share
     sheet sent, as a JSON object. JSON only, so a form on another site cannot post here: FastAPI refuses other content
-    types. Replies with one line for the Shortcut's notification."""
-    text = " ".join(_texts(body).split())[:4000]
-    link = shared_link(text)
-    if not link:  # say what arrived: the Shortcut is built by hand on a phone, and this is all its builder sees
-        return f"No TikTok, YouTube or Instagram link in: {text[:80]}" if text else \
-            "Spike got no text. In the Shortcut, set the field's value to Shortcut Input."
-    same = [g for g in list_labels("gold") if g["source_url"] == link]
-    if any(g["status"] != "failed" for g in same):
-        return "Already a standard."
-    if same:  # shared again after a failed read: read it again
-        label_id = same[0]["id"]
-        update_label(label_id, status="processing", error=None)
-    else:
-        label_id = save_label({"kind": "gold", "category": "any", "status": "processing", "reasons": "[]",
-                               "source_url": link})
-    background_tasks.add_task(analyze_gold, label_id)
-    return "Saved. Gemini is reading it."
+    types. The Shortcut keeps a queue file and sends all of it, so shares made while Spike was off arrive with the
+    next one. Replies with one line for the Shortcut's notification. Every reply starts with "Spike:": the Shortcut
+    clears its queue only then, never on an error page (tailscale serve's 502 while Spike is down, a 403)."""
+    text = " ".join(_texts(body).split())[:50000]
+    links = shared_links(text)
+    if not links:  # say what arrived: the Shortcut is built by hand on a phone, and this is all its builder sees
+        return f"Spike: no TikTok, YouTube or Instagram link in: {text[:80]}" if text else \
+            "Spike: nothing arrived. Nothing was queued, or the Shortcut's text field is empty."
+    gold, added = list_labels("gold"), 0
+    for link in links:
+        same = [g for g in gold if g["source_url"] == link]
+        if any(g["status"] != "failed" for g in same):
+            continue
+        if same:  # shared again after a failed read: read it again
+            label_id = same[0]["id"]
+            update_label(label_id, status="processing", error=None)
+        else:
+            label_id = save_label({"kind": "gold", "category": "any", "status": "processing", "reasons": "[]",
+                                   "source_url": link})
+        background_tasks.add_task(analyze_gold, label_id)
+        added += 1
+    old = len(links) - added
+    if not added:
+        return "Spike: already a standard." if old == 1 else f"Spike: all {old} are already standards."
+    saved = "saved. Gemini is reading it." if added == 1 else f"saved {added}. Gemini is reading them."
+    return f"Spike: {saved}" + (f" Already standards: {old}." if old else "")
 
 
 @router.post("/settings/standards/{label_id}/delete")

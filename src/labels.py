@@ -159,16 +159,20 @@ def gold_url_ok(url: str) -> bool:
     return p.scheme in ("http", "https") and any(host == h or host.endswith("." + h) for h in GOLD_HOSTS)
 
 
-def shared_link(text: str) -> Optional[str]:
-    """The first allowed link in what a phone's share sheet sent, without its query and fragment: share links carry
-    per-share tracking (?si=, ?igsh=), so the same short would look new each time. A YouTube watch link keeps its v."""
+def shared_links(text: str) -> List[str]:
+    """Every allowed link in what a phone's share sheet sent (the Shortcut sends its whole queue of shares), once each,
+    without its query and fragment: share links carry per-share tracking (?si=, ?igsh=), so the same short would look
+    new each time. A YouTube watch link keeps its v."""
+    links: List[str] = []
     for raw in re.findall(r"https?://[^\s<>\"']+", text or ""):
         url = raw.rstrip(".,!?)")
         if gold_url_ok(url):
             p = urlparse(url)
             v = parse_qs(p.query).get("v")
-            return p._replace(query=urlencode({"v": v[0]}) if v else "", fragment="").geturl()
-    return None
+            url = p._replace(query=urlencode({"v": v[0]}) if v else "", fragment="").geturl()
+            if url not in links:
+                links.append(url)
+    return links
 
 
 def _download(url: str, folder: Path) -> Tuple[Path, Dict[str, Any]]:

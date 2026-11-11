@@ -29,20 +29,25 @@ Settings card stays as it is.
 `POST /settings/standards/share`, admin only, a JSON object such as
 `{"text": "..."}`.
 
-1. Take the first `http(s)` link that passes `gold_url_ok`, from every
-   string in the object under any key, lists included. iOS capitalizes a
-   key typed in Shortcuts (`Text`), and a share can be a list.
+1. Take every `http(s)` link that passes `gold_url_ok`, once each, from
+   every string in the object under any key, lists included. iOS
+   capitalizes a key typed in Shortcuts (`Text`), and a share can be a
+   list. The Shortcut sends its whole queue (see below), so one post can
+   carry many links.
 2. Drop its query string and fragment: share links carry per-share
    tracking (`?si=`, `?igsh=`). A `v` parameter (YouTube watch links) is
    kept.
-3. If a gold label with that link is processing or ready, add nothing.
+3. For each link: if a gold label with it is processing or ready, add nothing.
    If one failed, read it again. Otherwise save a gold label (category
    `any`, no reasons) and start `analyze_gold` in the background.
-4. Reply with one plain-text line for the Shortcut to show:
-   `Saved. Gemini is reading it.`, `Already a standard.`,
-   `No TikTok, YouTube or Instagram link in: <first 80 characters>`, or
-   `Spike got no text...` when nothing arrived. The phone is the only
-   place the Shortcut's builder sees what was sent.
+4. Reply with one plain-text line for the Shortcut to show, always
+   starting with `Spike:`: `Spike: saved 2. Gemini is reading them.`,
+   `Spike: already a standard.`,
+   `Spike: no TikTok, YouTube or Instagram link in: <first 80 characters>`,
+   or `Spike: nothing arrived...`. The phone is the only place the
+   Shortcut's builder sees what was sent. The Shortcut clears its queue
+   only on a reply that starts with `Spike:`, so an error page
+   (`tailscale serve` gives 502 while Spike is down, a 403) keeps it.
 
 **Cross-site posts:** FastAPI 0.142 parses a body as JSON only when the
 `Content-Type` is JSON. A form from another site cannot send that without a
@@ -50,10 +55,24 @@ CORS preflight, which Spike never answers, so it gets 422.
 
 ## Shortcut ("Spike standard")
 
-1. Show in Share Sheet, receives URLs and Text.
-2. Get Contents of URL: `<SPIKE_PUBLIC_URL>/settings/standards/share`,
-   POST, JSON body, field `text` = Shortcut Input.
-3. Show Notification: Contents of URL.
+1. Show in Share Sheet, receives URLs and Text. If there's no input:
+   Continue (run from the Shortcuts app, it sends the queue).
+2. Get File `spike-queue.txt` from the Shortcuts folder, Error If Not
+   Found off.
+3. Text: File, a new line, Shortcut Input.
+4. Save File: that Text as `spike-queue.txt`, overwriting. The share is
+   on the phone before anything is sent.
+5. Get Contents of URL: `<SPIKE_PUBLIC_URL>/settings/standards/share`,
+   POST, JSON body, field `text` = Text.
+6. Show Notification: Contents of URL.
+7. If Contents of URL begins with `Spike:`: Delete Files on Saved File,
+   Confirm Before Deleting off.
+
+**Offline queue (2026-11-11):** while Spike or the PC is off, step 5 fails
+and Shortcuts stops the run (it has no error handling), so the queue file
+keeps the link. The next share sends the old links with the new one.
+Shortcuts' Append to Text File is not used: users report it does not
+create a missing file.
 
 The Standards card shows these steps with Spike's address filled in.
 
