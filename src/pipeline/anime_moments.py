@@ -47,7 +47,7 @@ INTENSITY_PEAKS, SWELL_PEAKS, ACTION_SLOTS = 8, 4, 4
 ACTION_LEN_S = (10.0, 45.0)
 
 ANIME_RENDER_DEFAULTS = {"layout": "letterbox", "letterbox_style": "title", "caption_style": "bold_pop",
-                         "cut_pauses": "off", "music": False}
+                         "cut_pauses": "off", "music": False, "frame": "medium"}
 
 ANIME_GUIDE = """What makes an anime moment work as a short clip for a stranger who never saw the show:
 - a complete joke: the setup and the punchline are both inside the clip, and it ends on the punchline or the reaction to it

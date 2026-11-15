@@ -472,6 +472,27 @@ def layout_segments_for(
     return merged
 
 
+FRAME_RATIOS: Dict[str, Optional[Tuple[int, int]]] = {"fit": None, "medium": (4, 3), "close": (1, 1)}  # width:height of the picture kept; fit keeps all
+
+
+def frame_crop(frame: str, src_w: int, src_h: int) -> Optional[Tuple[int, int]]:
+    """(crop_w, crop_h) of the middle of the source for a frame size, or None when nothing is cropped: fit, an unknown name,
+    or a source already as narrow as the frame. Integer math, and an even width because libx264 needs one."""
+    ratio = FRAME_RATIOS.get(frame)
+    if not ratio:
+        return None
+    num, den = ratio
+    if src_w * den <= src_h * num:
+        return None
+    return src_h * num // den // 2 * 2, src_h
+
+
+def footage_height(frame: str, src_w: int, src_h: int) -> int:
+    """Height in pixels of the letterboxed picture inside the 1080x1920 frame. The title card sits above it."""
+    w, h = frame_crop(frame, src_w, src_h) or (src_w, src_h)
+    return min(OUTPUT_HEIGHT, int(OUTPUT_WIDTH * h / w))
+
+
 def _layout_filters(
     layout: str,
     src: str,
@@ -483,11 +504,12 @@ def _layout_filters(
     facecam_box: Optional[Dict[str, float]],
     letterbox_style: str = "blur",
     zoom_z: str = "",
+    frame: str = "fit",
 ) -> List[str]:
     """Filters turning [src] into a 1080x1920 [dst] for one layout. zoom_z is a zoompan 'z' expression
     ("" for none): split zooms only the facecam panel, every other layout zooms the whole frame."""
     if zoom_z and layout != "split":
-        inner = _layout_filters(layout, src, f"{dst}_nz", src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style)
+        inner = _layout_filters(layout, src, f"{dst}_nz", src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style, "", frame)
         return inner + [f"[{dst}_nz]{_zoompan(zoom_z, OUTPUT_WIDTH, OUTPUT_HEIGHT)}[{dst}]"]
     if layout == "face_track" and sc_rel:
         first_kf = keyframes[0] if keyframes else {"cx_px": src_w / 2, "cy_px": src_h / 2}
@@ -512,14 +534,16 @@ def _layout_filters(
             f"[gp_in]crop={gp_w}:{gp_h}:{gp_x}:{gp_y},scale={OUTPUT_WIDTH}:{SPLIT_GAMEPLAY_H},setsar=1[gameplay]",
             f"[facecam][gameplay]vstack=inputs=2[{dst}]",
         ]
+    crop = frame_crop(frame, src_w, src_h)
+    cut = f"crop={crop[0]}:{crop[1]}," if crop else ""  # the middle of the picture, before it is scaled to the frame width
     if layout == "letterbox" and letterbox_style == "title":  # title card is overlaid after the zoom
         return [
-            f"[{src}]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"[{src}]{cut}scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
             f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1[{dst}]"
         ]
     if layout == "letterbox":
         return [
-            f"[{src}]split=2[bg_in][fg_in]",
+            f"[{src}]{cut}split=2[bg_in][fg_in]",
             f"[bg_in]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},boxblur=20:5,setsar=1[bg]",
             f"[fg_in]scale={OUTPUT_WIDTH}:-1,setsar=1[fg]",
             f"[bg][fg]overlay=(W-w)/2:(H-h)/2[{dst}]",
@@ -555,6 +579,7 @@ def build_vertical_filtergraph(
     title_input: Optional[int] = None,
     bleeps: Optional[List[Tuple[float, float]]] = None,
     sfx_at: Optional[List[Tuple[int, float]]] = None,
+    frame: str = "fit",
 ) -> str:
     """
     Build complete native FFmpeg filtergraph:
@@ -598,7 +623,7 @@ def build_vertical_filtergraph(
     # 2. Layout Transformation. With layout switches, each layout used runs over the whole
     # trimmed clip, then each segment is cut from its layout's output and the pieces joined.
     segments = layout_segments or [(0.0, layout)]
-    lay_args = (src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style, _zoom_expr(zooms) if zooms else "")
+    lay_args = (src_w, src_h, keyframes, sc_rel, facecam_box, letterbox_style, _zoom_expr(zooms) if zooms else "", frame)
     if len(segments) == 1:
         filters += _layout_filters(segments[0][1], "v_trimmed", "v_layout", *lay_args)
     else:
@@ -788,6 +813,8 @@ def run_stage9c_render(
         cut_setting = "off"
     ai_cuts = bool(src_settings.get("ai_cuts", False))  # the AI editor's cuts, apart from pause cutting
     letterbox_style = src_settings.get("letterbox_style", "title")
+    frame = src_settings.get("frame", "fit")
+    frame = frame if frame in FRAME_RATIOS else "fit"
 
     all_words = []
     for seg in transcript.get("segments", []):
@@ -862,6 +889,7 @@ def run_stage9c_render(
             music_track=str(chosen_track_path) if chosen_track_path else None,
             silence_trim=pace,
             letterbox_style=letterbox_style,
+            frame=frame,
             title_text=cand.get("hook_text") or cand.get("title") or "",
             extra_cuts=cand.get("cuts"),
             zooms=cand.get("zooms"),
@@ -894,6 +922,7 @@ def run_stage9c_render(
                     letterbox_style=letterbox_style,
                     cuts=json.dumps(cand.get("cuts") or []),
                     zooms=json.dumps(cand.get("zooms") or []),
+                    frame=frame,
                 )
                 cand["clip_id"] = clip_id
                 if render_info.get("no_face"):
@@ -946,6 +975,7 @@ def render_single_vertical_clip(
     sfx: Optional[List[Dict[str, Any]]] = None,
     info: Optional[Dict[str, Any]] = None,
     caption_language: str = "spoken",
+    frame: str = "fit",
 ) -> bool:
     """
     Renders a single vertical clip from a downloaded section video file.
@@ -957,6 +987,7 @@ def render_single_vertical_clip(
     mid-clip (e.g. a reaction ends and the streamer goes full-cam).
     letterbox_style: "title" draws title_text above the video on white bars while
     letterbox shows; "blur" keeps the blurred fill. The title card replaces the 2.5 s hook.
+    frame: "fit", "medium" (4:3 crop) or "close" (square crop): how much of the picture Letterbox shows. The title card sits above it.
     sfx: [{t, id}] meme sounds at source seconds (src/sfx.py); ones inside a cut are dropped.
     caption_language: "english" shows the captions in English via src/caption_translate.py; the audio and bleeps stay as spoken.
     """
@@ -1020,7 +1051,7 @@ def render_single_vertical_clip(
     title_png: Optional[Path] = None
     if letterbox_style == "title" and "letterbox" in used:
         card_text = _mask_profanity(title_text) if profanity_mask else title_text
-        video_h = min(OUTPUT_HEIGHT, int(OUTPUT_WIDTH * src_h / src_w))
+        video_h = footage_height(frame, src_w, src_h)
         title_png = out_file.parent / f"title_{out_file.stem}.png"
         if render_title_card(card_text, video_h, title_png):
             hook_text = ""  # the card already shows it
@@ -1124,6 +1155,7 @@ def render_single_vertical_clip(
         has_music=has_music,
         layout_segments=segments,
         letterbox_style=letterbox_style,
+        frame=frame,
         title_input=(2 if has_music else 1) if title_png else None,
         bleeps=[(a, b) for a, b in slur_intervals(retimed_words, clip_start) if b > 0 and a < effective_dur],
         sfx_at=sfx_at,
