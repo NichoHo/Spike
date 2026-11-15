@@ -57,8 +57,11 @@ ANIME_GUIDE = """What makes an anime moment work as a short clip for a stranger 
 - an exaggerated reaction or an awkward silence that is funny on its own
 - a moment that shows a well-known anime trope a stranger recognizes (an attack that takes forever to charge, screaming to power up,
   long speeches mid-fight, a villain explaining the plan), even if it happens inside a fight. Label it comedy_beat
-For each clip, write hook_text: a 3 to 8 word question or observation for a stranger (example: "Why do anime attacks take forever?").
-It is not a quote from the clip. It is shown on the title card above the video.
+For each clip, write hooks: three captions for the title card above the video, one per voice, each under 80 characters.
+A hook is not a quote from the clip. Never use slurs or strong profanity.
+- relatable: the clip as an everyday situation, ending in a colon (example: "When the bouncer asks you to leave for the third time:")
+- curious: a question a stranger wants answered (example: "Why do anime attacks take forever?")
+- plain: one line saying what happens (example: "Krillin learns he ranks below dirt")
 Not clips: opening and ending songs, recaps, next-episode previews, exposition, a reply whose question is outside the clip,
 a fight that only matters if you know the plot, and late-series reveals (flag these as spoilers).
 Show context: {genres}; top tags: {tags}; audio: {audio_kind}.
@@ -212,6 +215,21 @@ def clean_llm_text(text: Any, max_len: int) -> str:
     return re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\s]+", " ", str(text or "")).strip()[:max_len]
 
 
+HOOK_VOICES = ("relatable", "curious", "plain")  # the first one that is filled in starts on the title card
+HOOK_MAX = 80  # the Hook title box on the clip page allows 80
+
+
+def pick_hooks(c: AnimeCandidate) -> Tuple[str, Dict[str, str]]:
+    """(the hook the title card starts with, {voice: text} for each voice the judge filled in).
+    An older single hook_text is the fallback when no voice is filled in."""
+    opts: Dict[str, str] = {}
+    for voice in HOOK_VOICES:
+        text = clean_llm_text(getattr(c.hooks, voice), HOOK_MAX)
+        if text:
+            opts[voice] = text
+    return next(iter(opts.values()), clean_llm_text(c.hook_text, HOOK_MAX)), opts
+
+
 def clamp_window(start: float, end: float, duration: float) -> Optional[Tuple[float, float]]:
     """(start, end) inside [0, duration], or None when it is not a real window. Times from subtitles and models are
     never trusted to be in range before they reach ffmpeg."""
@@ -243,8 +261,8 @@ also propose any moment it missed.
 Return JSON {{"candidates": [...]}} with up to {JUDGE_MAX_CANDIDATES} moments, best first. Each candidate has these fields, in this order:
 start, end (MM:SS), setup_line_idx (list of line numbers a stranger needs), punchline_line_idx (one line number), archetype (one of: {", ".join(ANIME_ARCHETYPES)}),
 why (one sentence: why a stranger laughs or cares), scores (integers 0 to 10: self_contained, payoff, setup_present, delivery, quotability),
-needs_prior_context (bool), spoiler (bool), hook_line_idx (line number or null), hook_text, title, hashtags, seed_ids (list of seed ids it covers).
-title: 5 to 12 words naming the main character and what happens. In title and hook_text, spell each name the way the transcript and English-speaking fans do (Goku, Gohan, Krillin), not the database spelling in the cast list below: it can reverse the order or romanize ("Gokuu Son" is Goku, "Kuririn" is Krillin). Never invent a character. Cast, only so you know who is in the show: {characters}.
+needs_prior_context (bool), spoiler (bool), hook_line_idx (line number or null), hooks (an object with relatable, curious and plain), title, hashtags, seed_ids (list of seed ids it covers).
+title: 5 to 12 words naming the main character and what happens. In title and hooks, spell each name the way the transcript and English-speaking fans do (Goku, Gohan, Krillin), not the database spelling in the cast list below: it can reverse the order or romanize ("Gokuu Son" is Goku, "Kuririn" is Krillin). Never invent a character. Cast, only so you know who is in the show: {characters}.
 hashtags: 3 to 6 tags without #, about this show only.
 Be strict: most lines are not clips. Score 9 or 10 only for a moment a stranger would share.
 
@@ -477,9 +495,10 @@ def run_stage7_anime(video_id: int, video_dir: Path, meta: Dict[str, Any], trans
     records: List[Dict[str, Any]] = []
     for c in judged_resp.candidates[:JUDGE_MAX_CANDIDATES]:
         edges, why_not = snap_boundaries(lines, c.setup_line_idx, c.punchline_line_idx, c.hook_line_idx, preset)
+        hook, hooks = pick_hooks(c)
         rec: Dict[str, Any] = {
             "origin": "anime_judge", "humor_type": c.archetype, "reason": clean_llm_text(c.why, 400), "why_funny": clean_llm_text(c.why, 400),
-            "title": clean_llm_text(c.title or c.hook_text, 120), "hook_text": clean_llm_text(c.hook_text, 80),
+            "title": clean_llm_text(c.title or hook, 120), "hook_text": hook, "hook_options": hooks,
             "needs_context": c.needs_prior_context,
             "hashtags": finalize_hashtags(anime, c.archetype, c.hashtags),
             "music": False, "pace": "natural", "cuts": [], "zooms": [], "seed_ids": c.seed_ids,

@@ -121,6 +121,18 @@ class AnimeScores(BaseModel):
     quotability: int = Field(ge=0, le=10)
 
 
+class AnimeHooks(BaseModel):
+    """The three hook captions for one clip, one per voice. The title card starts with the first one that is filled in."""
+    relatable: str = Field(default="", description='The clip as an everyday situation, ending in a colon: "When your boss says quick question:"')
+    curious: str = Field(default="", description="A question a stranger wants answered")
+    plain: str = Field(default="", description="One line saying what happens")
+
+    @field_validator("relatable", "curious", "plain", mode="before")
+    @classmethod
+    def _text(cls, v):
+        return "" if v is None else str(v)
+
+
 class AnimeCandidate(BaseModel):
     """One anime moment from the whole-episode text judge. `why` comes before `scores` so the model explains first."""
     start: str = Field(default="", description="MM:SS, informational; the line numbers decide the edges")
@@ -133,7 +145,13 @@ class AnimeCandidate(BaseModel):
     needs_prior_context: bool = False
     spoiler: bool = False
     hook_line_idx: Optional[int] = None
-    hook_text: str = Field(default="", description="3 to 8 word question or observation for a stranger, not a quote")
+    hooks: AnimeHooks = Field(default_factory=AnimeHooks, description="Three hook captions, under 80 characters each")
+    hook_text: str = Field(default="", description="Older single hook; the judge now fills hooks")
+
+    @field_validator("hooks", mode="before")
+    @classmethod
+    def _hooks(cls, v):
+        return v if isinstance(v, dict) else {}
     title: str = Field(default="", description="5 to 12 words: name the main character and say what happens")
     hashtags: List[str] = Field(default_factory=list, description="Genre and show tags without #")
     seed_ids: List[str] = Field(default_factory=list)
