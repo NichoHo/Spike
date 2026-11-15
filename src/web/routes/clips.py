@@ -19,6 +19,7 @@ from starlette.status import HTTP_404_NOT_FOUND, HTTP_303_SEE_OTHER
 
 from src.concepts import CONCEPTS
 from src.config import SILENCE_TRIM_S, VIDEOS_DIR
+from src.caption_translate import save_lines
 from src.cleanup import delete_rejected_clip_files
 from src.labels import REJECT_TAGS, record_verdict
 from src.db import (
@@ -349,6 +350,14 @@ def _parse_layout_changes(raw: str, start_s: float, end_s: float) -> list:
     return sorted(out, key=lambda c: c["t"])
 
 
+def _english_lines(clip: Dict[str, Any]) -> Optional[List[Dict[str, str]]]:
+    """The English caption lines of the clip's current render, or None when it has no sidecar."""
+    try:
+        return json.loads(Path(clip["file_path"]).with_suffix(".en.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 @router.get("/clips/{clip_id}/captions")
 async def get_clip_captions(
     clip_id: int,
@@ -361,8 +370,11 @@ async def get_clip_captions(
     if not clip_row:
         raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Clip not found.")
     clip = dict(clip_row)
+    sidecar = _english_lines(clip)
+    if clip.get("caption_language") == "english" and sidecar is not None:
+        return {"text": "\n".join(l["en"] for l in sidecar), "language": "english"}
     words = _load_words(VIDEOS_DIR / str(clip["video_id"]), clip["candidate_id"])
-    return {"text": " ".join(w["word"].strip() for w in words if _in_window(w, start_s, end_s))}
+    return {"text": " ".join(w["word"].strip() for w in words if _in_window(w, start_s, end_s)), "language": "spoken"}
 
 
 @router.post("/clips/{clip_id}/rerender")
@@ -381,6 +393,7 @@ async def rerender_clip_action(
     silence_trim: bool = Form(False),
     silence_trim_s: float = Form(SILENCE_TRIM_S),  # cut pauses longer than this
     caption_text: Optional[str] = Form(None),
+    caption_text_language: str = Form("spoken"),  # "english" when caption_text holds fixed English lines
     layout_changes: str = Form(""),
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     zooms: Optional[str] = Form(None),    # JSON [{t, scale, hold_s}]; absent keeps the stored list
@@ -411,6 +424,18 @@ async def rerender_clip_action(
             status_code=HTTP_404_NOT_FOUND,
             detail="Section source file for this clip is missing on disk."
         )
+
+    if caption_text_language == "english" and caption_text is not None:
+        lines = _english_lines(clip)
+        if lines is None:
+            raise HTTPException(status_code=400, detail="Re-render in English first.")
+        edited = [l.strip() for l in caption_text.splitlines()]
+        if len(edited) != len(lines):
+            raise HTTPException(status_code=400, detail=f"Keep one line per caption line ({len(lines)} lines).")
+        if any(len(l) > 200 for l in edited):
+            raise HTTPException(status_code=400, detail="A caption line can be at most 200 characters.")
+        save_lines(VIDEOS_DIR / str(clip["video_id"]), {l["key"]: new for l, new in zip(lines, edited) if new != l["en"]})
+        caption_text = None  # the store holds the fix; the spoken-text retiming must not run
 
     params = dict(
         start_s=start_s, end_s=end_s, layout=layout, caption_style=caption_style, caption_language=caption_language, hook_text=hook_text or "",

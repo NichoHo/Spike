@@ -315,6 +315,7 @@
             {{ ui.caption_picker('caption', clip.caption_style or 'bold_pop') }}
             {{ ui.caption_language_picker('caplang', clip.caption_language) }}
             <input type="hidden" name="caption_text" id="caption-text-field" disabled>
+            <input type="hidden" name="caption_text_language" id="caption-text-language" disabled>
             <button type="button" class="btn btn--secondary btn--sm" id="btn-edit-captions" style="margin-top: var(--space-2); align-self: flex-start;" onclick="openCaptionEditor()">
               {{ ui.icon("pencil-simple", 14) }}
               <span>Edit caption text</span>
@@ -491,6 +492,7 @@
       <div class="card__header">
         <h3 class="card__title">Edit caption text</h3>
         <p class="card__description">Fix words below while the clip plays on the left. The new text applies when you re-render.</p>
+        <p class="field__help" id="captions-en-help" hidden>One line per caption line. Clear a line to hide it.</p>
       </div>
       <div class="card__body" style="flex: 1; display: flex;">
         <textarea id="captions-textarea" class="input" style="flex: 1; width: 100%; min-height: 360px; font-size: 16px; line-height: 26px; resize: none;" aria-label="Caption text"></textarea>
@@ -736,6 +738,7 @@ document.getElementById("approve-schedule")?.addEventListener("click", (e) => {
 
 <script>
 let captionsOriginal = '';
+let captionsLanguage = 'spoken';
 // The caption panel takes over the whole right column; the player on the left stays playable.
 function setCaptionPanel(open) {
   document.querySelectorAll('.inspector > :not(#captions-panel)').forEach((el) => { el.hidden = open; });
@@ -751,7 +754,10 @@ async function openCaptionEditor() {
   try {
     const r = await fetch(`/clips/{{ clip.id }}/captions?start_s=${s}&end_s=${e}`);
     if (!r.ok) throw new Error();
-    captionsOriginal = (await r.json()).text;
+    const data = await r.json();
+    captionsOriginal = data.text;
+    captionsLanguage = data.language || 'spoken';
+    document.getElementById('captions-en-help').hidden = captionsLanguage !== 'english';
     const saved = document.getElementById('caption-text-field');
     ta.value = saved.disabled ? captionsOriginal : saved.value;   // text saved earlier, not re-rendered yet
   } catch (_) {
@@ -761,11 +767,16 @@ async function openCaptionEditor() {
 }
 // Save keeps the text in the re-render form; the Re-render button at the bottom applies it
 function saveCaptions() {
-  const text = document.getElementById('captions-textarea').value.trim();
+  const raw = document.getElementById('captions-textarea').value;
+  // English lines are positional, so a cleared line must stay as an empty line
+  const text = captionsLanguage === 'english' ? raw.replace(/\s+$/, '') : raw.trim();
   const f = document.getElementById('caption-text-field');
-  const changed = Boolean(text) && text !== captionsOriginal;
+  const lang = document.getElementById('caption-text-language');
+  const changed = (Boolean(text) || captionsLanguage === 'english') && text !== captionsOriginal;
   f.value = changed ? text : '';
   f.disabled = !changed;
+  lang.value = captionsLanguage;
+  lang.disabled = !changed;
   setCaptionPanel(false);
   updateDirty();
   if (changed) showToast('Caption text saved. Re-render to apply it.');

@@ -154,3 +154,46 @@ def test_review_page_keeps_a_rerendering_clip_with_a_spinner(env):
     set_clip_render_state(env["clip"], "ready")
     html = env["c"].get("/").text
     assert "clip-card--rendering" not in html and f'href="/clips/{env["clip"]}"' in html
+
+
+def _english_clip(env, monkeypatch):
+    """Re-render the fixture clip in English with a fake translator; returns the form and the sidecar lines."""
+    import src.caption_translate as ct
+    monkeypatch.setattr("src.pipeline.stage7_moments.clip_video_part", lambda *a, **k: None)
+    def fake_ask(prompt, part=None):
+        n = int(re.search(r"exactly (\d+) strings", prompt).group(1))
+        return [f"english line {i}" for i in range(n)]
+    monkeypatch.setattr(ct, "_ask", fake_ask)
+    form = {"start_s": "27", "end_s": "36", "layout": "letterbox", "caption_style": "bold_pop", "layout_changes": "[]",
+            "caption_language": "english"}
+    assert env["c"].post(f"/clips/{env['clip']}/rerender", data=form, follow_redirects=False).status_code == 303
+    clip = get_clip(env["clip"])
+    lines = json.loads(Path(clip["file_path"]).with_suffix(".en.json").read_text(encoding="utf-8"))
+    return form, lines
+
+
+def test_english_caption_lines_can_be_fixed_and_the_fix_is_kept(env, monkeypatch):
+    form, lines = _english_clip(env, monkeypatch)
+    assert len(lines) >= 2
+    got = env["c"].get(f"/clips/{env['clip']}/captions?start_s=27&end_s=36").json()
+    assert got == {"text": "\n".join(l["en"] for l in lines), "language": "english"}
+
+    edited = [l["en"] for l in lines]
+    edited[0] = "Yo that's wild"
+    data = {**form, "caption_text": "\n".join(edited), "caption_text_language": "english"}
+    assert env["c"].post(f"/clips/{env['clip']}/rerender", data=data, follow_redirects=False).status_code == 303
+    clip = get_clip(env["clip"])
+    store = json.loads((Path(clip["file_path"]).parents[1] / "captions_en.json").read_text(encoding="utf-8"))
+    assert store[lines[0]["key"]] == "Yo that's wild"
+    assert "YO" in Path(clip["file_path"]).with_suffix(".ass").read_text(encoding="utf-8")
+
+    short = {**data, "caption_text": "\n".join(edited[:-1])}
+    res = env["c"].post(f"/clips/{env['clip']}/rerender", data=short, follow_redirects=False)
+    assert res.status_code == 400 and "one line per caption line" in res.json()["detail"]
+    long = {**data, "caption_text": "\n".join(["x" * 201] + edited[1:])}
+    assert env["c"].post(f"/clips/{env['clip']}/rerender", data=long, follow_redirects=False).status_code == 400
+
+
+def test_spoken_clip_captions_keep_the_space_joined_text(env):
+    got = env["c"].get(f"/clips/{env['clip']}/captions?start_s=27&end_s=36").json()
+    assert got["language"] == "spoken" and "\n" not in got["text"] and got["text"].startswith("w")
