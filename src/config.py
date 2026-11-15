@@ -79,6 +79,9 @@ JUDGE_GEMINI_MODEL = os.environ.get("SPIKE_JUDGE_MODEL", FALLBACK_GEMINI_MODEL)
 # The "auto" framing layout runs on Flash-Lite: the judge's Flash quota is tiny (it ran out after 16 requests on
 # 2026-10-15) and layout calls must not eat it. Set SPIKE_LAYOUT_MODEL=<flash model> to compare quality.
 LAYOUT_GEMINI_MODEL = os.environ.get("SPIKE_LAYOUT_MODEL", DEFAULT_GEMINI_MODEL)
+# English captions (src/caption_translate.py) run on Flash-Lite: one call per English clip would use up Flash's
+# small daily quota, which the judge needs. Set SPIKE_TRANSLATE_MODEL to the Flash model for better slang.
+TRANSLATE_GEMINI_MODEL = os.environ.get("SPIKE_TRANSLATE_MODEL", DEFAULT_GEMINI_MODEL)
 # Gemini does not report remaining quota, so Spike counts its own requests per model (src/gemini_budget.py)
 # against this hardcoded daily limit. At 0 for the layout model, "auto" falls back to the face-size heuristic
 # until the day resets. A guess: set it just under your key's real per-model daily limit.
