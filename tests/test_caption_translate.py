@@ -1,6 +1,9 @@
 """English captions (docs/superpowers/plans/2026-11-16-english-captions.md)."""
 
 import json
+import subprocess
+
+import pytest
 
 from src import caption_translate as ct
 
@@ -101,10 +104,6 @@ def test_a_clip_part_that_cannot_be_built_falls_back_to_text_only(tmp_path):
 
 # --- rendering ---------------------------------------------------------------------------------------------------
 
-import subprocess
-
-import pytest
-
 SPOKEN = [{"word": " anjir", "start": 28.0, "end": 28.3}, {"word": " gila", "start": 28.4, "end": 28.8},
           {"word": " nigga", "start": 30.0, "end": 30.4}]
 
@@ -151,6 +150,9 @@ def test_english_render_shows_english_and_keeps_spoken_bleeps(render_env, monkey
 def test_failed_translation_renders_spoken_and_warns(render_env, monkeypatch):
     from src.db import get_connection
     monkeypatch.setattr(ct, "_ask", lambda prompt, part=None: None)
+    stale = render_env["dir"] / "out" / "clip.en.json"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text("[]", encoding="utf-8")
     out, ass = render_env["render"]("english")
     assert "ANJIR" in ass and not out.with_suffix(".en.json").exists()
     with get_connection() as conn:

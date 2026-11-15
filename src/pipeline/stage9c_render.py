@@ -1052,6 +1052,7 @@ def render_single_vertical_clip(
 
     # English captions: only the text changes. Bleeps below still use the spoken words, because the audio is spoken.
     shown_words = retimed_words
+    out_file.with_suffix(".en.json").unlink(missing_ok=True)  # the sidecar must always describe this render
     if caption_language == "english" and retimed_words:
         from src.caption_translate import english_words
         from src.pipeline.stage7_moments import clip_video_part
