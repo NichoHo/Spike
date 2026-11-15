@@ -232,6 +232,16 @@
   </div>
 {%- endmacro %}
 
+{% macro caption_language_picker(prefix, current) -%}
+  <span class="field__label" id="{{ prefix }}-lbl" style="margin-top: var(--space-3);">Caption language</span>
+  <div class="segmented" role="radiogroup" aria-labelledby="{{ prefix }}-lbl">
+    {%- for v, label in [("spoken", "As spoken"), ("english", "English")] %}
+    <input type="radio" name="caption_language" id="{{ prefix }}-{{ v }}" value="{{ v }}" {% if (current or 'spoken') == v %}checked{% endif %}><label for="{{ prefix }}-{{ v }}">{{ label }}</label>
+    {%- endfor %}
+  </div>
+  <p class="field__help">As spoken shows the words as said, in any language. English translates everything else into casual English and keeps what was already said in English.</p>
+{%- endmacro %}
+
 {# How a job renders its clips: the New page and the source form share this. `p` has the keys of moment_render.DEFAULT_PRESETS.
    The wrapper gets applyPresets(p), which the New page calls when a source is picked. #}
 {% macro render_presets(prefix, p, mood=none) -%}
@@ -250,6 +260,7 @@
       </label>
       <div class="js-caption-opts" style="margin-top: var(--space-2);">
         {{ caption_picker(prefix ~ '-caption', p.caption_style) }}
+        {{ caption_language_picker(prefix ~ '-caplang', p.caption_language) }}
       </div>
     </div>
 
@@ -303,7 +314,7 @@
       root.addEventListener('change', sync);
       root.applyPresets = (p) => {
         const pick = (name, v) => root.querySelectorAll(`input[name="${name}"]`).forEach((r) => { r.checked = r.value === v; });
-        pick('layout', p.layout); pick('caption_style', p.caption_style); pick('cut_pauses', p.cut_pauses);
+        pick('layout', p.layout); pick('caption_style', p.caption_style); pick('caption_language', p.caption_language || 'spoken'); pick('cut_pauses', p.cut_pauses);
         pick('music', p.music === 'auto' ? 'auto' : p.music ? 'on' : 'off');
         root.querySelector('input[name="captions"]').checked = Boolean(p.captions);
         root.querySelector('input[name="ai_cuts"]').checked = Boolean(p.ai_cuts);

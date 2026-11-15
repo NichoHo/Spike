@@ -373,6 +373,7 @@ async def rerender_clip_action(
     end_s: float = Form(...),
     layout: str = Form("split"),
     caption_style: str = Form("bold_pop"),
+    caption_language: str = Form("spoken"),
     hook_text: Optional[str] = Form(""),
     show_hook: bool = Form(False),
     music_enabled: bool = Form(False),
@@ -402,6 +403,8 @@ async def rerender_clip_action(
         return RedirectResponse(url=f"/clips/{clip_id}", status_code=HTTP_303_SEE_OTHER)
     if concept is not None and concept not in CONCEPTS:
         raise HTTPException(status_code=400, detail="Unknown concept.")
+    if caption_language not in ("spoken", "english"):
+        raise HTTPException(status_code=400, detail="Unknown caption language.")
     # A clip that is, or becomes, a concept clip is cut from per-segment sections made inside the job
     if (concept or clip.get("concept") or "single") == "single" and (clip.get("concept") or "single") == "single" and not _section_file(clip).exists():
         raise HTTPException(
@@ -410,7 +413,7 @@ async def rerender_clip_action(
         )
 
     params = dict(
-        start_s=start_s, end_s=end_s, layout=layout, caption_style=caption_style, hook_text=hook_text or "",
+        start_s=start_s, end_s=end_s, layout=layout, caption_style=caption_style, caption_language=caption_language, hook_text=hook_text or "",
         show_hook=show_hook, music_enabled=music_enabled, music_track=music_track, silence_trim=silence_trim,
         silence_trim_s=min(5.0, max(0.5, silence_trim_s)), caption_text=caption_text, layout_changes=layout_changes, letterbox_style=letterbox_style,
         zooms=_json_list(zooms), cuts=_json_list(cuts), sfx=_json_list(sfx),
@@ -446,6 +449,7 @@ async def ai_edit_clip_action(
     params = dict(
         start_s=clip.get("trim_start_s") or clip["orig_start_s"], end_s=clip.get("trim_end_s") or clip["orig_end_s"],
         layout=clip.get("layout") or "split", caption_style=clip.get("caption_style") or "bold_pop",
+        caption_language=clip.get("caption_language") or "spoken",
         hook_text=clip.get("cand_hook") or "", show_hook=clip.get("show_hook") == 1,
         music_enabled=bool(clip.get("music_track")), music_track=clip.get("music_track"),
         silence_trim=clip.get("silence_trim") == 1, silence_trim_s=clip.get("silence_trim_s"), caption_text=None, layout_changes=clip.get("layout_changes") or "",
@@ -587,7 +591,7 @@ def _render_concept_version(clip: Dict[str, Any], p: Dict[str, Any], concept: st
         concept=concept, segs=segs, overlay=overlay, title=clip.get("cand_title") or "",
         hook_text=(p["hook_text"] or clip.get("cand_hook") or "").strip(), video_dir=video_dir, meta=meta,
         cand_id=clip["candidate_id"], all_words=_load_words(video_dir, clip["candidate_id"]), layout=p["layout"],
-        caption_style=p["caption_style"], facecam_box=None, profanity_mask=True,
+        caption_style=p["caption_style"], caption_language=p.get("caption_language", "spoken"), facecam_box=None, profanity_mask=True,
         letterbox_style=p["letterbox_style"] if p["letterbox_style"] in ("title", "blur") else "blur",
         out_file=out_file, thumb_file=thumb_file,
     )
@@ -708,6 +712,7 @@ def _rerender_job(
                 clip_end=end_s,
                 layout=p["layout"],
                 caption_style=p["caption_style"],
+                caption_language=p.get("caption_language", "spoken"),
                 hook_text=clean_hook if p["show_hook"] else "",
                 all_words=all_words,
                 music_track=chosen_music_str,
@@ -742,6 +747,7 @@ def _rerender_job(
         thumb_path=str(new_thumb_file),
         layout=p["layout"],
         caption_style=p["caption_style"],
+        caption_language=p.get("caption_language", "spoken"),
         trim_start_s=start_s,
         trim_end_s=end_s,
         music_track=chosen_music_str,
@@ -771,5 +777,5 @@ def _rerender_job(
                 pass
     if clean_hook and clean_hook != (clip.get("cand_hook") or ""):
         update_candidate_hook(cand_id, clean_hook)
-    log_event("info", f"Clip #{clip_id} re-rendered (v{new_version}, {concept}, {p['layout']}, {p['caption_style']}) by {user_login}")
+    log_event("info", f"Clip #{clip_id} re-rendered (v{new_version}, {concept}, {p['layout']}, {p['caption_style']}, {p.get('caption_language', 'spoken')}) by {user_login}")
     _push_render_event(user_login, clip_id, clip_title, True, face_note)

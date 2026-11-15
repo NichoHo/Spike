@@ -313,6 +313,7 @@
           <div class="field">
             <span class="field__label">Caption style</span>
             {{ ui.caption_picker('caption', clip.caption_style or 'bold_pop') }}
+            {{ ui.caption_language_picker('caplang', clip.caption_language) }}
             <input type="hidden" name="caption_text" id="caption-text-field" disabled>
             <button type="button" class="btn btn--secondary btn--sm" id="btn-edit-captions" style="margin-top: var(--space-2); align-self: flex-start;" onclick="openCaptionEditor()">
               {{ ui.icon("pencil-simple", 14) }}

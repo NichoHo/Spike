@@ -85,7 +85,7 @@ async def new_job_page(
 
 
 def parse_presets(layout: str, captions: Optional[str], music: str, cut_pauses: str, letterbox_style: str,
-                  caption_style: str, ai_cuts: Optional[str] = None) -> Dict[str, Any]:
+                  caption_style: str, ai_cuts: Optional[str] = None, caption_language: str = "spoken") -> Dict[str, Any]:
     """Render options from the New page or the source form, in the shape a job's settings use.
     Switches send their value when on and nothing when off. Profanity is always masked."""
     if (
@@ -93,6 +93,7 @@ def parse_presets(layout: str, captions: Optional[str], music: str, cut_pauses: 
         or music not in ("auto", "on", "off")
         or cut_pauses not in ("auto", "natural", "off")
         or caption_style not in ("bold_pop", "karaoke", "clean")
+        or caption_language not in ("spoken", "english")
     ):
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid processing option.")
     return {
@@ -104,6 +105,7 @@ def parse_presets(layout: str, captions: Optional[str], music: str, cut_pauses: 
         "music": "auto" if music == "auto" else music == "on",
         "cut_pauses": cut_pauses,
         "ai_cuts": ai_cuts not in (None, "off"),
+        "caption_language": caption_language,
     }
 
 
@@ -228,6 +230,7 @@ async def submit_new_job(
     ai_cuts: Optional[str] = Form(None),  # switch: "on" when on
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
     caption_style: str = Form("bold_pop"),
+    caption_language: str = Form("spoken"),
     kind: str = Form("stream"),  # "stream" or "anime"; only the Paste URL and Upload tabs send it
     anime_audio: str = Form("sub"),
     anime_id: str = Form(""),
@@ -259,7 +262,7 @@ async def submit_new_job(
         raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Invalid video type.")
     anime = kind == "anime" and tab in ("url", "upload")
     # Anime jobs ignore the stream render presets: the runner applies the anime defaults (letterbox, no added music, no pause cuts)
-    settings = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style, ai_cuts) if layout and not anime else {}
+    settings = parse_presets(layout, captions, music, cut_pauses, letterbox_style, caption_style, ai_cuts, caption_language) if layout and not anime else {}
     if anime:
         settings["anime"] = build_anime_settings(anime_audio, anime_id, anime_episode, anime_hardsubbed, anime_title_match,
                                                  anime_youtube_url, anime_youtube_offset)

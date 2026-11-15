@@ -20,10 +20,19 @@ def test_source_presets_use_the_saved_ones_else_the_old_columns():
 def test_switches_count_as_on_only_when_sent_and_profanity_is_always_masked():
     p = parse_presets("split", None, "on", "off", "title", "karaoke")
     assert p == {"layout": "split", "letterbox_style": "title", "captions": False, "caption_style": "karaoke",
-                 "profanity_mask": True, "music": True, "cut_pauses": "off", "ai_cuts": False}
+                 "profanity_mask": True, "music": True, "cut_pauses": "off", "ai_cuts": False,
+                 "caption_language": "spoken"}
     assert parse_presets("auto", "on", "auto", "auto", "blur", "bold_pop")["captions"] is True
     with pytest.raises(HTTPException):
         parse_presets("nope", "on", "auto", "auto", "blur", "bold_pop")
+
+
+def test_caption_language_is_spoken_or_english():
+    assert parse_presets("auto", "on", "auto", "off", "blur", "bold_pop", None, "english")["caption_language"] == "english"
+    with pytest.raises(HTTPException) as e:
+        parse_presets("auto", "on", "auto", "off", "blur", "bold_pop", None, "french")
+    assert e.value.status_code == 400
+    assert source_presets({"presets": json.dumps({"layout": "auto"})})["caption_language"] == "spoken"
 
 
 def test_a_new_source_starts_on_auto():

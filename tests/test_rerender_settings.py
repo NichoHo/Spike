@@ -91,6 +91,23 @@ def test_rerender_applies_every_setting(env, monkeypatch):
     assert env["c"].get(f"/media/clip/{env['clip']}/stream").headers["cache-control"] == "no-cache"
 
 
+def test_rerender_keeps_the_caption_language_and_rejects_an_unknown_one(env, monkeypatch):
+    import src.caption_translate as ct
+    monkeypatch.setattr("src.pipeline.stage7_moments.clip_video_part", lambda *a, **k: None)
+    def fake_ask(prompt, part=None):
+        n = int(re.search(r"exactly (\d+) strings", prompt).group(1))
+        return [f"english line {i}" for i in range(n)]
+    monkeypatch.setattr(ct, "_ask", fake_ask)
+    form = {"start_s": "28", "end_s": "35", "layout": "letterbox", "caption_style": "bold_pop", "layout_changes": "[]"}
+    bad = env["c"].post(f"/clips/{env['clip']}/rerender", data={**form, "caption_language": "klingon"}, follow_redirects=False)
+    assert bad.status_code == 400
+    ok = env["c"].post(f"/clips/{env['clip']}/rerender", data={**form, "caption_language": "english"}, follow_redirects=False)
+    assert ok.status_code == 303
+    assert get_clip(env["clip"])["caption_language"] == "english"
+    html = env["c"].get(f"/clips/{env['clip']}").text
+    assert re.search(r'value="english"\s+checked', html)
+
+
 def test_face_track_with_no_face_falls_back_to_the_previous_layout(env):
     res = env["c"].post(f"/clips/{env['clip']}/rerender", data={
         "start_s": "28", "end_s": "35", "layout": "face_track", "caption_style": "bold_pop", "layout_changes": "[]",
