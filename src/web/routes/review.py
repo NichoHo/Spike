@@ -209,6 +209,7 @@ async def clip_detail(
             "silence_trim_s": clip.get("silence_trim_s") or SILENCE_TRIM_S,
             "zooms": zooms,
             "ai_edits": list_clip_ai_edits(clip_id),
+            "hook_options": json.loads(cand["hook_options"]) if cand and cand["hook_options"] else {},
             "concept": concept,
             "c_segments": c_segments,
             "overlay": json.loads(clip.get("overlay") or "{}"),

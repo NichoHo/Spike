@@ -34,7 +34,7 @@ from src.db import (
     list_review_clips,
     log_event,
 )
-from src.pipeline.stage9c_render import SWITCH_LAYOUTS, render_single_vertical_clip
+from src.pipeline.stage9c_render import FRAME_RATIOS, SWITCH_LAYOUTS, render_single_vertical_clip
 from src import claude_fallback, gemini_budget
 from src.web.auth import get_current_user, require_admin
 
@@ -398,6 +398,7 @@ async def rerender_clip_action(
     caption_text_language: str = Form("spoken"),  # "english" when caption_text holds fixed English lines
     layout_changes: str = Form(""),
     letterbox_style: str = Form("blur"),  # the toggle sends "title" when on
+    frame: str = Form("fit"),             # fit, medium or close; anything else is fit
     zooms: Optional[str] = Form(None),    # JSON [{t, scale, hold_s}]; absent keeps the stored list
     cuts: Optional[str] = Form(None),     # JSON [[start_s, end_s]]; absent keeps the stored cuts
     sfx: Optional[str] = Form(None),      # JSON [{t, id}] meme sounds; absent keeps the stored ones
@@ -444,7 +445,7 @@ async def rerender_clip_action(
     params = dict(
         start_s=start_s, end_s=end_s, layout=layout, caption_style=caption_style, caption_language=caption_language, hook_text=hook_text or "",
         show_hook=show_hook, music_enabled=music_enabled, music_track=music_track, silence_trim=silence_trim,
-        silence_trim_s=min(5.0, max(0.5, silence_trim_s)), caption_text=caption_text, layout_changes=layout_changes, letterbox_style=letterbox_style,
+        silence_trim_s=min(5.0, max(0.5, silence_trim_s)), caption_text=caption_text, layout_changes=layout_changes, letterbox_style=letterbox_style, frame=frame if frame in FRAME_RATIOS else "fit",
         zooms=_json_list(zooms), cuts=_json_list(cuts), sfx=_json_list(sfx),
         concept=concept, segments=_json_list(segments), overlay=_json_dict(overlay), theme=theme,
         concept_source=concept_source if concept_source in ("ai", "user") else None,
@@ -482,7 +483,7 @@ async def ai_edit_clip_action(
         hook_text=clip.get("cand_hook") or "", show_hook=clip.get("show_hook") == 1,
         music_enabled=bool(clip.get("music_track")), music_track=clip.get("music_track"),
         silence_trim=clip.get("silence_trim") == 1, silence_trim_s=clip.get("silence_trim_s"), caption_text=None, layout_changes=clip.get("layout_changes") or "",
-        letterbox_style=clip.get("letterbox_style") or "blur", zooms=None, cuts=None, sfx=None,
+        letterbox_style=clip.get("letterbox_style") or "blur", frame=clip.get("frame") or "fit", zooms=None, cuts=None, sfx=None,
     )
     set_clip_render_state(clip_id, "rendering")
     background_tasks.add_task(
@@ -749,6 +750,7 @@ def _rerender_job(
                 silence_trim_s=p.get("silence_trim_s"),
                 layout_changes=switches,
                 letterbox_style=letterbox_style,
+                frame=p.get("frame", "fit"),
                 title_text=clean_hook or clip.get("cand_title") or "",
                 extra_cuts=cuts,
                 zooms=zooms,
@@ -785,6 +787,7 @@ def _rerender_job(
         status="ready",
         show_hook=1 if p["show_hook"] and clean_hook and not is_concept else 0,
         letterbox_style=letterbox_style,
+        frame=p.get("frame", "fit"),
         cuts=json.dumps(cuts),
         zooms=json.dumps(zooms),
         concept=concept,

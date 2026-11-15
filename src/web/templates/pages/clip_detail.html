@@ -277,6 +277,16 @@
             <p class="field__help">Auto lets the AI pick the layout and any switches again when you re-render, replacing the switches below.</p>
           </div>
 
+          <div class="field">
+            <label class="field__label" for="field-frame">Frame</label>
+            <select name="frame" id="field-frame" class="select">
+              {% for value, label in [('fit', 'Fit: the whole picture'), ('medium', 'Medium: 4:3 crop'), ('close', 'Close: square crop')] %}
+              <option value="{{ value }}" {% if (clip.frame or 'fit') == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <p class="field__help">How much of the picture Letterbox shows. Medium and Close crop the sides.</p>
+          </div>
+
           <div class="field" data-for="single">
             <div class="field-head">
               <span class="field__label">Layout switches</span>
@@ -303,6 +313,23 @@
           <div class="field" data-for="single story top3 top5">
             <label class="field__label" for="field-hook-text">Hook title</label>
             <input type="text" name="hook_text" id="field-hook-text" class="input" value="{{ clip.cand_hook or '' }}" maxlength="80" placeholder="Short funny summary of the clip…">
+            {% if hook_options %}
+            <div class="chip-row" role="group" aria-label="Hook suggestions" style="margin-top: var(--space-2);" data-hook-chips>
+              {% for voice, label in [('relatable', 'Relatable'), ('curious', 'Question'), ('plain', 'Plain')] if hook_options.get(voice) %}
+              <button type="button" class="chip{% if hook_options[voice] == clip.cand_hook %} is-on{% endif %}" data-hook="{{ hook_options[voice] }}" aria-pressed="{{ 'true' if hook_options[voice] == clip.cand_hook else 'false' }}" title="{{ hook_options[voice] }}">{{ label }}: {{ hook_options[voice] }}</button>
+              {% endfor %}
+            </div>
+            <p class="field__help">Click one to use it, or type your own above. Re-render to apply.</p>
+            <script>
+            (() => {
+              const input = document.getElementById('field-hook-text');
+              const chips = document.querySelectorAll('[data-hook-chips] .chip');
+              const sync = () => chips.forEach((c) => { const on = c.dataset.hook === input.value.trim(); c.classList.toggle('is-on', on); c.setAttribute('aria-pressed', String(on)); });
+              chips.forEach((c) => c.addEventListener('click', () => { input.value = c.dataset.hook; input.dispatchEvent(new Event('input', { bubbles: true })); }));
+              input.addEventListener('input', sync);
+            })();
+            </script>
+            {% endif %}
             <label class="switch-row" style="margin-top: var(--space-2);">
               <input type="checkbox" name="show_hook" class="switch" role="switch" value="1" {% if clip.show_hook == 1 %}checked{% endif %}>
               <span>Show on video (top, first 2.5 s)</span>

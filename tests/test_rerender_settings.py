@@ -218,3 +218,23 @@ def test_english_lines_ignores_a_sidecar_of_the_wrong_shape(tmp_path):
 def test_spoken_clip_captions_keep_the_space_joined_text(env):
     got = env["c"].get(f"/clips/{env['clip']}/captions?start_s=27&end_s=36").json()
     assert got["language"] == "spoken" and "\n" not in got["text"] and got["text"].startswith("w")
+
+
+def test_frame_is_saved_with_the_re_render_and_a_bad_value_means_fit(env):
+    form = {"start_s": "28", "end_s": "35", "layout": "letterbox", "letterbox_style": "title", "caption_style": "bold_pop",
+            "hook_text": "When the test passes:", "layout_changes": "[]"}
+    assert env["c"].post(f"/clips/{env['clip']}/rerender", data={**form, "frame": "close"}, follow_redirects=False).status_code == 303
+    assert get_clip(env["clip"])["frame"] == "close"
+    assert '<option value="close" selected>' in env["c"].get(f"/clips/{env['clip']}").text
+    env["c"].post(f"/clips/{env['clip']}/rerender", data={**form, "frame": "huge"}, follow_redirects=False)
+    assert get_clip(env["clip"])["frame"] == "fit"
+
+
+def test_clip_page_offers_the_three_hooks_and_still_takes_any_text(env):
+    assert "data-hook-chips" not in env["c"].get(f"/clips/{env['clip']}").text  # a clip without options shows none
+    opts = {"relatable": "When the dirt wins:", "curious": "Why is Krillin below the dirt?", "plain": "Krillin ranks below dirt"}
+    with get_connection() as conn:
+        conn.execute("UPDATE candidates SET hook_options = ? WHERE id = ?", (json.dumps(opts), env["cand"]))
+    html = env["c"].get(f"/clips/{env['clip']}").text
+    assert html.count("data-hook=") == 3 and 'data-hook="When the dirt wins:"' in html
+    assert 'name="hook_text"' in html  # Other: the box is still there for any text
