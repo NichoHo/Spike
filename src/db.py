@@ -299,6 +299,8 @@ def init_db():
             "ALTER TABLE sources ADD COLUMN letterbox_style TEXT DEFAULT 'title'",  # "title" (white bars + title) or "blur"
             "ALTER TABLE clips ADD COLUMN sfx TEXT",  # JSON [{t, id}] meme sounds at source seconds, see src/sfx.py
             "ALTER TABLE clips ADD COLUMN caption_language TEXT DEFAULT 'spoken'",  # spoken or english, see src/caption_translate.py
+            "ALTER TABLE candidates ADD COLUMN hook_options TEXT",  # JSON {voice: text}: the judge's three hooks, see pick_hooks in src/pipeline/anime_moments.py
+            "ALTER TABLE clips ADD COLUMN frame TEXT DEFAULT 'fit'",  # fit, medium (4:3 crop) or close (square crop), see frame_crop in stage9c_render.py
         ]
         for stmt in migration_statements:
             try:
@@ -593,8 +595,8 @@ def insert_candidate(video_id: int, cand: Dict[str, Any]) -> int:
                 video_id, peak_t, start_s, end_s, origin, chat_mood,
                 signal_score, llm_score, final_score, av_score,
                 punchline, features, title, hook_text, post_caption,
-                hashtags, reason, mood, needs_context, status, humor_type, why_funny, status_reason, cuts, payoff_t, segments, zooms, concept, concept_spec, judge_model
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                hashtags, reason, mood, needs_context, status, humor_type, why_funny, status_reason, cuts, payoff_t, segments, zooms, concept, concept_spec, judge_model, hook_options
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
             (
@@ -628,6 +630,7 @@ def insert_candidate(video_id: int, cand: Dict[str, Any]) -> int:
                 cand.get("concept") or "single",
                 json.dumps(cand["concept_spec"]) if cand.get("concept_spec") else None,
                 cand.get("judge_model"),
+                json.dumps(cand["hook_options"]) if cand.get("hook_options") else None,
             )
         )
         return cur.fetchone()[0]
@@ -670,6 +673,7 @@ def create_or_update_clip(
     concept_source: Optional[str] = None,
     sfx: Optional[str] = None,
     caption_language: Optional[str] = None,
+    frame: Optional[str] = None,
 ) -> int:
     """Insert or update a clip for a candidate. `cuts` is JSON [[start_s, end_s]]; None keeps the stored cuts (and sfx)."""
     now = now_utc_iso()
@@ -688,13 +692,13 @@ def create_or_update_clip(
                     letterbox_style = ?, file_path = ?, thumb_path = ?, status = ?, cuts = COALESCE(?, cuts), zooms = COALESCE(?, zooms),
                     concept = COALESCE(?, concept), segments = COALESCE(?, segments), overlay = COALESCE(?, overlay),
                     theme = COALESCE(?, theme), concept_source = COALESCE(?, concept_source), sfx = COALESCE(?, sfx),
-                    caption_language = COALESCE(?, caption_language)
+                    caption_language = COALESCE(?, caption_language), frame = COALESCE(?, frame)
                 WHERE id = ?
                 """,
                 (
                     new_version, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, cuts, zooms, concept, segments, overlay, theme, concept_source, sfx, caption_language, clip_id
+                    file_path, thumb_path, status, cuts, zooms, concept, segments, overlay, theme, concept_source, sfx, caption_language, frame, clip_id
                 )
             )
             return clip_id
@@ -704,14 +708,14 @@ def create_or_update_clip(
                 INSERT INTO clips (
                     candidate_id, version, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, created_at, cuts, zooms, concept, segments, overlay, theme, concept_source, sfx, caption_language
-                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    file_path, thumb_path, status, created_at, cuts, zooms, concept, segments, overlay, theme, concept_source, sfx, caption_language, frame
+                ) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 (
                     candidate_id, layout, caption_style, trim_start_s, trim_end_s,
                     music_track, silence_trim, silence_trim_s, punch_in_zoom, show_hook, letterbox_style,
-                    file_path, thumb_path, status, now, cuts, zooms, concept or "single", segments, overlay, theme, concept_source, sfx, caption_language or "spoken"
+                    file_path, thumb_path, status, now, cuts, zooms, concept or "single", segments, overlay, theme, concept_source, sfx, caption_language or "spoken", frame or "fit"
                 )
             )
             return cur.fetchone()[0]
