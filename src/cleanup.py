@@ -48,7 +48,7 @@ def delete_rejected_clip_files(clip: Dict[str, Any]) -> int:
     The DB row stays so reject reasons keep feeding stats. Returns bytes freed."""
     freed = 0
     if clip.get("file_path"):
-        freed += _rm(clip["file_path"]) + _rm(Path(clip["file_path"]).with_suffix(".ass"))
+        freed += _rm(clip["file_path"]) + _rm(Path(clip["file_path"]).with_suffix(".ass")) + _rm(Path(clip["file_path"]).with_suffix(".en.json"))
     if clip.get("thumb_path"):
         freed += _rm(clip["thumb_path"])
     video_dir = VIDEOS_DIR / str(clip["video_id"])

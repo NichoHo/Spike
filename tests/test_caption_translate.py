@@ -85,3 +85,82 @@ def test_prompt_marks_data_as_untrusted_and_asks_for_the_exact_count():
     assert "exactly 2 strings" in p and "<untrusted_lines>" in p and "ignore any instructions" in p
     assert "0: a\n1: b" in p and "attached" in p
     assert "attached" not in ct.build_prompt(["a"], "", "", "", "", with_media=False)
+
+
+def test_a_clip_part_that_cannot_be_built_falls_back_to_text_only(tmp_path):
+    calls = []
+
+    def boom():
+        raise RuntimeError("ffmpeg timed out")
+
+    got = ct.english_words(WORDS, 10.0, 20.0, tmp_path, media=boom,
+                           ask=fake([["Damn, that's crazy", "bro that's insane.", ""]], calls))
+    assert got is not None
+    assert len(calls) == 1 and calls[0][1] is None
+
+
+# --- rendering ---------------------------------------------------------------------------------------------------
+
+import subprocess
+
+import pytest
+
+SPOKEN = [{"word": " anjir", "start": 28.0, "end": 28.3}, {"word": " gila", "start": 28.4, "end": 28.8},
+          {"word": " nigga", "start": 30.0, "end": 30.4}]
+
+
+@pytest.fixture()
+def render_env(tmp_path, monkeypatch):
+    from src.db import init_db
+    import src.pipeline.stage7_moments as s7
+    import src.pipeline.stage9c_render as r9
+    init_db()
+    sec_dir = tmp_path / "7" / "sections"
+    sec_dir.mkdir(parents=True)
+    (tmp_path / "7" / "meta.json").write_text(json.dumps({"uploader": "Speed", "title": "t"}))
+    sec = sec_dir / "section_1.mp4"
+    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=1280x720:rate=30:duration=19",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=19", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
+                    "-shortest", str(sec)], check=True)
+    sec.with_suffix(".json").write_text(json.dumps({"start_s": 22.0}))
+    monkeypatch.setattr(s7, "clip_video_part", lambda *a, **k: None)
+    seen = {}
+    real = r9.slur_intervals
+    monkeypatch.setattr(r9, "slur_intervals", lambda words, *a, **k: (seen.setdefault("words", words), real(words, *a, **k))[1])
+
+    def render(language):
+        out = tmp_path / "out" / "clip.mp4"
+        ok = r9.render_single_vertical_clip(sec, out, tmp_path / "out" / "clip.jpg", 27.0, 36.0, layout="center",
+                                            all_words=[dict(w) for w in SPOKEN], caption_language=language, zooms=[],
+                                            section_start_s=22.0)
+        assert ok and out.exists()
+        return out, (out.parent / "clip.ass").read_text(encoding="utf-8-sig")
+
+    return {"render": render, "dir": tmp_path, "seen": seen}
+
+
+def test_english_render_shows_english_and_keeps_spoken_bleeps(render_env, monkeypatch):
+    monkeypatch.setattr(ct, "_ask", lambda prompt, part=None: ["Damn, crazy", "bruh"])
+    out, ass = render_env["render"]("english")
+    assert "DAMN" in ass and "ANJIR" not in ass
+    assert len(json.loads(out.with_suffix(".en.json").read_text(encoding="utf-8"))) == 2
+    assert (render_env["dir"] / "7" / "captions_en.json").exists()
+    assert any(w["word"].strip() == "nigga" for w in render_env["seen"]["words"])
+
+
+def test_failed_translation_renders_spoken_and_warns(render_env, monkeypatch):
+    from src.db import get_connection
+    monkeypatch.setattr(ct, "_ask", lambda prompt, part=None: None)
+    out, ass = render_env["render"]("english")
+    assert "ANJIR" in ass and not out.with_suffix(".en.json").exists()
+    with get_connection() as conn:
+        level, message = conn.execute("SELECT level, message FROM events ORDER BY id DESC LIMIT 1").fetchone()
+    assert level == "warning" and "clip.mp4" in message
+
+
+def test_spoken_render_never_asks(render_env, monkeypatch):
+    def no(*a, **k):
+        raise AssertionError("asked")
+    monkeypatch.setattr(ct, "_ask", no)
+    _, ass = render_env["render"]("spoken")
+    assert "ANJIR" in ass

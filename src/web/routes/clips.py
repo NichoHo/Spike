@@ -762,7 +762,8 @@ def _rerender_job(
     set_clip_layout_changes(clip_id, json.dumps(switches) if switches else None)
     # Drop the superseded version so re-renders don't pile up on disk. Windows refuses while a browser still
     # streams the old file; that must not abort the job before the hook, the log and the toast below.
-    for old in (clip.get("file_path"), clip.get("thumb_path")):
+    old_en = Path(clip["file_path"]).with_suffix(".en.json") if clip.get("file_path") else None
+    for old in (clip.get("file_path"), clip.get("thumb_path"), old_en):
         if old and Path(old) not in (new_out_file, new_thumb_file):
             try:
                 Path(old).unlink(missing_ok=True)

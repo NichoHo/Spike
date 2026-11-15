@@ -65,7 +65,7 @@ from src.config import (
     ZOOM_MAX,
     ZOOM_OUT_DURATION,
 )
-from src.db import create_or_update_clip, set_clip_layout_changes, set_clip_no_face
+from src.db import create_or_update_clip, log_event, set_clip_layout_changes, set_clip_no_face
 from src.music import (
     get_random_track_for_mood,
     resolve_music_path,
@@ -711,7 +711,7 @@ def _render_center_fallback(
 # ── Main Vertical Render Function ─────────────────────────────────────────────
 
 def _render_concept_candidate(cand, cand_id, video_dir, sec_file, all_words, layout, facecam_box, caption_style,
-                              profanity_mask, letterbox_style, out_file, thumb_file, rendered) -> None:
+                              profanity_mask, letterbox_style, out_file, thumb_file, rendered, caption_language="spoken") -> None:
     """Story, POV and countdown clips: the concept renderer makes the file, the clip row records the concept."""
     from src.concepts import stored_segments
     from src.pipeline.concept_render import render_concept_clip
@@ -724,12 +724,13 @@ def _render_concept_candidate(cand, cand_id, video_dir, sec_file, all_words, lay
             hook_text=cand.get("hook_text") or "", video_dir=video_dir, meta=meta, cand_id=cand_id, all_words=all_words,
             layout=clip_layout, caption_style=caption_style, facecam_box=clip_facecam, profanity_mask=profanity_mask,
             letterbox_style=letterbox_style, out_file=out_file, thumb_file=thumb_file,
+            caption_language=caption_language,
         )
     except Exception as e:
         print(f"  [stage 9c] {cand['concept']} clip {cand_id} failed: {e}")
         return
     cand["trim_start_s"], cand["trim_end_s"] = 0.0, duration
-    cand["layout"], cand["caption_style"] = clip_layout, caption_style
+    cand["layout"], cand["caption_style"], cand["caption_language"] = clip_layout, caption_style, caption_language
     cand["render_file"], cand["thumbnail_file"] = str(out_file), str(thumb_file)
     rendered.append(out_file)
     try:
@@ -739,6 +740,7 @@ def _render_concept_candidate(cand, cand_id, video_dir, sec_file, all_words, lay
             letterbox_style=letterbox_style, cuts="[]", zooms="[]", concept=cand["concept"],
             segments=json.dumps(stored_segments(cand["segs"])), overlay=json.dumps(cand.get("overlay") or {}),
             theme=cand.get("theme") or "", concept_source=(cand.get("concept_source") or "ai"),
+            caption_language=caption_language,
         )
     except Exception as e:
         logger.warning(f"Failed to record clip in DB: {e}")
@@ -768,6 +770,7 @@ def run_stage9c_render(
     src_settings = source_settings or {}
     layout = src_settings.get("layout", DEFAULT_LAYOUT)
     caption_style = src_settings.get("caption_style", "bold_pop")
+    caption_language = src_settings.get("caption_language", "spoken")
     captions_on = bool(src_settings.get("captions", True))
     profanity_mask = bool(src_settings.get("profanity_mask", True))
     facecam_box = src_settings.get("facecam_box")
@@ -813,7 +816,7 @@ def run_stage9c_render(
         sec_file = Path(sec_file_str)
         if cand.get("segs") and cand.get("concept", "single") != "single":
             _render_concept_candidate(cand, cand_id, video_dir, sec_file, all_words, layout, facecam_box, caption_style,
-                                      profanity_mask, letterbox_style, out_file, thumb_file, rendered)
+                                      profanity_mask, letterbox_style, out_file, thumb_file, rendered, caption_language)
             continue
         clip_start = float(cand["start_s"])
         clip_end = float(cand["end_s"])
@@ -833,7 +836,7 @@ def run_stage9c_render(
         clip_layout, clip_facecam = resolve_layout(base_layout, sec_file, facecam_box, ai=layout != "auto")
         pace = (cand.get("pace") or "natural") if cut_setting == "auto" else cut_setting
         use_music = cand.get("music", True) if music_setting == "auto" else bool(music_setting)
-        cand["layout"], cand["caption_style"] = clip_layout, caption_style  # runner re-registers clips from these
+        cand["layout"], cand["caption_style"], cand["caption_language"] = clip_layout, caption_style, caption_language  # runner re-registers clips from these
 
         chosen_track_path: Optional[Path] = None
         if use_music:
@@ -852,6 +855,7 @@ def run_stage9c_render(
             layout=clip_layout,
             info=render_info,
             caption_style=caption_style,
+            caption_language=caption_language,
             all_words=cand_words if captions_on else [],
             facecam_box=clip_facecam,
             profanity_mask=profanity_mask,
@@ -880,6 +884,7 @@ def run_stage9c_render(
                     thumb_path=str(thumb_file),
                     layout=render_info.get("layout", clip_layout),
                     caption_style=caption_style,
+                    caption_language=caption_language,
                     trim_start_s=clip_start,
                     trim_end_s=clip_end,
                     music_track=music_str,
@@ -940,6 +945,7 @@ def render_single_vertical_clip(
     overlay_events: Optional[List[Dict[str, Any]]] = None,
     sfx: Optional[List[Dict[str, Any]]] = None,
     info: Optional[Dict[str, Any]] = None,
+    caption_language: str = "spoken",
 ) -> bool:
     """
     Renders a single vertical clip from a downloaded section video file.
@@ -952,6 +958,7 @@ def render_single_vertical_clip(
     letterbox_style: "title" draws title_text above the video on white bars while
     letterbox shows; "blur" keeps the blurred fill. The title card replaces the 2.5 s hook.
     sfx: [{t, id}] meme sounds at source seconds (src/sfx.py); ones inside a cut are dropped.
+    caption_language: "english" shows the captions in English via src/caption_translate.py; the audio and bleeps stay as spoken.
     """
     if not sec_file.exists():
         print(f"  [stage 9c] Error: section file {sec_file} does not exist.")
@@ -1043,10 +1050,25 @@ def render_single_vertical_clip(
     # Remap words for ASS captions
     retimed_words = retime_words_for_cuts(caption_words, clip_start, clip_end, cut_intervals)
 
+    # English captions: only the text changes. Bleeps below still use the spoken words, because the audio is spoken.
+    shown_words = retimed_words
+    if caption_language == "english" and retimed_words:
+        from src.caption_translate import english_words
+        from src.pipeline.stage7_moments import clip_video_part
+        got = english_words(
+            retimed_words, clip_start, clip_start + effective_dur, video_dir=sec_file.parent.parent,  # sections/ is in the video folder
+            media=lambda: clip_video_part({"local_path": str(sec_file)}, section_clip_offset, section_clip_offset + clip_dur),
+        )
+        if got:
+            shown_words, en_lines = got
+            out_file.with_suffix(".en.json").write_text(json.dumps(en_lines, ensure_ascii=False), encoding="utf-8")
+        else:
+            log_event("warning", f"English captions failed for {out_file.name}; it shows the words as spoken. Re-render to try again.")
+
     # 2. Generate ASS Captions
     ass_path = out_file.parent / f"{out_file.stem}.ass"
     ass_content = generate_ass(
-        words=retimed_words,
+        words=shown_words,
         clip_start_s=clip_start,
         clip_end_s=clip_start + effective_dur,
         style=caption_style,

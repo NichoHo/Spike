@@ -165,6 +165,7 @@ def render_concept_clip(
     letterbox_style: str,
     out_file: Path,
     thumb_file: Path,
+    caption_language: str = "spoken",
 ) -> float:
     """Render a story, POV or countdown clip to out_file. Returns its length in seconds. Raises
     ConceptRenderError (or a section download error) when a piece cannot be made, leaving no half-made output."""
@@ -192,7 +193,7 @@ def render_concept_clip(
             ok = render_single_vertical_clip(
                 sec_file=sections[k], out_file=out, thumb_file=work / f"{name}.jpg",
                 clip_start=seg["start_s"], clip_end=seg["end_s"], layout=layout, caption_style=caption_style,
-                hook_text=hook, all_words=all_words if words_on else [], facecam_box=facecam_box,
+                caption_language=caption_language, hook_text=hook, all_words=all_words if words_on else [], facecam_box=facecam_box,
                 profanity_mask=profanity_mask, silence_trim=False, letterbox_style=letterbox_style,
                 title_text=hook, extra_cuts=[tuple(c) for c in seg.get("remove") or []], zooms=seg.get("zooms"),
                 section_start_s=read_section_start(sections[k]), overlay_events=events, caption_y=caption_y,
