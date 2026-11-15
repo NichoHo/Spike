@@ -231,12 +231,12 @@ def build_prompt(lines: List[Dict[str, Any]], seeds: Dict[int, str], anime: Dict
     guide = ANIME_GUIDE.format(genres=", ".join(anime.get("genres") or []) or "unknown", tags=top_tags,
                                audio_kind=anime.get("audio_kind", "sub"))
     body = "\n".join(
-        f"[{i}] {_mmss(ln['start'])}-{_mmss(ln['end'])} {(ln.get('speaker') or 'SPEAKER')}: {ln['text']}"
+        f"[{i}] {_mmss(ln['start'])}-{_mmss(ln['end'])} " + (f"{ln['speaker']}: " if ln.get("speaker") else "") + ln["text"]
         + (f" [seed:{seeds[i]}]" if i in seeds else "")
         for i, ln in enumerate(lines))
     characters = ", ".join(anime.get("characters") or []) or "none given"
     return f"""Below is the full English transcript of one anime episode: {anime.get('title') or meta.get('title') or ''}, episode {anime.get('episode') or '?'}.
-Lines read [idx] MM:SS-MM:SS SPEAKER: text. Lines marked [seed:id] start a dialogue exchange a detector found; judge them, and
+Lines read [idx] MM:SS-MM:SS NAME: text, or [idx] MM:SS-MM:SS text when nobody is named. Lines marked [seed:id] start a dialogue exchange a detector found; judge them, and
 also propose any moment it missed.
 {guide}
 
@@ -244,7 +244,7 @@ Return JSON {{"candidates": [...]}} with up to {JUDGE_MAX_CANDIDATES} moments, b
 start, end (MM:SS), setup_line_idx (list of line numbers a stranger needs), punchline_line_idx (one line number), archetype (one of: {", ".join(ANIME_ARCHETYPES)}),
 why (one sentence: why a stranger laughs or cares), scores (integers 0 to 10: self_contained, payoff, setup_present, delivery, quotability),
 needs_prior_context (bool), spoiler (bool), hook_line_idx (line number or null), hook_text, title, hashtags, seed_ids (list of seed ids it covers).
-title: 5 to 12 words naming the main character and what happens. Use only these character names or the speaker names in the transcript, never invent one: {characters}.
+title: 5 to 12 words naming the main character and what happens. In title and hook_text, spell each name the way the transcript and English-speaking fans do (Goku, Gohan, Krillin), not the database spelling in the cast list below: it can reverse the order or romanize ("Gokuu Son" is Goku, "Kuririn" is Krillin). Never invent a character. Cast, only so you know who is in the show: {characters}.
 hashtags: 3 to 6 tags without #, about this show only.
 Be strict: most lines are not clips. Score 9 or 10 only for a moment a stranger would share.
 
@@ -648,6 +648,10 @@ if __name__ == "__main__":
     tags = finalize_hashtags({"title": "Dragon Ball Z", "parody": True}, "comedy_beat", ["Goku", "dragonballzabridged", "#Anime", "x1", "y2", "z3"])
     assert tags[:3] == ["animecomedy", "dragonballz", "dragonballzabridged"] and len(tags) == 6 and "anime" in tags, tags
     assert finalize_hashtags({"title": "Cowboy Bebop"}, "fight_sakuga", [])[:2] == ["anime", "cowboybebop"]
+    p = build_prompt([{"start": 1.0, "end": 3.0, "text": "Hello.", "speaker": None}, {"start": 3.0, "end": 5.0, "text": "Hi.", "speaker": "Goku"}],
+                     {}, {"title": "Dragon Ball Z", "characters": ["Gokuu Son", "Kuririn"]}, {})
+    assert "SPEAKER" not in p, "a placeholder label reached the judge, which then copied it into a title"
+    assert "[0] 00:01-00:03 Hello." in p and "[1] 00:03-00:05 Goku: Hi." in p and "Gokuu Son, Kuririn" in p
     from src.models import VideoVerdict
     r = {"judge": 90.0}
     apply_video(r, VideoVerdict(visible=True, standalone=False, reaction="peak", score=80))
