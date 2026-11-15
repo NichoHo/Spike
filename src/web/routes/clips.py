@@ -353,9 +353,11 @@ def _parse_layout_changes(raw: str, start_s: float, end_s: float) -> list:
 def _english_lines(clip: Dict[str, Any]) -> Optional[List[Dict[str, str]]]:
     """The English caption lines of the clip's current render, or None when it has no sidecar."""
     try:
-        return json.loads(Path(clip["file_path"]).with_suffix(".en.json").read_text(encoding="utf-8"))
+        lines = json.loads(Path(clip["file_path"]).with_suffix(".en.json").read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, KeyError):
         return None
+    ok = isinstance(lines, list) and all(isinstance(l, dict) and isinstance(l.get("key"), str) and isinstance(l.get("en"), str) for l in lines)
+    return lines if ok else None
 
 
 @router.get("/clips/{clip_id}/captions")
@@ -429,7 +431,9 @@ async def rerender_clip_action(
         lines = _english_lines(clip)
         if lines is None:
             raise HTTPException(status_code=400, detail="Re-render in English first.")
-        edited = [l.strip() for l in caption_text.splitlines()]
+        edited = [l.strip() for l in caption_text.replace("\r\n", "\n").split("\n")]
+        if len(edited) == len(lines) + 1 and not edited[-1]:
+            edited.pop()  # a stray final newline
         if len(edited) != len(lines):
             raise HTTPException(status_code=400, detail=f"Keep one line per caption line ({len(lines)} lines).")
         if any(len(l) > 200 for l in edited):

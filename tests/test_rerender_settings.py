@@ -186,12 +186,33 @@ def test_english_caption_lines_can_be_fixed_and_the_fix_is_kept(env, monkeypatch
     store = json.loads((Path(clip["file_path"]).parents[1] / "captions_en.json").read_text(encoding="utf-8"))
     assert store[lines[0]["key"]] == "Yo that's wild"
     assert "YO" in Path(clip["file_path"]).with_suffix(".ass").read_text(encoding="utf-8")
+    assert {k for k, v in store.items() if not v.startswith("english line")} == {lines[0]["key"]}  # only the edit differs from the model
 
     short = {**data, "caption_text": "\n".join(edited[:-1])}
     res = env["c"].post(f"/clips/{env['clip']}/rerender", data=short, follow_redirects=False)
     assert res.status_code == 400 and "one line per caption line" in res.json()["detail"]
     long = {**data, "caption_text": "\n".join(["x" * 201] + edited[1:])}
     assert env["c"].post(f"/clips/{env['clip']}/rerender", data=long, follow_redirects=False).status_code == 400
+
+
+def test_clearing_the_last_english_line_hides_it(env, monkeypatch):
+    form, lines = _english_clip(env, monkeypatch)
+    text = "\r\n".join([l["en"] for l in lines[:-1]] + [""])  # browsers submit CRLF
+    data = {**form, "caption_text": text, "caption_text_language": "english"}
+    assert env["c"].post(f"/clips/{env['clip']}/rerender", data=data, follow_redirects=False).status_code == 303
+    clip = get_clip(env["clip"])
+    store = json.loads((Path(clip["file_path"]).parents[1] / "captions_en.json").read_text(encoding="utf-8"))
+    assert store[lines[-1]["key"]] == ""
+
+
+def test_english_lines_ignores_a_sidecar_of_the_wrong_shape(tmp_path):
+    from src.web.routes.clips import _english_lines
+    clip = {"file_path": str(tmp_path / "c.mp4")}
+    for bad in ('{"a": 1}', '[{"key": "k"}]', '[1]', '[{"key": 1, "en": "x"}]'):
+        (tmp_path / "c.en.json").write_text(bad, encoding="utf-8")
+        assert _english_lines(clip) is None
+    (tmp_path / "c.en.json").write_text('[{"key": "k", "src": "s", "en": "x"}]', encoding="utf-8")
+    assert _english_lines(clip) == [{"key": "k", "src": "s", "en": "x"}]
 
 
 def test_spoken_clip_captions_keep_the_space_joined_text(env):

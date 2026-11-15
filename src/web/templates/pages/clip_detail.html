@@ -769,7 +769,7 @@ async function openCaptionEditor() {
 function saveCaptions() {
   const raw = document.getElementById('captions-textarea').value;
   // English lines are positional, so a cleared line must stay as an empty line
-  const text = captionsLanguage === 'english' ? raw.replace(/\s+$/, '') : raw.trim();
+  const text = captionsLanguage === 'english' ? raw : raw.trim();
   const f = document.getElementById('caption-text-field');
   const lang = document.getElementById('caption-text-language');
   const changed = (Boolean(text) || captionsLanguage === 'english') && text !== captionsOriginal;
