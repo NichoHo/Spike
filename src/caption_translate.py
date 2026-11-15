@@ -130,7 +130,12 @@ def english_words(
         before = " ".join(w["word"].strip() for w in [w for w in words if w.get("start", 0) < start_s][-CONTEXT_WORDS:])
         after = " ".join(w["word"].strip() for w in [w for w in words if w.get("start", 0) >= end_s][:CONTEXT_WORDS])
         texts = [c["text"] for c in cues]
-        part = media() if media else None
+        part = None
+        if media:
+            try:
+                part = media()
+            except Exception as e:  # building the clip runs ffmpeg and can time out; translate from text alone
+                print(f"  [captions] Could not attach the clip: {e}")
         got = None
         for attempt in ([part, None] if part is not None else [None]):
             prompt = build_prompt(texts, before, after, str(meta.get("uploader") or ""), str(meta.get("title") or ""),
