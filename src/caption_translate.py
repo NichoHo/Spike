@@ -159,7 +159,8 @@ def english_words(
             got = None
         if got is None:
             return None
-        save_lines(video_dir, {k: t.strip() for k, t in zip(keys, got)}, overwrite=False)  # stored lines (and fixes) win
+        # One line per caption line: a newline from the model would make the editor's line count disagree with the sidecar
+        save_lines(video_dir, {k: " ".join(t.split()) for k, t in zip(keys, got)}, overwrite=False)  # stored lines (and fixes) win
         store = _load(video_dir / STORE_NAME)  # may hold a fix saved while the model ran
 
     in_window = {id(w) for c in cues for w in c["words"]}

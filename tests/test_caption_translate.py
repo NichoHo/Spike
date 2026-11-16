@@ -225,3 +225,11 @@ def test_words_spoken_before_the_clip_stay_out_of_the_translation_when_the_clip_
     assert "PREVWORD" in prompts[0].split("<untrusted_context_before>")[1].split("</untrusted_context_before>")[0]
     assert "PREVWORD" not in prompts[0].split("<untrusted_lines>")[1].split("</untrusted_lines>")[0]
     assert "DAMN" in ass
+
+
+def test_a_newline_in_a_model_line_is_collapsed_so_the_editor_line_count_holds(tmp_path):
+    _, lines = ct.english_words(WORDS, 10.0, 20.0, tmp_path,
+                                ask=fake([["Damn,\nthat's  crazy", "bro that's insane.", ""]]))
+    assert lines[0]["en"] == "Damn, that's crazy"
+    stored = json.loads((tmp_path / ct.STORE_NAME).read_text(encoding="utf-8"))
+    assert all("\n" not in v for v in stored.values())
