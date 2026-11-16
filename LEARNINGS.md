@@ -33,9 +33,11 @@
   "gak" negation that flipped a meaning, and heard "seblak". `medium` was no better than `small`. Turbo ran
   at about 1.4x real time on an 8 minute probe, `small` at 1.1x on the same file (single runs, not a clean
   benchmark; no multi hour stream timed). Its own failure modes: it can flip the language to English and
-  write English directly, repeat "Let's go!", and invent lines ("M4 is a kind of fabric"). Not switched on:
-  `WHISPER_MODEL=large-v3-turbo` in the environment changes stage 5. Not yet marked on a second streamer
-  (OJEKS clips O1 and O2 are in the report, waiting for someone who speaks Indonesian).
+  write English directly, repeat "Let's go!", and invent lines ("M4 is a kind of fabric"). Now the stage 5
+  default (`src/config.py`, switched on 2026-11-17 on the user's call, before the second streamer was
+  marked); `WHISPER_MODEL=small` in `.env` goes back. Streams that already have a `transcript.json` keep
+  their `small` transcript, because stage 5 resumes from it. The OJEKS clips O1 and O2 are in the report,
+  still waiting for someone who speaks Indonesian.
 - **Learned (verified):** the caption prompt let the model move words between lines. On a real clip that
   shifted every later caption by one line with the line count unchanged, so the count check passed. The
   prompt now says one caption per source line (b659b30).

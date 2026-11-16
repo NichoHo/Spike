@@ -89,8 +89,10 @@ GEMINI_DAILY_LIMIT = int(os.environ.get("SPIKE_GEMINI_DAILY_LIMIT", "250"))
 # Per-model overrides. Flash returned 429 after 16 counted requests, so its real daily limit is at most about that.
 GEMINI_DAILY_LIMITS = {JUDGE_GEMINI_MODEL: 15}
 
-# Whisper ASR
-DEFAULT_WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
+# Whisper ASR. large-v3-turbo beat small on real mixed-language clips: it detects English that small writes as
+# Indonesian, keeps negations, and spells slang better (reports/english_captions_eval.md). The first run on a
+# machine downloads 1.6 GB. WHISPER_MODEL=small in .env goes back to the old model.
+DEFAULT_WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 WHISPER_COMPUTE_TYPE = "int8"
 WHISPER_DEVICE = "cpu"
 

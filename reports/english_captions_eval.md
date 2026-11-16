@@ -75,7 +75,7 @@ Same 60 second clips and audio for every model, run the way stage 5 runs (int8 o
 - **Like for like on the full 8 minute probe of B** (what the pipeline does, with long context): turbo still writes the English lines above. It loses the three "Go to the wall" lines that `small` had right, and writes Thai script for the last "Penong" lines.
 - **Speed:** turbo took 338 s for the 480 s probe (1.4x real time) against 440 s for `small` on the same file earlier. Both were single runs with other jobs on the PC, so this is not a clean benchmark. I did not time a multi hour stream.
 - **Turbo failure modes seen:** on OJEKS clip O1 it labelled the language English (0.59) and wrote English directly, including "Let's go!" five times in a row, which may be a repetition loop. It also invented "M4 is a kind of fabric".
-- **Switching:** `WHISPER_MODEL=large-v3-turbo` in the environment changes stage 5 for every stream. The model is already downloaded to the Hugging Face cache on this PC. Nothing is switched on.
+- **Switching:** done on 2026-11-17. `large-v3-turbo` is now the stage 5 default in `src/config.py`, and `WHISPER_MODEL=small` in `.env` goes back. The model is in the Hugging Face cache on this PC, so it loads with no network (checked offline through the real stage 5: 5.4 s to load, 60 s of audio in 37 s). Streams that already have a `transcript.json` are not redone.
 
 ### A bug this found in the caption step
 
