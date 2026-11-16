@@ -115,7 +115,8 @@ def run_pipeline(
             anime = run_stage1_anime(video_dir, meta, source_settings["anime"] or {})
             # Anime source defaults (report 5.6, 5.7): the studio already cut and scored the scene, so one continuous
             # range and no added music. A setting the job or source already carries wins.
-            source_settings = {**ANIME_RENDER_DEFAULTS, **({"captions": False} if anime.get("hardsubbed") else {}), **source_settings}
+            # A hardsubbed source keeps the whole picture: its burned-in subtitles are the only captions and a crop would cut them.
+            source_settings = {**ANIME_RENDER_DEFAULTS, **({"captions": False, "frame": "fit"} if anime.get("hardsubbed") else {}), **source_settings}
 
         # Stage 2: fetch_audio
         enter_stage(video_id, "fetch_audio")
