@@ -230,6 +230,9 @@ def retime_words_for_cuts(
     for w in words:
         w_st = float(w.get("start", 0))
         w_et = float(w.get("end", 0))
+        if w_et <= clip_start:  # spoken before the clip: map_timestamp_to_trimmed would pile it onto clip_start
+            retimed.append(w)
+            continue
         # Skip words entirely engulfed in a cut
         if any(c_st <= w_st and w_et <= c_et for c_st, c_et in cut_intervals):
             continue
@@ -1087,10 +1090,14 @@ def render_single_vertical_clip(
     if caption_language == "english" and retimed_words:
         from src.caption_translate import english_words
         from src.pipeline.stage7_moments import clip_video_part
-        got = english_words(
-            retimed_words, clip_start, clip_start + effective_dur, video_dir=sec_file.parent.parent,  # sections/ is in the video folder
-            media=lambda: clip_video_part({"local_path": str(sec_file)}, section_clip_offset, section_clip_offset + clip_dur),
-        )
+        try:
+            got = english_words(
+                retimed_words, clip_start, clip_start + effective_dur, video_dir=sec_file.parent.parent,  # sections/ is in the video folder
+                media=lambda: clip_video_part({"local_path": str(sec_file)}, section_clip_offset, section_clip_offset + clip_dur),
+            )
+        except Exception as e:  # a failed translation never fails the render: fall back to the spoken words below
+            print(f"  [captions] English captions crashed: {e}")
+            got = None
         if got:
             shown_words, en_lines = got
             out_file.with_suffix(".en.json").write_text(json.dumps(en_lines, ensure_ascii=False), encoding="utf-8")

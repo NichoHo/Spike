@@ -51,8 +51,14 @@ def build_cues(words: List[Dict[str, Any]], start_s: float, end_s: float) -> Lis
     return cues
 
 
+def _plain(text: str) -> str:
+    """Untrusted text without < and >, so it cannot close the tag fence it sits in."""
+    return text.replace("<", "").replace(">", "")
+
+
 def build_prompt(texts: List[str], before: str, after: str, streamer: str, title: str, with_media: bool) -> str:
-    numbered = "\n".join(f"{i}: {t}" for i, t in enumerate(texts))
+    numbered = "\n".join(f"{i}: {_plain(t)}" for i, t in enumerate(texts))
+    before, after, streamer, title = _plain(before), _plain(after), _plain(streamer), _plain(title)
     media = (" The clip's video with sound is attached: listen to it to check the words. It may include moments that"
              " were cut from the final clip; caption only the numbered lines.") if with_media else ""
     return f"""You write English captions for a short clip from a live stream.
@@ -88,7 +94,8 @@ def _ask(prompt: str, part: Any = None) -> Optional[List[str]]:
                                       media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW)
     try:
         resp = generate_content_with_retry(get_gemini_client(), TRANSLATE_GEMINI_MODEL, contents, cfg,
-                                           purpose="translate clip captions to English", claude_model="sonnet")
+                                           purpose="translate clip captions to English", claude_model="sonnet",
+                                           max_retries=2)
         lines = json.loads(resp.text).get("lines")
         return [str(x) for x in lines] if isinstance(lines, list) else None
     except Exception as e:
@@ -98,17 +105,23 @@ def _ask(prompt: str, part: Any = None) -> Optional[List[str]]:
 
 def _load(path: Path) -> Dict[str, Any]:
     try:
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except ValueError:
         return {}
+    return data if isinstance(data, dict) else {}
 
 
-def save_lines(video_dir: Path, entries: Dict[str, str]) -> None:
+def save_lines(video_dir: Path, entries: Dict[str, str], overwrite: bool = True) -> None:
     """Merge {cue_key: english} into the video's store. Reads right before writing, so a fix saved by another
-    re-render of the same video is not lost. ponytail: no lock; two writes in the same instant keep the last one."""
+    re-render of the same video is not lost. overwrite=False keeps a line already stored (model output must never
+    replace a fix). ponytail: no lock; two writes in the same instant keep the last one."""
     path = video_dir / STORE_NAME
     store = _load(path)
-    store.update(entries)
+    if overwrite:
+        store.update(entries)
+    else:
+        for k, t in entries.items():
+            store.setdefault(k, t)
     path.write_text(json.dumps(store, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
@@ -141,14 +154,13 @@ def english_words(
             prompt = build_prompt(texts, before, after, str(meta.get("uploader") or ""), str(meta.get("title") or ""),
                                   with_media=attempt is not None)
             got = ask(prompt, attempt)
-            if got is not None and len(got) == len(cues):
+            if got is not None and len(got) == len(cues) and all(len(t) <= 200 for t in got):  # 200 is the editor's cap
                 break
             got = None
         if got is None:
             return None
-        new = {k: t.strip() for k, t in zip(keys, got) if k not in store}  # stored lines (and fixes) win
-        save_lines(video_dir, new)
-        store.update(new)
+        save_lines(video_dir, {k: t.strip() for k, t in zip(keys, got)}, overwrite=False)  # stored lines (and fixes) win
+        store = _load(video_dir / STORE_NAME)  # may hold a fix saved while the model ran
 
     in_window = {id(w) for c in cues for w in c["words"]}
     out = [w for w in words if id(w) not in in_window]

@@ -795,6 +795,13 @@ async function openCaptionEditor() {
 // Save keeps the text in the re-render form; the Re-render button at the bottom applies it
 function saveCaptions() {
   const raw = document.getElementById('captions-textarea').value;
+  if (captionsLanguage === 'english') {  // the same checks as the server, so a mistake shows here and not as a 400 page
+    const n = captionsOriginal.split('\n').length;
+    const lines = raw.replace(/\r\n/g, '\n').split('\n').map((l) => l.trim());
+    if (lines.length === n + 1 && !lines[lines.length - 1]) lines.pop();  // a stray final newline
+    if (lines.length !== n) { showToast(`Keep one line per caption line (${n} lines).`); return; }
+    if (lines.some((l) => l.length > 200)) { showToast('A caption line can be at most 200 characters.'); return; }
+  }
   // English lines are positional, so a cleared line must stay as an empty line
   const text = captionsLanguage === 'english' ? raw : raw.trim();
   const f = document.getElementById('caption-text-field');
