@@ -20,10 +20,15 @@
 - **Learned (verified):** `str.splitlines()` drops a trailing empty line, and the editor trimmed the
   text, so a cleared last English line gave a line-count 400. The server now splits on `\n` after
   normalising `\r\n`, and the page sends English text untrimmed.
-- **Not verified:** how good the translations are on real streams. Task 5 of the plan (5 real clips,
-  Flash-Lite against Flash, reviewed with someone who speaks the language) has not run. Flash-Lite is the
-  default because Flash has about 15 calls a day and the judge needs them. Set `SPIKE_TRANSLATE_MODEL`
-  to change it.
+- **Learned (verified, 5 real windows, 2 of them marked line by line by the user):** Flash-Lite and Flash
+  are level on quality (B: 14 and 13 of 28 lines right; A2: 6 and 5 of 13). Flash-Lite answered all five
+  clips on the first call in 24 to 57 s. Flash needed the text-only retry on three, gave no answer on one,
+  and used up its daily quota, so Flash-Lite stays the default (`SPIKE_TRANSLATE_MODEL` changes it). The
+  limit is Whisper `small` on accented, noisy Indonesian: it dropped a "ga" (so "not tasty" became
+  "tastes good"), heard English as Indonesian, and made up lines. Both models mostly kept those errors even
+  with the audio attached, and a prompt telling them to trust the audio did not help (A2: 2 better, 1
+  worse). Data and marks: `reports/english_captions_eval.md`. Next to try: a bigger Whisper model on the
+  clip window only.
 - **Open:** story, POV and countdown clips translate each segment separately, so a first render can make
   up to 2 calls per segment (the plan says 2 per clip). Fine on Flash-Lite; batch the segments into one
   call if translation moves to Flash. Their editor shows the spoken text, not the English lines.
