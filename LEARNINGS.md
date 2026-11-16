@@ -1,5 +1,91 @@
 # Spike: Learnings
 
+## 2026-11-16: English captions for streamers who mix languages
+
+- **Built:** a clip's captions are `spoken` (default, as before) or `english`. Set per source, per job and
+  per clip (`caption_language`). English mode translates at render time in `src/caption_translate.py`: one
+  Gemini call per clip with the clip's video and sound attached, then one text-only retry, then spoken
+  captions plus a warning event if both fail. Lines already in English keep their real word timing.
+  Translated lines get timings spread over the speech they replace, so the yellow highlight follows
+  reading pace there. Bleeps still use the spoken words. Translations and the team's fixes live in
+  `data/videos/<id>/captions_en.json`, keyed by the line's spoken text, so a re-render asks nothing.
+  `<clip>.en.json` lists the lines of the current render for the editor ("Edit caption text").
+- **Why:** a streamer can switch language mid-sentence, and Whisper `small` is weakest on exactly that
+  slang. Giving the model the audio lets it fix misheard words that the transcript alone cannot.
+- **Learned (verified):** `retime_words_for_cuts` moved every word spoken before the clip onto the clip's
+  first frame whenever the clip had a cut, because `map_timestamp_to_trimmed` returns 0 before the clip
+  start. English mode sent the whole stream to the model. It also made a slur said earlier in the stream
+  bleep the first 0.1 s of every clip with cuts. Words that end before the clip now keep their real time.
+  A reviewer reproduced both with a script. No fixture had words before the clip together with a cut.
+- **Learned (verified):** `str.splitlines()` drops a trailing empty line, and the editor trimmed the
+  text, so a cleared last English line gave a line-count 400. The server now splits on `\n` after
+  normalising `\r\n`, and the page sends English text untrimmed.
+- **Not verified:** how good the translations are on real streams. Task 5 of the plan (5 real clips,
+  Flash-Lite against Flash, reviewed with someone who speaks the language) has not run. Flash-Lite is the
+  default because Flash has about 15 calls a day and the judge needs them. Set `SPIKE_TRANSLATE_MODEL`
+  to change it.
+- **Open:** story, POV and countdown clips translate each segment separately, so a first render can make
+  up to 2 calls per segment (the plan says 2 per clip). Fine on Flash-Lite; batch the segments into one
+  call if translation moves to Flash. Their editor shows the spoken text, not the English lines.
+
+## 2026-11-16: Three hooks per anime clip and a frame size
+
+- **Built:** the anime judge writes three hooks per clip (`relatable`,
+  `curious`, `plain`). The title card starts with the first one. The clip
+  page shows them as chips; the Hook title box still takes any text. A new
+  per-clip Frame setting (`fit`, `medium` 4:3, `close` square) crops the
+  sides before the letterbox scale. Anime clips start on `medium`; every
+  other source stays on `fit`. A hardsubbed source also stays on `fit`,
+  because a crop would cut its burned-in subtitles.
+- **Why:** on the user's Dragon Ball channel about half of the viewers of
+  the two Shorts YouTube tested swiped away, the hooks read like topic
+  labels, and the picture filled 32% of the frame.
+- **Checked:** the new tests, the module self-test, and a real render of
+  all three frame sizes with a 3-line hook (the card stays above the
+  picture). Not checked: whether the hooks or the crop help. That needs
+  about 10 Shorts and YouTube Studio.
+- **Known gaps:** hooks for Shorts already posted; hooks on the blurred
+  style (it has no title card); the anime judge does not read the Standards
+  (gold labels); "Render this moment" (`moment_render.py`) ignores
+  `ANIME_RENDER_DEFAULTS`, so it uses `fit`; the Frame select also shows
+  for concept clips, where it does nothing. With `medium` and `close` the
+  captions (at 68% of the height) now sit on the picture, not on the white
+  bar.
+- **Read results:** compare `candidates.hook_text` with `hook_options` to see
+  which voice a clip used:
+  `SELECT id, CASE hook_text WHEN json_extract(hook_options,'$.relatable') THEN 'relatable' WHEN json_extract(hook_options,'$.curious') THEN 'curious' WHEN json_extract(hook_options,'$.plain') THEN 'plain' ELSE 'custom' END AS voice FROM candidates WHERE hook_options IS NOT NULL;`
+  After about 10 Shorts, compare "Stayed to watch" in YouTube Studio with
+  the old 50% and see which voice did best. The 4:3 crop is read from one
+  low-resolution frame of another channel; treat it as a guess
+  (`FRAME_RATIOS` in `stage9c_render.py` is the one place to change it).
+
+## 2026-11-16: Anime titles said "SPEAKER" and used database names
+
+- **Found:** the user's Dragon Ball Shorts channel had one title that began
+  "SPEAKER interrupts..." and others with "Gohan Son", "Gokuu Son" and
+  "Kuririn". Cause 1: `build_prompt` in `anime_moments.py` labeled every
+  line that had no speaker as `SPEAKER:`. Abridged audio has no speaker
+  tags, so every line had it, and the judge sometimes copied it into a
+  title. Cause 2: the same prompt said to use only the AniList cast names.
+  AniList returns `Gokuu Son`, `Gohan Son` and `Kuririn` for Dragon Ball Z
+  (checked live on 2026-11-16).
+- **Fixed:** a line shows a name only when it has one. The title rule now
+  says to spell names as the transcript and English fans do (Goku, Gohan,
+  Krillin). The cast list only says who is in the show. The check is in the
+  module self-test: `py -3.14 -m src.pipeline.anime_moments`.
+- **Verified:** the old code, run from git HEAD, printed `SPEAKER: Hello.`.
+  One live judge call with the new prompt, on an invented transcript,
+  wrote "Krillin" and not "Kuririn". Not checked: a transcript that never
+  says the name. Titles already on YouTube are unchanged.
+- **Not changed:** the Japanese translation step (`anime_asr.translate_lines`)
+  still keeps the AniList spellings. That is right for subbed anime, but it
+  gives Japanese-order names if a dub-name audience is the goal.
+- **Next (from the channel analytics):** about half of viewers swipe away
+  from the first seconds of the two Shorts YouTube tested, and the newer
+  Shorts have no hook text on top. The POV caption bank
+  (`data/pov_bank.json`) is empty, and the footage fills about a third of
+  the frame.
+
 ## 2026-11-11: Queue shared standards while Spike is off
 
 - **Built:** the Shortcut saves each share to `spike-queue.txt` on the
@@ -11,6 +97,17 @@
   Recalled, not checked: a failed Get Contents of URL stops the run, and a
   File in a Text action gives the file's text. Test once: share with Spike
   off, start Spike, share again, expect `saved 2`.
+- **Changed (2026-11-12):** with the PC off, the phone showed iOS's
+  "A server with the specified hostname could not be found" (its Tailscale
+  was off too). Shortcuts cannot catch that, so the Shortcut now runs
+  Tailscale's Connect and Find Devices (PC online?) first, and shows "Spike
+  is off. Your link is saved..." instead of posting. Not run on an iPhone.
+  Edge: for a few minutes after the PC shuts down, Tailscale may still list
+  it online, and the post fails with iOS's error. The link stays queued.
+- **Built (2026-11-13):** the Shortcut also sends its queue file as
+  `queued`, and the reply says how many of the videos Gemini is reading
+  waited on the phone (`processing 3 videos (2 queued)`). Spike prints the
+  same line to its terminal. Shortcuts without the field get the old reply.
 
 ## 2026-11-10: Share a standard from the iPhone
 
