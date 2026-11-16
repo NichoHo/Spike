@@ -62,15 +62,28 @@ CORS preflight, which Spike never answers, so it gets 422.
 3. Text: File, a new line, Shortcut Input.
 4. Save File: that Text as `spike-queue.txt`, overwriting. The share is
    on the phone before anything is sent.
-5. Get Contents of URL: `<SPIKE_PUBLIC_URL>/settings/standards/share`,
-   POST, JSON body, field `text` = Text.
-6. Show Notification: Contents of URL.
-7. If Contents of URL begins with `Spike:`: Delete Files on Saved File,
-   Confirm Before Deleting off.
+5. Tailscale Connect, then Tailscale Find Devices: Name is the first
+   label of `SPIKE_PUBLIC_URL`'s host (`nicho`), Is Online.
+6. If Devices has any value: Get Contents of URL:
+   `<SPIKE_PUBLIC_URL>/settings/standards/share`, POST, JSON body,
+   field `text` = Text, field `queued` = File (Type: Text). Spike reads
+   links from every field; `queued` (any case) only tells it which ones
+   waited on the phone, so the reply can say `Spike: processing 3 videos
+   (2 queued)...` or `Spike: processing 2 queued videos...`. Spike also
+   prints the reply to its terminal as `[share]`.
+7. If If Result begins with `Spike:`: Show Notification If Result, then
+   Delete Files on Saved File, Confirm Before Deleting off. Otherwise:
+   Show Notification `Spike is off. Your link is saved and will be
+   processed the next time you run Spike standard while Spike is on.`
 
-**Offline queue (2026-11-11):** while Spike or the PC is off, step 5 fails
-and Shortcuts stops the run (it has no error handling), so the queue file
-keeps the link. The next share sends the old links with the new one.
+**Offline queue (2026-11-11):** while Spike or the PC is off, the queue
+file keeps the link, and the next run sends the old links with the new
+one. Shortcuts has no error handling: a failed Get Contents of URL stops
+the run with iOS's own error ("A server with the specified hostname could
+not be found" when the phone's Tailscale is off). So the Shortcut asks
+Tailscale first (Find Devices, 2026-11-12) and posts only when the PC is
+online. PC online but Spike down gives `tailscale serve`'s 502 page, which
+does not start with `Spike:`, so the same "Spike is off" line shows.
 Shortcuts' Append to Text File is not used: users report it does not
 create a missing file.
 

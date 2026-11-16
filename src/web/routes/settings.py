@@ -266,6 +266,8 @@ async def share_standard(body: Dict[str, Any], background_tasks: BackgroundTasks
         background_tasks.add_task(analyze_gold, label_id)
         added += 1
     old = len(links) - added
+    print(f"  [standards] Phone sent {len(links)} link{'s' * (len(links) > 1)}: {added} to read, "
+          f"{old} skipped (already standards)", flush=True)
     if not added:
         return "Spike: already a standard." if old == 1 else f"Spike: all {old} are already standards."
     saved = "saved. Gemini is reading it." if added == 1 else f"saved {added}. Gemini is reading them."

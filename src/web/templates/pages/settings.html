@@ -92,19 +92,20 @@
         <summary>{{ ui.icon("caret-right", 14) }} Add from your iPhone's share sheet</summary>
         <div class="stack stack--sm disclosure__body small muted">
           {% if not share_url.startswith("https://") %}{{ ui.alert("warning", "Your iPhone can't reach Spike yet", "Run tailscale serve on this PC, set SPIKE_PUBLIC_URL in .env to the address it gives, then restart Spike.") }}{% endif %}
-          <p>Set this up once in the Shortcuts app. Then tap Share on a TikTok, YouTube or Instagram short and pick Spike standard. It's saved for any stream with no reasons, and a notification says it worked. Tailscale must be on.</p>
+          <p>Set this up once in the Shortcuts app. Then tap Share on a TikTok, YouTube or Instagram short and pick Spike standard. It's saved for any stream with no reasons, and a notification says it worked. The Shortcut turns Tailscale on by itself.</p>
           <ol>
             <li>In Shortcuts, tap <strong>+</strong> and name it <code>Spike standard</code>.</li>
             <li>In its details, turn on <strong>Show in Share Sheet</strong> and let it receive <strong>URLs</strong> and <strong>Text</strong>. Set <strong>If there's no input</strong> to <strong>Continue</strong>.</li>
             <li>Add <strong>Get File</strong> from the <strong>Shortcuts</strong> folder, path <code>spike-queue.txt</code>. Turn off <strong>Error If Not Found</strong>.</li>
             <li>Add <strong>Text</strong> with <strong>File</strong>, a new line, then <strong>Shortcut Input</strong>.</li>
             <li>Add <strong>Save File</strong> to save that <strong>Text</strong> to the Shortcuts folder as <code>spike-queue.txt</code>. Turn off <strong>Ask Where to Save</strong> and turn on <strong>Overwrite If File Exists</strong>.</li>
-            <li>Add <strong>Get Contents of URL</strong> with this address. Set Method to <strong>POST</strong> and Request Body to <strong>JSON</strong>, and add a Text field named <code>text</code> set to <strong>Text</strong>.
+            <li>Add Tailscale's <strong>Connect</strong>, then Tailscale's <strong>Find Devices</strong> where Name is <code>{{ share_url.split("/")[2].split(".")[0] }}</code> and the device Is Online.</li>
+            <li>Add <strong>If</strong> <strong>Devices</strong> has any value. Inside it, add <strong>Get Contents of URL</strong> with this address. Set Method to <strong>POST</strong> and Request Body to <strong>JSON</strong>, and add a Text field named <code>text</code> set to <strong>Text</strong>.
               <input type="text" class="input input--mono" readonly value="{{ share_url }}" aria-label="Address for the shortcut" autocomplete="off" spellcheck="false" translate="no" style="margin-top: var(--space-1);"></li>
-            <li>Add <strong>Show Notification</strong> set to <strong>Contents of URL</strong>.</li>
-            <li>Add <strong>If</strong> <strong>Contents of URL</strong> begins with <code>Spike:</code>, and inside it <strong>Delete Files</strong> on <strong>Saved File</strong> with <strong>Confirm Before Deleting</strong> off.</li>
+            <li>After that If ends, add another <strong>If</strong>: <strong>If Result</strong> begins with <code>Spike:</code>. Inside it, add <strong>Show Notification</strong> set to <strong>If Result</strong>, then <strong>Delete Files</strong> on <strong>Saved File</strong> with <strong>Confirm Before Deleting</strong> off.</li>
+            <li>Under its <strong>Otherwise</strong>, add <strong>Show Notification</strong> with: <code>Spike is off. Your link is saved and will be processed the next time you run Spike standard while Spike is on.</code></li>
           </ol>
-          <p>Spike off? The Shortcut stops with an error, but the link stays in <code>spike-queue.txt</code> and goes with your next share. To send the queue without sharing, run Spike standard from the Shortcuts app.</p>
+          <p>Spike off? The link waits in <code>spike-queue.txt</code> on your phone. Once Spike is on, run Spike standard from the Shortcuts app, or share another short, and everything waiting goes in.</p>
           <p>Not in the share sheet's first row? It's under More (Instagram: Share to…). Use Edit Actions there to pin it.</p>
         </div>
       </details>

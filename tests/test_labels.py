@@ -244,10 +244,13 @@ def test_share_finds_the_link_under_any_key_and_in_lists(gold):
     assert gold["client"].post("/settings/standards/share", json=["https://youtu.be/k3"]).status_code == 422
 
 
-def test_a_queue_of_shares_made_while_spike_was_off_is_read_in_one_post(gold):
+def test_a_queue_of_shares_made_while_spike_was_off_is_read_in_one_post(gold, capsys):
     _share(gold["client"], "https://youtu.be/q1")
     queue = "https://youtu.be/q1?si=a\nCheck this https://vt.tiktok.com/ZS2/\nhttps://www.instagram.com/reel/R3/?igsh=b"
     assert _share(gold["client"], queue).text == "Spike: saved 2. Gemini is reading them. Already standards: 1."
+    out = capsys.readouterr().out  # the terminal shows the queue arriving and each short being read
+    assert "Phone sent 3 links: 2 to read, 1 skipped (already standards)" in out
+    assert "Reading https://vt.tiktok.com/ZS2/" in out and "Ready: https://www.instagram.com/reel/R3/" in out
     assert [r["source_url"] for r in _labels()] == [
         "https://youtu.be/q1", "https://vt.tiktok.com/ZS2/", "https://www.instagram.com/reel/R3/"]
     assert _share(gold["client"], queue).text == "Spike: all 3 are already standards."

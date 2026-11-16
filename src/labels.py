@@ -195,8 +195,11 @@ def analyze_gold(label_id: int, upload_path: Optional[str] = None) -> None:
     the Settings card shows it."""
     from google.genai import types
     from src.pipeline.stage7_moments import clip_video_part, get_gemini_client, judge_generate
+    url = f"standard #{label_id}"
     try:
         label = get_label(label_id)
+        url = label["source_url"]
+        print(f"  [standards] Reading {url} ...", flush=True)
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path, info = (Path(upload_path), {}) if upload_path else _download(label["source_url"], Path(tmp))
             part = clip_video_part({"local_path": str(path)}, 0.0,
@@ -211,8 +214,10 @@ def analyze_gold(label_id: int, upload_path: Optional[str] = None) -> None:
         update_label(label_id, status="ready", error=None, title=read.title[:200], transcript=read.transcript[:TEXT_MAX],
                      why=read.why_it_works[:400], hook=read.hook[:80], views=info.get("view_count"),
                      humor_type=read.humor_type if read.humor_type in MOMENT_TYPES else "other")
+        print(f"  [standards] Ready: {url} ({read.title[:60]})", flush=True)
     except Exception as e:
         update_label(label_id, status="failed", error=str(e)[:300])
+        print(f"  [standards] Failed: {url}: {str(e)[:150]}", flush=True)
     finally:
         if upload_path:
             Path(upload_path).unlink(missing_ok=True)
