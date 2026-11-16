@@ -54,6 +54,106 @@ Ground truth for B (30 lines) and A2 (14 lines). A blank or "." mark counts as c
 - **Prompt variant (not applied):** "trust the audio over the transcript, keep negations, hide a line you cannot hear", run on Flash-Lite. On A2 it fixed "seblak" and "your map" but broke "Sova", and the "ga" and "anjay" errors stayed. On B the call fell back to text-only after a 503, so it is not a fair test, and it still kept the never-said lines. The repo prompt is unchanged.
 - **Reading:** the two models are level. The limit is the Whisper transcript, and the models rarely repair it even with the audio attached.
 
+
+## Round 2 (2026-11-17): bigger Whisper models, and a clearer streamer
+
+### Whisper models on the two clips you marked
+
+Same 60 second clips and audio for every model, run the way stage 5 runs (int8 on CPU, VAD, word timestamps, multilingual). `large-v3-turbo` is the 1.62 GB CTranslate2 model that faster-whisper maps `large-v3-turbo` to (the Hugging Face repo moved from `mobiuslabsgmbh` to `dropbox-dash`; same repo, MIT license).
+
+| | small (now) | medium | large-v3-turbo |
+|---|---|---|---|
+| Clip B, language guess | Indonesian (0.72) | Indonesian (0.75) | English (0.56) |
+| Clip B, mean word confidence | 0.58 | 0.52 | 0.71 |
+| Clip B, words heard | 86 | 82 | 115 |
+| Clip A2, mean word confidence | 0.56 | 0.60 | 0.71 |
+| Clip A2, words heard | 53 | 45 | 65 |
+
+- **B (mostly English speech, your marks):** `small` and `medium` write Indonesian for English ("Masuklah di luar", "Apa itu apa?"). Turbo writes English and gets "Look at me, look at me", "Ow", "Bye", "Baby can you say hi to my camera?", "What?", "Shelby", and all four "Thank you for the subprime Shelby". With the audio attached, the caption step also fixed turbo's "I die so far" to "I died so fast" and "Go take the water" to "Go take the wall", both matching your marks. Still wrong: the four "hi" lines, "Hello, I'm f0rsakeN's..." (turbo invents "M4 is a kind of fabric"), and "watch this".
+- **A2 (Indonesian, your marks):** turbo hears "gak enak banget" (the negation `small` dropped, so "not tasty" no longer becomes "tastes good"), "seblak", "This is your map, yes sir", "What are you eating?", "Jet, Sova, Cypher, Clove". Still wrong for all three models: "anjay".
+- **Medium** was no better than `small` (lower confidence on B, same language error), so it is not worth switching to.
+- **Like for like on the full 8 minute probe of B** (what the pipeline does, with long context): turbo still writes the English lines above. It loses the three "Go to the wall" lines that `small` had right, and writes Thai script for the last "Penong" lines.
+- **Speed:** turbo took 338 s for the 480 s probe (1.4x real time) against 440 s for `small` on the same file earlier. Both were single runs with other jobs on the PC, so this is not a clean benchmark. I did not time a multi hour stream.
+- **Turbo failure modes seen:** on OJEKS clip O1 it labelled the language English (0.59) and wrote English directly, including "Let's go!" five times in a row, which may be a repetition loop. It also invented "M4 is a kind of fabric".
+- **Switching:** `WHISPER_MODEL=large-v3-turbo` in the environment changes stage 5 for every stream. The model is already downloaded to the Hugging Face cache on this PC. Nothing is switched on.
+
+### A bug this found in the caption step
+
+On clip A2 with turbo's transcript, the captions slid one line out of step from line 7 on ("Damn" over "Mana rasanya gak enak banget lagi") while the line count still matched. The prompt told the model "You may move a word to the next or previous line", and one move shifted everything after it. The prompt now says one caption per source line, never move words between lines, and the same clip comes out aligned (commit b659b30).
+
+### New streamer: OJEKS (YouTube), clearer audio and real code-switching
+
+Chosen by a quick triage of the Indonesian YouTube channels in the outreach list (3 minute audio probe from each, transcribed with `small`; 8 of 10 downloaded, one had no speech at that minute). OJEKS mixed English and Indonesian inside sentences most densely. On the two 60 second OJEKS clips `small` has a mean word confidence of 0.61 and 0.71, against 0.58 on clip B and 0.56 on clip A2, so the audio is somewhat clearer, not dramatically. Stream: "ESCAPE SIMULATOR W @Lenlenkedua", https://www.youtube.com/watch?v=bpWoO48NAbw
+
+- **O1:** 26:15 to 27:15 (https://www.youtube.com/watch?v=bpWoO48NAbw&t=1575s)
+- **O2:** 25:00 to 26:00 (https://www.youtube.com/watch?v=bpWoO48NAbw&t=1500s)
+
+Not marked yet. `HEARD` is the Whisper line, `==>` is the English caption from the shipped prompt (Flash-Lite, clip attached).
+
+#### O1, Whisper small (10 lines)
+```
+ 1. apa ketekan apa all in this space?  ==>  What do I press, what's all in this space?
+ 2. to fire dance in the ground  ==>  to fire dance in the ground
+ 3. okay it's okay santai santai ini  ==>  Okay it's okay, chill, chill
+ 4. lagi liat liat ini  ==>  Just looking around here
+ 5. pepper ini ada suatu sih apa  ==>  This pepper, there's something here, what is it?
+ 6. disini ya oh iya oh  ==>  Right here, oh yeah, oh
+ 7. nama buku  ==>  Book name
+ 8. bentar cik  ==>  Hold on, dude
+ 9. buku nih  ==>  This book
+10. oh kama lagi ngar jenit  ==>  Oh, what is this, I'm confused
+```
+
+#### O1, Whisper large-v3-turbo
+```
+ 1. What's the key?  ==>  What's the key?
+ 2. Oh, it's space.  ==>  Oh, it's space.
+ 3. To fire dance in the ground.  ==>  To fire dance in the ground.
+ 4. Okay!  ==>  Okay!
+ 5. It's okay!  ==>  It's okay!
+ 6. Let's go!  ==>  let's go!
+ 7. Let's go!  ==>  let's go!
+ 8. Let's go!  ==>  let's go!
+ 9. Let's go!  ==>  let's go!
+10. Let's go!  ==>  let's go!
+11. This paper has something.  ==>  This paper has something.
+12. What's this?  ==>  What's this?
+13. Oh, yes!  ==>  Oh, yes!
+14. Oh, I found a book!  ==>  Oh, I found a book!
+15. Wait,  ==>  Wait,
+16. let's go!  ==>  let's go!
+17. It's a book!  ==>  It's a book!
+18. Oh, you can't see it.  ==>  Oh, you can't see it.
+```
+
+#### O2, Whisper small
+```
+ 1. iya, si banten juga saling hadapan di bawahnya, iya di bawahnya  ==>  Yeah, the Banten one is also facing each other underneath, yeah, underneath
+ 2. yang terakhir, sengah di bawahnya tuh gak ada lurus atas paling bawah  ==>  The last one, the one underneath isn't straight, it's at the very bottom
+ 3. gitu  ==>  Like that
+ 4. loh guys nah, kayanya aku ada kunci ini nih coba ya uh,  ==>  See guys, I think I have this key, let's try it, oh,
+ 5. bisa oke  ==>  It works, okay
+ 6. first of all  ==>  First of all
+ 7. first of all, kita punya botol  ==>  First of all, we have a bottle
+ 8. buat apa  ==>  What's it for?
+ 9. ya di hit?  ==>  Is it for hitting?
+10. ga tau  ==>  I don't know
+11. everyone is telling the truth  ==>  Everyone is telling the truth
+```
+
+#### O2, Whisper large-v3-turbo
+```
+ 1. berhadapan oke iya si banteng juga saling hadapan dibawahnya berarti ya di  ==>  facing each other, okay, yeah, the bull is also facing each other, so it's underneath, right?
+ 2. bawahnya yang terakhir singa dibawahnya tuh ngadep lurus atas paling bawah  ==>  underneath, the last one is the lion, underneath it's facing straight up, the very bottom
+ 3. tuh langsung  ==>  is straight
+ 4. keliling kita w gitu loh guys itu nah kayaknya aku ada kunci  ==>  all around us, W, you know guys, that, well, I think I have this key
+ 5. ini nih coba ya bisa oke first of all first of all  ==>  here, let's try, it works, okay, first of all, first of all
+ 6. kita punya botol lah  ==>  we have a bottle
+ 7. kekuin lah ketutup  ==>  it's locked, it's closed
+ 8. buat apa ya di si nggak tahu  ==>  what's it for, I don't know
+ 9. everyone is telling the truth  ==>  everyone is telling the truth
+```
+
 ## Side by side
 
 ```

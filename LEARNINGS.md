@@ -27,8 +27,18 @@
   limit is Whisper `small` on accented, noisy Indonesian: it dropped a "ga" (so "not tasty" became
   "tastes good"), heard English as Indonesian, and made up lines. Both models mostly kept those errors even
   with the audio attached, and a prompt telling them to trust the audio did not help (A2: 2 better, 1
-  worse). Data and marks: `reports/english_captions_eval.md`. Next to try: a bigger Whisper model on the
-  clip window only.
+  worse). Data and marks: `reports/english_captions_eval.md`.
+- **Learned (verified, 2026-11-17, a bigger Whisper):** `large-v3-turbo` (1.6 GB) beats `small` on the two
+  marked clips: it detected English on clip B (`small` and `medium` both wrote Indonesian for it), kept the
+  "gak" negation that flipped a meaning, and heard "seblak". `medium` was no better than `small`. Turbo ran
+  at about 1.4x real time on an 8 minute probe, `small` at 1.1x on the same file (single runs, not a clean
+  benchmark; no multi hour stream timed). Its own failure modes: it can flip the language to English and
+  write English directly, repeat "Let's go!", and invent lines ("M4 is a kind of fabric"). Not switched on:
+  `WHISPER_MODEL=large-v3-turbo` in the environment changes stage 5. Not yet marked on a second streamer
+  (OJEKS clips O1 and O2 are in the report, waiting for someone who speaks Indonesian).
+- **Learned (verified):** the caption prompt let the model move words between lines. On a real clip that
+  shifted every later caption by one line with the line count unchanged, so the count check passed. The
+  prompt now says one caption per source line (b659b30).
 - **Open:** story, POV and countdown clips translate each segment separately, so a first render can make
   up to 2 calls per segment (the plan says 2 per clip). Fine on Flash-Lite; batch the segments into one
   call if translation moves to Flash. Their editor shows the spoken text, not the English lines.
