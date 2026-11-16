@@ -69,7 +69,7 @@ Rewrite every line as natural spoken English, the way a young native English spe
 - Keep swearing exactly as strong as it is. Do not soften it, censor it, or add any.
 - Keep words already said in English as they are. If a whole line is already English, return it exactly unchanged.
 - Keep names, usernames, game terms, item names and memes as they are.
-- Keep each line about as long as the original so it fits the same moment. You may move a word to the next or previous line when English word order needs it.
+- Output line N is the caption for input line N only. Never merge, split, reorder or move words between lines, even when a sentence continues on the next line: translate each line on its own and keep it about as long as the original.
 - Fix a misheard word only when the audio or the context makes the right word clear. Never invent speech.
 - A line that is only filler or a meaningless sound ("eh", "hmm") becomes "". Laughter becomes "HAHAHA".
 - No brackets, notes or explanations.
