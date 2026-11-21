@@ -470,6 +470,14 @@ def dispatch_post(post_id: int, acknowledged: bool = False) -> Dict[str, Any]:
             caption=full_caption if platform == "tiktok" else None,
         )
 
+        if platform == "youtube" and final_status == "posted" and platform_post_id:
+            try:  # the analytics row is linked from the start; a failure here never fails the post
+                from src.analytics import record_upload
+                record_upload(account_id, post_id, post["candidate_id"], clip_id, platform_post_id, post_url,
+                              post.get("clip_title") or caption)
+            except Exception as e:
+                log_event("warning", f"Post #{post_id}: could not record it for analytics: {e}")
+
         log_event(
             "info",
             f"Post #{post_id} dispatched to {platform} ({final_status}, ID: {platform_post_id})",

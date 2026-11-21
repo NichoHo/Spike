@@ -47,6 +47,11 @@
       {{ nav_badge("posts") }}
     </a>
 
+    <a href="/analytics" class="nav-item {% if active_nav == 'analytics' %}is-active{% endif %}" {% if active_nav == 'analytics' %}aria-current="page"{% endif %}>
+      {{ ui.icon("chart-line", 16) }}
+      <span>Analytics</span>
+    </a>
+
     <a href="/outreach" class="nav-item {% if active_nav == 'outreach' %}is-active{% endif %}" {% if active_nav == 'outreach' %}aria-current="page"{% endif %} data-nav-key="outreach" data-nav-marker="{{ badges.outreach[1] }}">
       {{ ui.icon("envelope-simple", 16) }}
       <span>Outreach</span>

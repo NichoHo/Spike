@@ -188,15 +188,40 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_posts_status_scheduled
             ON posts(status, scheduled_for);
 
-        CREATE TABLE IF NOT EXISTS post_stats (
+        -- One row per Short on a connected channel (src/analytics.py). candidate_id has no FK: the facts copy outlives the candidate.
+        CREATE TABLE IF NOT EXISTS published (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-            measured_at TEXT NOT NULL,
+            account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            platform TEXT NOT NULL DEFAULT 'youtube',
+            platform_video_id TEXT NOT NULL,
+            url TEXT,
+            title TEXT,
+            published_at TEXT,
+            duration_s REAL,
+            post_id INTEGER REFERENCES posts(id) ON DELETE SET NULL,
+            candidate_id INTEGER,
+            facts TEXT,          -- JSON copy made when the row is linked
+            watch_notes TEXT,    -- JSON, Step 2
+            retention TEXT,      -- JSON {age, points}: the 100 audienceWatchRatio points
+            link_state TEXT NOT NULL DEFAULT 'none' CHECK(link_state IN ('auto', 'confirmed', 'none')),
+            UNIQUE(platform, platform_video_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS published_stats (
+            published_id INTEGER NOT NULL REFERENCES published(id) ON DELETE CASCADE,
+            day TEXT NOT NULL,
             views INTEGER DEFAULT 0,
+            engaged_views INTEGER DEFAULT 0,
             likes INTEGER DEFAULT 0,
             comments INTEGER DEFAULT 0,
-            shares INTEGER DEFAULT 0
+            shares INTEGER DEFAULT 0,
+            subs_gained INTEGER DEFAULT 0,
+            avg_view_pct REAL,
+            avg_view_s REAL,
+            UNIQUE(published_id, day)
         );
+
+        DROP TABLE IF EXISTS post_stats;  -- nothing ever wrote it
 
         CREATE TABLE IF NOT EXISTS clip_ai_edits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

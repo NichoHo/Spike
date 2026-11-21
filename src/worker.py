@@ -158,6 +158,11 @@ def start_worker(poll_interval_s: float = 5.0):
 
             if now_ts - last_sweep >= 3600.0:
                 sweep_old_sections()
+                try:
+                    from src.analytics import run_daily  # runs once a day: it checks its own date
+                    run_daily()
+                except Exception as an_err:
+                    print(f"[worker] Analytics pull error: {an_err}")
                 last_sweep = now_ts
 
             processed = run_render_cycle() or run_worker_cycle()

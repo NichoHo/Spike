@@ -1,5 +1,22 @@
 # Spike: Learnings
 
+## 2026-11-21: Clip analytics step 1 built (stats per Short and the Analytics tab)
+
+- **Built:** `src/analytics.py`, tables `published` and `published_stats` (`post_stats` dropped), the
+  `yt-analytics.readonly` scope, a daily pull in the worker, the `/analytics` tab (sortable table, group
+  views, Unlinked picker, admin "Pull now"), and `tests/test_analytics.py`. A YouTube upload by Spike makes a
+  linked row. A daily import links a Short by an exact title match (0.9 or more), else it shows Unlinked.
+- **Changed from the spec:** the channel import uses the account's own OAuth token for `channels`,
+  `playlistItems` and `videos.list`, not the outreach API-key helpers, so it needs no API key and takes no
+  share of the outreach quota ledger. It reuses `parse_duration` and `SHORT_MAX_S`.
+- **Not checked yet (needs the live channel):** `dimensions=day,video` with a multi-video filter (a 400
+  falls back to one call per Short in code), how late Analytics rows arrive, and the compare with
+  YouTube Studio. The user must also turn on the YouTube Analytics API in the Cloud project and sign in
+  again.
+- **Tests:** `tests/test_analytics.py` passes (8). The full suite crashes on this machine with an OpenBLAS
+  memory error when run as one process (also before this change); files run one at a time pass with
+  `OPENBLAS_NUM_THREADS=1`.
+
 ## 2026-11-21: Clip analytics design (no code yet)
 
 - **Done:** wrote `docs/superpowers/specs/2026-11-21-clip-analytics-design.md` and pointed BLUEPRINT

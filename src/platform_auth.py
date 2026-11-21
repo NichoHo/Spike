@@ -25,8 +25,9 @@ PLATFORMS: Dict[str, Dict[str, Any]] = {
         "env": ("YOUTUBE_UPLOAD_CLIENT_ID", "YOUTUBE_UPLOAD_CLIENT_SECRET"),
         "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
-        # readonly only to read the channel name after sign-in
-        "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly",
+        # readonly: the channel name and its uploads; yt-analytics.readonly: per-Short stats (src/analytics.py)
+        "scope": "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly "
+                 "https://www.googleapis.com/auth/yt-analytics.readonly",
     },
     "tiktok": {
         "label": "TikTok",
