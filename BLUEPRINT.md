@@ -515,7 +515,8 @@ labeled window.
   and percentile scores in `candidates.features`.
 - **Labels, weakest to strongest:** overlap with community clips or the top
   heatmap bins; review approve or reject (with `reject_reason`); posted;
-  `post_stats` views, normalized per channel.
+  `published_stats` views as a multiple of the channel median, and the
+  "stayed" share (clip analytics spec, 2026-11-21).
 - **Test set.** Phase 0 labels 3 videos. Grow it to 10 VODs, each moment
   graded 0 to 3, and freeze it. `spike eval` re-runs detection on the frozen
   set and reports HIT@1 (is the top pick good), P@5, NDCG@5, and recall of
@@ -967,6 +968,10 @@ accounts that are already connected.
 | posted_by | integer fk users | Null if auto-posted |
 
 ### `post_stats`
+Replaced by `published` and `published_stats` in the clip analytics spec
+(`docs/superpowers/specs/2026-11-21-clip-analytics-design.md`). No code
+writes `post_stats`.
+
 | Column | Type | Notes |
 |---|---|---|
 | post_id | integer fk | |
@@ -1312,8 +1317,12 @@ clip cannot post through any path.
   30 minutes, a small separate scheduled task sends a Discord alert.
 - Disk-space guard and nightly cleanup.
 - Nightly SQLite backup (`.backup` command), 14 kept.
-- Pull post stats at 24 h and 7 d. A Stats view shows views by score band and
-  by signal mix.
+- Clip analytics, designed in
+  `docs/superpowers/specs/2026-11-21-clip-analytics-design.md`: daily YouTube
+  stats per Short (by day, so every number compares the same age), an
+  Analytics tab ranked by the multiple over the channel median and by
+  "stayed", weekly Claude Sonnet insights, suggested standards from
+  comparable channels, and an approved default hook voice.
 - Grow the ground-truth set to 10 graded VODs and freeze it (§6.5).
 - Once a few hundred reviewed candidates exist, fit logistic regression on
   `candidates.features` against review and post labels. Adopt the new

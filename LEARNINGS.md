@@ -1,5 +1,29 @@
 # Spike: Learnings
 
+## 2026-11-21: Clip analytics design (no code yet)
+
+- **Done:** wrote `docs/superpowers/specs/2026-11-21-clip-analytics-design.md` and pointed BLUEPRINT
+  Phase 7, §6.5 and §9 at it.
+- **Learned (checked in `data/spike.db`):** 0 accounts, 0 posts, 0 `post_stats` rows, 0 anime candidates
+  on this machine. The 29 DragonSoulClips Shorts are not linked to any clip. No code writes `post_stats`.
+- **Learned (verified, YouTube Analytics reference):** `yt-analytics.readonly` is needed, and
+  `reports.query` also needs `youtube.readonly`. `engagedViews` and a 100-point `audienceWatchRatio`
+  curve exist. Retention takes one video per call. Other reports take up to 500 video ids, with video
+  ids times days at 50,000 or less.
+- **Learned (verified, Meta media insights reference):** Reels give `views`, `reach`,
+  `ig_reels_avg_watch_time` and `reels_skip_rate` (skips in the first 3 s), with up to 48 h of lag.
+- **Learned (verified, Gemini docs):** about 100 tokens per second of video at low resolution, so a
+  30 s Short costs about 3,000 tokens to watch.
+- **Decided:** Gemini flash-lite watches each Short once (Claude cannot take video). Plain code does every
+  number. Claude Sonnet writes one insights report a week (about 15k tokens). Haiku claims too much from
+  29 Shorts, and Opus spends more of the Pro plan for little gain on a small input.
+- **Decided:** from instagram-agent-skill (MIT): rank by the multiple over the channel median, learn from
+  comparable channels' outliers as suggested standards, and add opening checks from the timed words.
+  Not taken: its hook scorer (the author measured AUC 0.56 for picking winners) and its 26 formulas
+  (written for people who talk to the camera).
+- **Open:** do Shorts reach YouTube by hand or through Spike? Which machine holds the clips behind the
+  29 old Shorts?
+
 ## 2026-11-16: English captions for streamers who mix languages
 
 - **Built:** a clip's captions are `spoken` (default, as before) or `english`. Set per source, per job and
