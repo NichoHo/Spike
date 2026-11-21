@@ -38,6 +38,7 @@ from src.db import (
     save_label,
     update_label,
 )
+from src import suggestions
 from src.labels import (GOLD_CATEGORIES, GOLD_EXTS, GOLD_MAX_BYTES, LIKE_TAGS, OTHER_CHARS, OTHER_MAX, analyze_gold,
                         gold_url_ok, reason_texts, shared_links)
 from src.concepts import EMOTIONS
@@ -96,6 +97,8 @@ async def settings_page(
             "gold_categories": GOLD_CATEGORIES,
             "like_tags": LIKE_TAGS,
             "standards_error": request.query_params.get("standards_error", ""),
+            "learn_channels": suggestions.channels(),
+            "suggested": suggestions.suggestions(),
             "share_url": f"{PUBLIC_URL}/settings/standards/share",
         },
     )
@@ -272,6 +275,38 @@ async def share_standard(body: Dict[str, Any], background_tasks: BackgroundTasks
         return "Spike: already a standard." if old == 1 else f"Spike: all {old} are already standards."
     saved = "saved. Gemini is reading it." if added == 1 else f"saved {added}. Gemini is reading them."
     return f"Spike: {saved}" + (f" Already standards: {old}." if old else "")
+
+
+@router.post("/settings/standards/channels")
+async def add_standard_channel(channel: str = Form(""), user: Dict[str, Any] = Depends(require_admin)):
+    """Follow a comparable channel: Spike reads its last 200 uploads now (a few quota units) and once a month, and
+    suggests its outliers."""
+    return _standards_back(suggestions.add_channel(channel) or "")
+
+
+@router.post("/settings/standards/channels/remove")
+async def remove_standard_channel(ref: str = Form(""), user: Dict[str, Any] = Depends(require_admin)):
+    suggestions.remove_channel(ref)
+    return _standards_back()
+
+
+@router.post("/settings/standards/suggestions/{video_id}/add")
+async def add_suggestion(video_id: str, background_tasks: BackgroundTasks, user: Dict[str, Any] = Depends(require_admin)):
+    """Add a suggested Short as a standard: the same Gemini intake as a pasted link, with its multiple kept."""
+    s = suggestions.find(video_id)  # only a Short Spike itself suggested; the id never comes straight from the form into a URL
+    if not s:
+        return _standards_back("That suggestion is no longer on the list.")
+    label_id = save_label({"kind": "gold", "category": "any", "status": "processing", "reasons": "[]",
+                           "source_url": f"https://www.youtube.com/shorts/{s['id']}", "multiple": s["multiple"]})
+    background_tasks.add_task(analyze_gold, label_id)
+    return _standards_back()
+
+
+@router.post("/settings/standards/suggestions/{video_id}/dismiss")
+async def dismiss_suggestion(video_id: str, user: Dict[str, Any] = Depends(require_admin)):
+    if suggestions.VIDEO_ID_RE.search(f"shorts/{video_id}"):
+        suggestions.dismiss(video_id)
+    return _standards_back()
 
 
 @router.post("/settings/standards/{label_id}/delete")

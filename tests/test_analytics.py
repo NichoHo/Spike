@@ -314,3 +314,111 @@ def test_the_insights_tab_shows_the_newest_report_and_escapes_model_text(acct, m
         assert page.status_code == 200 and "Quick openings stay" in page.text and "Worth testing" in page.text
         assert "<script>alert(1)</script>" not in page.text and "&lt;script&gt;" in page.text
         assert client.post("/analytics/insights/run", follow_redirects=False).status_code == 303
+
+
+# ── Step 4: suggested standards ───────────────────────────────────────────────
+
+def _yt_shorts(views_by_id, days_old=30):
+    """Fake YouTube answers for one channel whose Shorts have the given views."""
+    published = _iso(days_old)
+
+    def call(endpoint, settings, **q):
+        if endpoint == "channels":
+            return {"items": [{"id": "UC" + "a" * 22, "snippet": {"title": "Hakaizo"}, "contentDetails": {"relatedPlaylists": {"uploads": "UU1"}}}]}
+        if endpoint == "playlistItems":
+            return {"items": [{"contentDetails": {"videoId": v}} for v in views_by_id]}
+        return {"items": [{"id": v, "snippet": {"title": f"Short {v}", "publishedAt": published if v != "young" else _iso(3)},
+                           "contentDetails": {"duration": "PT30S" if v != "long" else "PT20M"},
+                           "statistics": {"viewCount": str(n)}} for v, n in views_by_id.items()]}
+    return call
+
+
+def test_channel_links_are_checked_before_use():
+    from src.suggestions import parse_channel
+    assert parse_channel("@Hakaizo") == "@Hakaizo" and parse_channel("https://www.youtube.com/@Hakaizo/shorts") == "@Hakaizo"
+    assert parse_channel("youtu.be/@Hakaizo") == "@Hakaizo"
+    assert parse_channel("https://www.youtube.com/channel/UC" + "a" * 22) == "UC" + "a" * 22
+    for bad in ("https://evil.com/@Hakaizo", "@a", "@bad handle; rm -rf", "https://youtube.com.evil.com/@Hakaizo", "javascript:alert(1)", ""):
+        assert parse_channel(bad) is None
+
+
+def test_young_shorts_are_left_out_and_a_3x_outlier_is_suggested(acct, monkeypatch):
+    from src import suggestions
+    views = {f"s{i}": 1000 for i in range(8)} | {"hit": 5000, "young": 90000, "long": 90000}
+    monkeypatch.setattr(suggestions.youtube, "call", _yt_shorts(views))
+    monkeypatch.setattr(suggestions.outreach_db, "get_settings", lambda: {})
+    got = suggestions.scan("@Hakaizo")
+    assert got["error"] == "" and got["name"] == "Hakaizo"
+    assert [(s["id"], s["multiple"]) for s in got["suggestions"]] == [("hit", 5.0)]  # not "young" (3 days old) or "long" (20 min)
+
+
+def test_a_failed_scan_is_kept_as_an_error_not_raised(monkeypatch):
+    from src import suggestions
+
+    def quota(*a, **k):
+        raise suggestions.youtube.QuotaExhausted("used up")
+    monkeypatch.setattr(suggestions.youtube, "call", quota)
+    monkeypatch.setattr(suggestions.outreach_db, "get_settings", lambda: {})
+    assert suggestions.scan("@Hakaizo")["error"] == "used up"
+
+
+def test_suggestions_skip_standards_and_dismissed_and_add_keeps_the_multiple(acct, monkeypatch):
+    from src import labels, suggestions
+    from src.db import get_connection as gc, save_label, set_setting
+    with gc() as conn:
+        conn.execute("DELETE FROM labels WHERE kind = 'gold'")
+    set_setting(suggestions.DISMISSED_KEY, "[]")
+    suggestions._save_channels([{"ref": "@Hakaizo", "name": "Hakaizo", "checked": "2026-11-21T00:00:00+00:00", "error": "",
+                                 "suggestions": [{"id": "aaaaaaaaaaa", "title": "A", "views": 9, "multiple": 4.0, "published_at": "x"},
+                                                 {"id": "bbbbbbbbbbb", "title": "B", "views": 9, "multiple": 3.5, "published_at": "x"},
+                                                 {"id": "ccccccccccc", "title": "C", "views": 9, "multiple": 3.1, "published_at": "x"}]}])
+    save_label({"kind": "gold", "category": "any", "status": "ready", "source_url": "https://youtube.com/shorts/aaaaaaaaaaa", "reasons": "[]"})
+    suggestions.dismiss("bbbbbbbbbbb")
+    assert [s["id"] for s in suggestions.suggestions()] == ["ccccccccccc"]
+    # the judge's examples say how far past its channel's median a standard went
+    gid = save_label({"kind": "gold", "category": "any", "status": "ready", "transcript": "t", "why": "w", "humor_type": "absurd",
+                      "source_url": "https://youtube.com/shorts/ddddddddddd", "reasons": "[]", "multiple": 4.2})
+    assert "(4x its channel's median)" in labels.examples_block("", None) and gid
+
+
+def test_own_winners_need_ten_old_shorts_and_a_2x_multiple_with_better_stayed(acct):
+    from src import suggestions
+    from src.db import set_setting
+    set_setting(suggestions.DISMISSED_KEY, "[]")
+    assert suggestions.own_suggestions() == []
+    ids = []
+    for i in range(12):  # 12 Shorts, 12 days apart per step so every one has 5+ earlier ones from the 6th on
+        ids.append(_published(acct, f"vid{i:08d}", 100 - i * 5, title=f"Own {i}"))
+    with get_connection() as conn:
+        for i, pid in enumerate(ids):
+            day = datetime.fromisoformat(_row(pid)["published_at"].replace("Z", "+00:00")).date()
+            hit = i == 11
+            for d in range(7):
+                conn.execute("INSERT INTO published_stats (published_id, day, views, engaged_views) VALUES (?, ?, ?, ?)",
+                             (pid, (day + timedelta(d)).isoformat(), 500 if hit else 100, 400 if hit else 40))
+    got = suggestions.own_suggestions()
+    assert [s["title"] for s in got] == ["Own 11"] and got[0]["multiple"] >= 2
+
+
+def test_the_standards_card_follows_a_channel_and_adds_a_suggestion(acct, monkeypatch):
+    from starlette.testclient import TestClient
+    from src import suggestions
+    from src.db import get_connection as gc, set_setting
+    from src.web.app import app
+    set_setting(suggestions.DISMISSED_KEY, "[]")
+    with gc() as conn:
+        conn.execute("DELETE FROM labels WHERE kind = 'gold'")
+    views = {f"s{i}": 1000 for i in range(8)} | {"hit": 5000}
+    monkeypatch.setattr(suggestions.youtube, "call", _yt_shorts(views))
+    monkeypatch.setattr(suggestions.outreach_db, "get_settings", lambda: {})
+    monkeypatch.setattr("src.web.routes.settings.analyze_gold", lambda *a, **k: None)
+    with TestClient(app) as client:
+        assert client.post("/settings/standards/channels", data={"channel": "https://evil.com/@x"}, follow_redirects=False).status_code == 303
+        assert client.post("/settings/standards/channels", data={"channel": "@Hakaizo"}, follow_redirects=False).status_code == 303
+        page = client.get("/settings").text
+        assert "Short hit" in page and "5.0x" in page and "Hakaizo" in page
+        assert client.post("/settings/standards/suggestions/hit/add", follow_redirects=False).status_code == 303
+        assert client.post("/settings/standards/suggestions/nothere1234/add", follow_redirects=False).status_code == 303
+    with gc() as conn:
+        rows = conn.execute("SELECT source_url, multiple, status FROM labels WHERE kind = 'gold'").fetchall()
+    assert [(r["source_url"], r["multiple"]) for r in rows] == [("https://www.youtube.com/shorts/hit", 5.0)]

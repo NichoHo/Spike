@@ -109,6 +109,36 @@
           <p>Not in the share sheet's first row? It's under More (Instagram: Share to…). Use Edit Actions there to pin it.</p>
         </div>
       </details>
+      <details class="disclosure" id="learn-channel" {% if learn_channels or suggested %}open{% endif %}>
+        <summary>{{ ui.icon("caret-right", 14) }} Learn from a channel</summary>
+        <div class="stack stack--sm disclosure__body">
+          <p class="small muted">Paste a comparable channel. Spike reads its last 200 uploads now and once a month, and suggests Shorts that got at least 3x that channel's median views. Public data has views only, so these show what YouTube pushes, not what keeps people watching. Your own Shorts that did 2x and kept viewers join the list after 10 Shorts are a week old.</p>
+          <form method="post" action="/settings/standards/channels" class="row" style="gap: var(--space-2);">
+            <input type="text" name="channel" class="input" placeholder="@Hakaizo or a youtube.com link" autocomplete="off" aria-label="Channel handle or link" required>
+            <button type="submit" class="btn btn--secondary">Learn from it</button>
+          </form>
+          {% for c in learn_channels %}
+            <form method="post" action="/settings/standards/channels/remove" class="row row--between small">
+              <span>{{ c.name }} <span class="muted">{{ c.ref }}, checked {{ c.checked[:10] }}{% if c.error %}. {{ c.error }}{% endif %}</span></span>
+              <input type="hidden" name="ref" value="{{ c.ref }}">
+              <button type="submit" class="btn btn--ghost btn--sm" aria-label="Stop learning from {{ c.name }}">Remove</button>
+            </form>
+          {% endfor %}
+          {% if suggested %}
+            <ul class="bank-list" aria-label="Suggested standards">
+              {% for s in suggested %}
+              <li class="bank-list__row">
+                <span class="badge">{{ "%.1f" | format(s.multiple) }}x</span>
+                <span class="bank-list__text"><a href="https://www.youtube.com/shorts/{{ s.id }}" target="_blank" rel="noopener">{{ s.title }}</a>
+                  <span class="bank-list__sub">{{ s.source }}, {{ "{:,}".format(s.views) }} views</span></span>
+                <form method="post" action="/settings/standards/suggestions/{{ s.id }}/add"><button type="submit" class="btn btn--secondary btn--sm">Add</button></form>
+                <form method="post" action="/settings/standards/suggestions/{{ s.id }}/dismiss"><button type="submit" class="btn btn--ghost btn--sm">Dismiss</button></form>
+              </li>
+              {% endfor %}
+            </ul>
+          {% elif learn_channels %}<p class="small muted">No suggestions right now.</p>{% endif %}
+        </div>
+      </details>
       {% if gold_labels %}
       <ul class="bank-list" aria-label="Standards">
         {% for g in gold_labels %}

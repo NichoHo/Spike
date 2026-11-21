@@ -1,5 +1,19 @@
 # Spike: Learnings
 
+## 2026-11-21: Clip analytics step 4 built (suggested standards)
+
+- **Built:** `src/suggestions.py`. The Standards card on Settings has "Learn from a channel": a handle or
+  youtube.com / youtu.be link (checked by regex, never reaches a shell) is stored in `standard_channels`
+  and scanned now and every 30 days with the outreach `youtube.call` helpers (last 200 uploads, about 8
+  quota units; this uses the API key and the outreach quota ledger). Shorts of 180 s or less and 14 days
+  old or more get a multiple over the median of the channel's other Shorts; 3x or more (up to 10) are
+  suggested. Spike's own Shorts join at 2x with `stayed` above the channel median once 10 are a week old.
+- **Built:** Add runs the existing `analyze_gold` intake and stores the multiple in the new column
+  `labels.multiple`; `examples_block` then writes "(Nx its channel's median)". Dismiss is kept in
+  `standard_dismissed`. Add only accepts an id Spike itself suggested.
+- **Not checked yet (needs a key and quota):** `channels.list` with `forHandle` (recalled, not verified
+  this session) and a real scan of a channel such as @Hakaizo. Tests fake `youtube.call`.
+
 ## 2026-11-21: Clip analytics step 3 built (weekly insights)
 
 - **Built:** `src/insights.py` and the `insights` table. Code picks the top 5 and bottom 5 Shorts (7 or more

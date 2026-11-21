@@ -106,6 +106,11 @@ def _liked(gold: Any) -> str:
     return f" Team likes it for: {_cut(likes, 300).rstrip('.')}." if likes else ""
 
 
+def _beat(gold: Any) -> str:
+    """The note "(4x its channel's median)" for a standard that came from a suggestion, else nothing."""
+    return f" ({gold['multiple']:.0f}x its channel's median)" if gold["multiple"] else ""
+
+
 def examples_block(channel: str, category: Optional[str]) -> str:
     """The team's examples for the transcript judge: up to 3 ready gold shorts (this stream's category first, then
     "any"), then the 2 newest approved and 2 newest rejected clips of this channel. Empty when there are none, and
@@ -120,7 +125,7 @@ def examples_block(channel: str, category: Optional[str]) -> str:
 def _examples_block(channel: str, category: Optional[str]) -> str:
     gold = [g for g in list_labels("gold", status="ready") if g["category"] in (category, "any")]
     gold.sort(key=lambda g: g["category"] != category)  # stable: this category first, each part stays newest first
-    lines = [f'Standard [{g["humor_type"] or "other"}]: "{_cut(g["transcript"], 300)}"{_liked(g)} '
+    lines = [f'Standard [{g["humor_type"] or "other"}]{_beat(g)}: "{_cut(g["transcript"], 300)}"{_liked(g)} '
              f'Works because: {_cut(g["why"], 200)}' for g in gold[:3]]
     if channel:
         for r in list_labels("approved", channel=channel, limit=2):

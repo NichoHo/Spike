@@ -322,6 +322,7 @@ def init_db():
             "ALTER TABLE candidates ADD COLUMN segments TEXT",  # JSON [[start_s, end_s]] of a story clip (stream seconds)
             "ALTER TABLE candidates ADD COLUMN zooms TEXT",  # JSON [{t, scale, hold_s}]; t is clip time for stories
             "ALTER TABLE clips ADD COLUMN zooms TEXT",
+            "ALTER TABLE labels ADD COLUMN multiple REAL",  # gold: views over its channel's median (src/suggestions.py)
             "ALTER TABLE clips ADD COLUMN render_facts TEXT",  # JSON opening checks of the current render, see src/opening.py
             "ALTER TABLE accounts ADD COLUMN platform_user_id TEXT",  # channel id / TikTok open_id / Instagram user id
             "ALTER TABLE clips ADD COLUMN silence_trim_s REAL",  # pause length that silence trim cuts; NULL is SILENCE_TRIM_S  # JSON [{t, scale, hold_s}]; an empty list means no zoom
@@ -1571,7 +1572,7 @@ def _meta_duration(video_id: int) -> Optional[float]:
 # ── Labels (src/labels.py) ───────────────────────────────────────────────────
 
 LABEL_FIELDS = ("kind", "clip_id", "channel", "category", "source_url", "start_s", "end_s", "title", "transcript", "why",
-                "humor_type", "hook", "reasons", "note", "scores", "views", "status", "error")
+                "humor_type", "hook", "reasons", "note", "scores", "views", "status", "error", "multiple")
 
 
 def save_label(fields: Dict[str, Any]) -> int:
