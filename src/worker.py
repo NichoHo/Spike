@@ -161,6 +161,8 @@ def start_worker(poll_interval_s: float = 5.0):
                 try:
                     from src.analytics import run_daily  # runs once a day: it checks its own date
                     run_daily()
+                    from src.insights import run_weekly  # a report when the newest is 7 days old; one Claude call
+                    run_weekly()
                 except Exception as an_err:
                     print(f"[worker] Analytics pull error: {an_err}")
                 last_sweep = now_ts

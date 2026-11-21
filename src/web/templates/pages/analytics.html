@@ -30,11 +30,42 @@
   {% endif %}
 {% else %}
   <div class="tabs" role="tablist" aria-label="View">
-    <a href="/analytics" class="tab {% if not group %}is-active{% endif %}" role="tab">Shorts</a>
+    <a href="/analytics" class="tab {% if not group and view != 'insights' %}is-active{% endif %}" role="tab">Shorts</a>
     {% for k, label in groups.items() %}<a href="/analytics?group={{ k }}" class="tab {% if group == k %}is-active{% endif %}" role="tab">By {{ label | lower }}</a>{% endfor %}
+    <a href="/analytics?view=insights" class="tab {% if view == 'insights' %}is-active{% endif %}" role="tab">Insights</a>
   </div>
 
-  {% if group %}
+  {% if view == 'insights' %}
+    {% if user and user.role == 'admin' %}
+      <form method="post" action="/analytics/insights/run">{{ ui.button("Run now", variant="secondary", type="submit") }}</form>
+      <p class="ai-status__note">Spike writes one report a week. Run now works once a day.</p>
+    {% endif %}
+    {% if insights_error %}{{ ui.alert("warning", "The last report failed", insights_error) }}{% endif %}
+    {% if not report %}
+      {{ ui.empty_state("chart-line", "No report yet", "The first one appears when Shorts have been imported. An admin can press Run now.") }}
+    {% else %}
+      <p class="ai-status__note">Report from {{ report_at[:10] }}.{% if reports | length > 1 %} Older:
+        {% for r in reports %}{% if r.id != report_id %}<a href="/analytics?view=insights&report={{ r.id }}">{{ r.created_at[:10] }}</a> {% endif %}{% endfor %}{% endif %}</p>
+      {% if report.not_enough_data %}
+        <p>Not enough data. A report needs at least 5 Shorts that are 7 or more days old and have stats.</p>
+      {% else %}
+        <h2>Findings</h2>
+        {% for f in report.findings %}
+          <p>{{ f.claim }} {{ ui.badge("Solid" if f.confidence == "solid" else "Worth testing", "success" if f.confidence == "solid" else "muted") }}
+            <span class="ai-status__note">n = {{ f.n }}, Shorts {{ f.ids | join(", ") }}</span></p>
+        {% else %}<p>No finding the data supports.</p>{% endfor %}
+        {% if report.drops %}
+          <h2>Where viewers left</h2>
+          {% for d in report.drops %}<p>Short {{ d.id }} at {{ d.at_s }}s{% if d.line %} ("{{ d.line }}"){% endif %}: {{ d.likely_cause }}</p>{% endfor %}
+        {% endif %}
+        {% if report.next_test %}
+          <h2>Next test</h2>
+          <p>{{ report.next_test.change }}</p>
+          <p class="ai-status__note">Keep the same: {{ report.next_test.keep_same }}. Shorts needed: {{ report.next_test.shorts_needed }}.</p>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  {% elif group %}
     <div class="table-wrap"><table class="table">
       <thead><tr><th>{{ groups[group] }}</th><th class="num">Shorts</th><th class="num">Median stayed</th><th class="num">Median multiple</th></tr></thead>
       <tbody>

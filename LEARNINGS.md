@@ -1,5 +1,19 @@
 # Spike: Learnings
 
+## 2026-11-21: Clip analytics step 3 built (weekly insights)
+
+- **Built:** `src/insights.py` and the `insights` table. Code picks the top 5 and bottom 5 Shorts (7 or more
+  days old, by `stayed`, ties by `multiple`), builds the prompt with every number and the group table, and
+  `run_claude(model="sonnet", label="analytics insights")` writes findings, drops and one next test. The
+  worker makes a report when the newest is 7 or more days old (one try a day). Admins get Run now (once a
+  day) on the new Insights tab, which shows the newest report, older ones, and the last error.
+- **Checks in code, not in the prompt only:** titles, hooks and watch notes go inside `<untrusted_data>`;
+  a finding that cites an id the model was not given is dropped; "solid" needs n of 20 or more (10 on
+  each side), else it becomes "worth testing"; fewer than 5 old enough Shorts stores "not enough data"
+  without a Claude call.
+- **Not checked yet:** a real Sonnet answer on real data (tests fake `run_claude`), and its token cost
+  against the spec's estimate (about 10k in, 1.5k out; the real counts are saved on each report).
+
 ## 2026-11-21: Clip analytics step 2 built (opening checks and watch notes)
 
 - **Built:** `src/opening.py` computes `first_word_s`, `words_first_3s`, `longest_quiet_s`, `loops`, `hook_card`

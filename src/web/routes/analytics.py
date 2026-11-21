@@ -6,7 +6,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.status import HTTP_303_SEE_OTHER
 
-from src import analytics
+import json
+
+from src import analytics, insights
 from src.db import get_connection, get_setting, list_accounts
 from src.web.auth import get_current_user, require_admin
 
@@ -25,7 +27,7 @@ def _value(r: Dict[str, Any], col: str):
 
 
 @router.get("/analytics", response_class=HTMLResponse)
-async def analytics_page(request: Request, sort: str = "published", desc: int = 1, group: str = "",
+async def analytics_page(request: Request, sort: str = "published", desc: int = 1, group: str = "", view: str = "", report: int = 0,
                          user: Dict[str, Any] = Depends(get_current_user)):
     rows = analytics.shorts_table()
     col = SORTS.get(sort, "published_at")
@@ -37,7 +39,14 @@ async def analytics_page(request: Request, sort: str = "published", desc: int = 
             "WHERE cand.title IS NOT NULL GROUP BY cand.id ORDER BY MAX(c.created_at) DESC LIMIT 300")]
     accounts = [a for a in list_accounts() if a["platform"] == "youtube"]
     notices = [(a["display_name"], m) for a in accounts if (m := get_setting(f"analytics_status:{a['id']}"))]
+    with get_connection() as conn:
+        reports = [dict(r) for r in conn.execute("SELECT id, created_at, tokens_in, tokens_out FROM insights ORDER BY id DESC LIMIT 20")]
+        shown = conn.execute("SELECT * FROM insights WHERE id = ?", (report,)).fetchone() if report else None
+    current = dict(shown) if shown else insights.latest()
     return request.app.state.templates.TemplateResponse(request=request, name="pages/analytics.html", context={
+        "view": view, "reports": reports, "report": json.loads(current["json"]) if current else None,
+        "report_id": current["id"] if current else None, "report_at": current["created_at"] if current else None,
+        "insights_error": get_setting("insights_error"),
         "page_title": "Analytics", "active_nav": "analytics", "user": user, "rows": rows, "clips": clips, "notices": notices,
         "sort": sort, "desc": desc, "group": group if group in GROUPS else "", "groups": GROUPS,
         "group_rows": analytics.group_table(rows, group) if group in GROUPS else [],
@@ -54,3 +63,9 @@ async def link_short(published_id: int, candidate_id: int = Form(...), user: Dic
 async def pull_now(tasks: BackgroundTasks, user: Dict[str, Any] = Depends(require_admin)):
     tasks.add_task(analytics.run_daily, True)
     return RedirectResponse("/analytics", status_code=HTTP_303_SEE_OTHER)
+
+
+@router.post("/analytics/insights/run")
+async def run_insights(tasks: BackgroundTasks, user: Dict[str, Any] = Depends(require_admin)):
+    tasks.add_task(insights.run_now)
+    return RedirectResponse("/analytics?view=insights", status_code=HTTP_303_SEE_OTHER)

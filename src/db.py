@@ -221,6 +221,15 @@ def init_db():
             UNIQUE(published_id, day)
         );
 
+        -- Weekly analytics reports (src/insights.py)
+        CREATE TABLE IF NOT EXISTS insights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            json TEXT NOT NULL,
+            tokens_in INTEGER DEFAULT 0,
+            tokens_out INTEGER DEFAULT 0
+        );
+
         DROP TABLE IF EXISTS post_stats;  -- nothing ever wrote it
 
         CREATE TABLE IF NOT EXISTS clip_ai_edits (
