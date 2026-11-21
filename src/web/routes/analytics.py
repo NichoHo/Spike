@@ -14,7 +14,8 @@ router = APIRouter()
 
 SORTS = {"title": "title", "published": "published_at", "age": "age", "voice": "voice", "frame": "frame", "views": "views_7d",
          "multiple": "multiple", "stayed": "stayed", "pct": "avg_view_pct", "drop": "drop", "link": "link_state"}
-GROUPS = {"voice": "Hook voice", "frame": "Frame", "layout": "Layout", "band": "Score band"}
+GROUPS = {"voice": "Hook voice", "frame": "Frame", "layout": "Layout", "band": "Score band", "first_word": "First word",
+          "loops": "Loops", "hook_card": "Hook card"}
 
 
 def _value(r: Dict[str, Any], col: str):

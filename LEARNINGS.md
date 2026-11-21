@@ -1,5 +1,19 @@
 # Spike: Learnings
 
+## 2026-11-21: Clip analytics step 2 built (opening checks and watch notes)
+
+- **Built:** `src/opening.py` computes `first_word_s`, `words_first_3s`, `longest_quiet_s`, `loops`, `hook_card`
+  and caption `lines` (output time) from the retimed words, inside `render_single_vertical_clip`. The two
+  callers that make a single clip store them in the new column `clips.render_facts` (concept clips store
+  none). A linked Short's `facts` copy now holds them, so the biggest-drop column shows the caption line.
+  The clip page shows one line of the checks. The tab groups by first word, loops and hook card.
+- **Built:** `analytics.watch_pending` has Gemini (`DEFAULT_GEMINI_MODEL`, low resolution) watch each new
+  Short once and store `watch_notes`: the public URL first, then the clip file for a private Short. At most
+  10 a day, newest first, 3 failures and a Short is left alone. It runs after the daily pull.
+- **Not checked yet (needs the live channel):** that Gemini accepts a Short's YouTube URL at low resolution.
+  Tests fake the Gemini call. A real render check is in `tests/test_caption_translate.py`.
+- **Not done on purpose:** no check changes a render. The numbers decide first (comedy needs its setup).
+
 ## 2026-11-21: Clip analytics step 1 built (stats per Short and the Analytics tab)
 
 - **Built:** `src/analytics.py`, tables `published` and `published_stats` (`post_stats` dropped), the

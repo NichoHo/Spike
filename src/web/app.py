@@ -63,6 +63,8 @@ templates.env.globals["layout_ai_left"] = _layout_ai.calls_left
 templates.env.globals["layout_ai_limit"] = lambda: _gemini_budget.limit(_config.LAYOUT_GEMINI_MODEL)
 from src.labels import REJECT_TAGS as _REJECT_TAGS  # noqa: E402  (the Reject dialog's reason chips)
 templates.env.globals["reject_tags"] = _REJECT_TAGS
+from src.opening import summary as _opening_summary  # noqa: E402  (the clip page's opening checks line)
+templates.env.globals["opening_summary"] = _opening_summary
 
 
 def _nav_badges() -> dict:

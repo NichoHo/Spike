@@ -31,6 +31,7 @@ from src.db import (
     set_clip_render_state,
     set_clip_layout_changes,
     set_clip_no_face,
+    set_clip_render_facts,
     list_review_clips,
     log_event,
 )
@@ -656,6 +657,7 @@ def _rerender_job(
     concept = "single"
     concept_saved: Dict[str, Any] = {}
     face_note = ""
+    render_info: Dict[str, Any] = {}  # opening checks of a single clip's render; concept clips leave it empty
 
     try:
         if prepare:
@@ -757,6 +759,7 @@ def _rerender_job(
                 payoff_t=clip.get("payoff_t"),
                 section_start_s=read_section_start(sec_file),
                 sfx=sfx,
+                info=render_info,
             )
     except Exception as exc:
         ok = False
@@ -798,6 +801,7 @@ def _rerender_job(
         sfx=json.dumps(sfx) if sfx is not None else None,
     )
     set_clip_layout_changes(clip_id, json.dumps(switches) if switches else None)
+    set_clip_render_facts(clip_id, render_info.get("render_facts"))
     # Drop the superseded version so re-renders don't pile up on disk. Windows refuses while a browser still
     # streams the old file; that must not abort the job before the hook, the log and the toast below.
     old_en = Path(clip["file_path"]).with_suffix(".en.json") if clip.get("file_path") else None

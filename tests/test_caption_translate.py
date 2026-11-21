@@ -235,3 +235,11 @@ def test_a_newline_in_a_model_line_is_collapsed_so_the_editor_line_count_holds(t
     assert lines[0]["en"] == "Damn, that's crazy"
     stored = json.loads((tmp_path / ct.STORE_NAME).read_text(encoding="utf-8"))
     assert all("\n" not in v for v in stored.values())
+
+
+def test_a_render_reports_opening_checks_on_the_output_timeline(render_env):
+    info = {}
+    render_env["render"]("spoken", info=info, hook_text="A hook")
+    rf = info["render_facts"]
+    assert rf["first_word_s"] == 1.0 and rf["hook_card"] is True and rf["words_first_3s"] == 2  # clip starts at 27 s; first word 28.0
+    assert rf["lines"][0]["start"] == 1.0

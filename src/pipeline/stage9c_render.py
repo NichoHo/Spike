@@ -65,7 +65,7 @@ from src.config import (
     ZOOM_MAX,
     ZOOM_OUT_DURATION,
 )
-from src.db import create_or_update_clip, log_event, set_clip_layout_changes, set_clip_no_face
+from src.db import create_or_update_clip, log_event, set_clip_layout_changes, set_clip_no_face, set_clip_render_facts
 from src.music import (
     get_random_track_for_mood,
     resolve_music_path,
@@ -928,6 +928,7 @@ def run_stage9c_render(
                     frame=frame,
                 )
                 cand["clip_id"] = clip_id
+                set_clip_render_facts(clip_id, render_info.get("render_facts"))
                 if render_info.get("no_face"):
                     set_clip_no_face(clip_id, True)
                     layout_changes = [c for c in layout_changes or [] if c.get("layout") != "face_track"]
@@ -1052,6 +1053,7 @@ def render_single_vertical_clip(
             if info is not None:
                 info.update(no_face=True, layout="auto")
     title_png: Optional[Path] = None
+    hook_card = bool((hook_text or "").strip())
     if letterbox_style == "title" and "letterbox" in used:
         card_text = _mask_profanity(title_text) if profanity_mask else title_text
         video_h = footage_height(frame, src_w, src_h)
@@ -1103,6 +1105,10 @@ def render_single_vertical_clip(
             out_file.with_suffix(".en.json").write_text(json.dumps(en_lines, ensure_ascii=False), encoding="utf-8")
         else:
             log_event("warning", f"English captions failed for {out_file.name}; it shows the words as spoken. Re-render to try again.")
+
+    if info is not None:  # opening checks for the Analytics tab; the caller stores them in clips.render_facts
+        from src.opening import opening_checks
+        info["render_facts"] = opening_checks(retimed_words, clip_start, effective_dur, hook_card or bool(title_png), shown_words)
 
     # 2. Generate ASS Captions
     ass_path = out_file.parent / f"{out_file.stem}.ass"

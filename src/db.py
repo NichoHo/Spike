@@ -313,6 +313,7 @@ def init_db():
             "ALTER TABLE candidates ADD COLUMN segments TEXT",  # JSON [[start_s, end_s]] of a story clip (stream seconds)
             "ALTER TABLE candidates ADD COLUMN zooms TEXT",  # JSON [{t, scale, hold_s}]; t is clip time for stories
             "ALTER TABLE clips ADD COLUMN zooms TEXT",
+            "ALTER TABLE clips ADD COLUMN render_facts TEXT",  # JSON opening checks of the current render, see src/opening.py
             "ALTER TABLE accounts ADD COLUMN platform_user_id TEXT",  # channel id / TikTok open_id / Instagram user id
             "ALTER TABLE clips ADD COLUMN silence_trim_s REAL",  # pause length that silence trim cuts; NULL is SILENCE_TRIM_S  # JSON [{t, scale, hold_s}]; an empty list means no zoom
             "ALTER TABLE candidates ADD COLUMN humor_type TEXT",
@@ -831,6 +832,12 @@ def set_clip_layout_changes(clip_id: int, layout_changes_json: Optional[str]) ->
 def set_clip_no_face(clip_id: int, no_face: bool) -> None:
     with get_connection() as conn:
         conn.execute("UPDATE clips SET no_face = ? WHERE id = ?", (1 if no_face else 0, clip_id))
+
+
+def set_clip_render_facts(clip_id: int, facts: Optional[dict]) -> None:
+    """The opening checks of the clip's current render (None for renders that make none, such as concept clips)."""
+    with get_connection() as conn:
+        conn.execute("UPDATE clips SET render_facts = ? WHERE id = ?", (json.dumps(facts) if facts else None, clip_id))
 
 
 def reset_stuck_renders() -> int:

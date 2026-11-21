@@ -103,6 +103,7 @@
       <p style="font-size: 14px; color: var(--color-text); line-height: 20px;">
         {{ clip.reason or 'Proposed as a peak moment.' }}
       </p>
+      {% if clip.render_facts %}<p class="ai-status__note" title="Measured from this render's timed words. Nothing here changes the render.">{{ opening_summary(clip.render_facts | from_json) }}</p>{% endif %}
 
       <div class="score-row" style="margin-top: var(--space-2);">
         <div class="score-row__item">

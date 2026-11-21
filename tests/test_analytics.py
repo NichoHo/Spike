@@ -164,3 +164,54 @@ def test_the_tab_renders_empty_with_rows_and_in_group_view(acct):
         by_voice = client.get("/analytics?group=voice")
         assert by_voice.status_code == 200 and "relatable" in by_voice.text
         assert client.post(f"/analytics/{pid}/link", data={"candidate_id": cand}, follow_redirects=False).status_code == 303
+
+
+# ── Step 2: opening checks and watch notes ────────────────────────────────────
+
+def _words(spec, offset=100.0):
+    return [{"word": w, "start": offset + s, "end": offset + e} for w, s, e in spec]
+
+
+def test_opening_checks_on_a_fixed_word_list():
+    from src.opening import opening_checks, summary
+    words = _words([("Nobody", 1.2, 1.6), ("expected", 1.7, 2.1), ("that.", 2.2, 2.6), ("Wait", 5.0, 5.3), ("nobody", 5.4, 5.9)])
+    rf = opening_checks(words, 100.0, 10.0, True)
+    assert rf["first_word_s"] == 1.2 and rf["words_first_3s"] == 3 and rf["longest_quiet_s"] == 2.4
+    assert rf["loops"] is True and rf["hook_card"] is True  # "nobody" opens and closes the Short
+    assert [ln["start"] for ln in rf["lines"]] == [1.2, 5.0] and rf["lines"][0]["text"] == "Nobody expected that."
+    assert "First word at 1.2s" in summary(rf)
+    quiet = opening_checks(_words([("Hello", 0.1, 0.4), ("there", 0.5, 0.8), ("friend", 8.0, 8.5)]), 100.0, 10.0, False)
+    assert quiet["loops"] is False and quiet["longest_quiet_s"] == 7.2 and quiet["hook_card"] is False
+    assert opening_checks([], 100.0, 10.0, False)["first_word_s"] is None
+
+
+def test_render_facts_are_stored_and_copied_into_the_facts(acct):
+    from src.db import set_clip_render_facts
+    cand, clip = _clip("Facts clip")
+    set_clip_render_facts(clip, {"first_word_s": 0.4, "loops": False, "lines": []})
+    assert analytics.candidate_facts(cand, clip)["render_facts"]["first_word_s"] == 0.4
+    set_clip_render_facts(clip, None)
+    assert analytics.candidate_facts(cand, clip)["render_facts"] is None
+
+
+def test_watch_notes_are_stored_once_and_capped_per_day(acct, monkeypatch):
+    from src import gemini_budget
+    from src.db import set_setting
+    from src.pipeline import stage7_moments as s7
+    calls = []
+
+    class Resp:
+        text = json.dumps({"opening": "a roar", "hook_card": "none", "subject": "s", "pacing": "p", "style": "st", "ending": "loops"})
+
+    monkeypatch.setattr(s7, "clip_video_part", lambda meta, a, b: object())
+    monkeypatch.setattr(s7, "get_gemini_client", lambda: None)
+    monkeypatch.setattr(s7, "generate_content_with_retry", lambda **kw: calls.append(kw["purpose"]) or Resp())
+    from google.genai import types
+    monkeypatch.setattr(types, "Content", lambda parts: parts)
+    monkeypatch.setattr(types, "Part", lambda **kw: kw)
+    set_setting(f"analytics_watches:{gemini_budget.today()}", "0")
+    ids = [_published(acct, f"w{i}", i + 1) for i in range(12)]
+    assert analytics.watch_pending() == 10 and len(calls) == 10  # the cap
+    assert analytics.watch_pending() == 0 and len(calls) == 10   # nothing left today
+    notes = json.loads(_row(ids[0])["watch_notes"])
+    assert notes["opening"] == "a roar" and _row(ids[11])["watch_notes"] is None  # the newest were watched first
