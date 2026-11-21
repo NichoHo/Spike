@@ -29,6 +29,16 @@
     {{ ui.empty_state("chart-line", "No YouTube account", "Connect one in Settings. Signing in again adds analytics. Spike then imports the channel's Shorts once a day.") }}
   {% endif %}
 {% else %}
+  {% if voice_offer %}
+    <div class="card"><div class="card__body stack stack--sm">
+      <p>Every hook voice now has 10 or more Shorts with results, and <strong>{{ voice_offer.voice }}</strong> keeps the most viewers (median stayed
+        {% for v, st in voice_offer.stats.items() %}{{ v }} {{ (st.median_stayed * 100) | round(1) }}% (n={{ st.n }}){{ ", " if not loop.last }}{% endfor %}).
+        The title card now starts on {{ current_voice }}.</p>
+      {% if user and user.role == 'admin' %}
+        <form method="post" action="/analytics/hook-voice"><input type="hidden" name="voice" value="{{ voice_offer.voice }}">{{ ui.button("Make " ~ voice_offer.voice ~ " the default", variant="primary", type="submit") }}</form>
+      {% endif %}
+    </div></div>
+  {% endif %}
   <div class="tabs" role="tablist" aria-label="View">
     <a href="/analytics" class="tab {% if not group and view != 'insights' %}is-active{% endif %}" role="tab">Shorts</a>
     {% for k, label in groups.items() %}<a href="/analytics?group={{ k }}" class="tab {% if group == k %}is-active{% endif %}" role="tab">By {{ label | lower }}</a>{% endfor %}

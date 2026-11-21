@@ -19,7 +19,8 @@ from scipy.signal import find_peaks
 
 from src.config import CREATOR_PRESETS, MAX_TARGET_CLIPS, MIN_RAW_LLM_SCORE, PICK_SPACING_S
 from src.models import VideoVerdict
-from src.db import insert_candidate
+from src.db import insert_candidate, update_candidate_hook
+from src.hook_voice import HOOK_VOICES, first_filled, rotated_hook  # the approved voice order starts the title card
 from src.models import ANIME_ARCHETYPES, AnimeCandidate, AnimeJudgeResponse
 from src.pipeline.anime_crowd import SEED_HALF_WINDOW_S, build_seeds, crowd_score
 from src.pipeline.anime_skip import overlap_fraction
@@ -215,7 +216,6 @@ def clean_llm_text(text: Any, max_len: int) -> str:
     return re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\s]+", " ", str(text or "")).strip()[:max_len]
 
 
-HOOK_VOICES = ("relatable", "curious", "plain")  # the first one that is filled in starts on the title card
 HOOK_MAX = 80  # the Hook title box on the clip page allows 80
 
 
@@ -227,7 +227,8 @@ def pick_hooks(c: AnimeCandidate) -> Tuple[str, Dict[str, str]]:
         text = clean_llm_text(getattr(c.hooks, voice), HOOK_MAX)
         if text:
             opts[voice] = text
-    return next(iter(opts.values()), clean_llm_text(c.hook_text, HOOK_MAX)), opts
+    lead = first_filled(opts)
+    return (opts[lead] if lead else clean_llm_text(c.hook_text, HOOK_MAX)), opts
 
 
 def clamp_window(start: float, end: float, duration: float) -> Optional[Tuple[float, float]]:
@@ -602,6 +603,10 @@ def run_stage7_anime(video_id: int, video_dir: Path, meta: Dict[str, Any], trans
         r.setdefault("final_score", r["llm_score"])
         r["features"] = {**r["features"], "prior": r.get("prior"), "judge": r.get("judge"), "anilist_id": anime.get("anilist_id")}
         r["id"] = insert_candidate(video_id, r)  # features carry the show id the posting gate checks
+        alt = rotated_hook(r.get("hook_options") or {}, r["id"])  # every fifth clip tests the next voice
+        if alt and alt != r.get("hook_text"):
+            r["hook_text"] = alt
+            update_candidate_hook(r["id"], alt)
     out_path.write_text(json.dumps(selected, indent=2), encoding="utf-8")
     print(f"  [stage 7] Selected {len(selected)} anime moments (scores {[r['llm_score'] for r in selected]}); "
           f"stored {sum(1 for r in records if r['status'] == 'low_score')} low_score, "

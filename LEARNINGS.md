@@ -1,5 +1,20 @@
 # Spike: Learnings
 
+## 2026-11-21: Clip analytics step 5 built (default hook voice)
+
+- **Built:** `src/hook_voice.py`. The setting `hook_voice_order` decides which voice starts the title card
+  (`pick_hooks` reads it; no setting means relatable, curious, plain as before). Every fifth candidate
+  (`candidate_id % 5 == 0`) starts on the next filled voice instead: the anime insert loop sets it after the
+  id exists. The Analytics tab offers "Make <voice> the default" when each voice has 10 or more linked
+  Shorts of 7 days or older and one voice alone has the highest median `stayed`. Approving it (admin) puts
+  the voice first, logs an event and adds an entry with the numbers to the top of this file. The route
+  re-checks the numbers, so a stale page cannot set a voice the data no longer backs.
+- **Not checked yet:** a real offer. It needs about 30 linked Shorts with results (10 per voice), so it will
+  not show for weeks after Spike posts its first Shorts.
+- **All five steps are built.** Still open, all needing the live accounts: the YouTube sign-in with the
+  Analytics API turned on, the `dimensions=day,video` call, Gemini watching a real Short URL, a real Sonnet
+  report and its token cost, and a real channel scan (`forHandle`). Compare 3 Shorts with YouTube Studio.
+
 ## 2026-11-21: Clip analytics step 4 built (suggested standards)
 
 - **Built:** `src/suggestions.py`. The Standards card on Settings has "Learn from a channel": a handle or

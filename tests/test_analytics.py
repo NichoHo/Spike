@@ -422,3 +422,65 @@ def test_the_standards_card_follows_a_channel_and_adds_a_suggestion(acct, monkey
     with gc() as conn:
         rows = conn.execute("SELECT source_url, multiple, status FROM labels WHERE kind = 'gold'").fetchall()
     assert [(r["source_url"], r["multiple"]) for r in rows] == [("https://www.youtube.com/shorts/hit", 5.0)]
+
+
+# ── Step 5: the default hook voice ────────────────────────────────────────────
+
+def _voice_rows(counts, stayed):
+    return [{"voice": v, "age": 20, "stayed": stayed[v] + i * 0.0001} for v, n in counts.items() for i in range(n)]
+
+
+def test_the_voice_order_changes_the_default_and_every_fifth_clip_tests_another(monkeypatch):
+    from src import hook_voice
+    from src.db import set_setting
+    from src.models import AnimeCandidate
+    from src.pipeline.anime_moments import pick_hooks
+    cand = AnimeCandidate.model_validate({"punchline_line_idx": 1, "archetype": "comedy_beat", "hooks": {"relatable": "R", "curious": "C", "plain": "P"},
+                                          "scores": {"self_contained": 8, "payoff": 8, "setup_present": 8, "delivery": 8, "quotability": 8}})
+    set_setting(hook_voice.ORDER_KEY, "")
+    assert pick_hooks(cand)[0] == "R"
+    set_setting(hook_voice.ORDER_KEY, json.dumps(["plain"]))
+    assert hook_voice.voice_order() == ("plain", "relatable", "curious") and pick_hooks(cand)[0] == "P"
+    opts = pick_hooks(cand)[1]
+    assert hook_voice.rotated_hook(opts, 10) == "R"  # the next filled voice after plain
+    assert [hook_voice.rotated_hook(opts, i) for i in (11, 12, 13, 14)] == [None] * 4
+    assert hook_voice.rotated_hook({"plain": "P"}, 10) is None  # one voice only: nothing to rotate to
+    set_setting(hook_voice.ORDER_KEY, "")
+
+
+def test_the_offer_needs_ten_per_voice_and_one_clear_winner(monkeypatch):
+    from src import hook_voice
+    from src.db import set_setting
+    set_setting(hook_voice.ORDER_KEY, "")
+    even = {"relatable": 10, "curious": 10, "plain": 10}
+    best = {"relatable": 0.30, "curious": 0.40, "plain": 0.35}
+    got = hook_voice.offer(_voice_rows(even, best))
+    assert got["voice"] == "curious" and got["stats"]["curious"]["n"] == 10
+    assert hook_voice.offer(_voice_rows({**even, "plain": 9}, best)) is None  # one voice has only 9
+    assert hook_voice.offer(_voice_rows(even, {"relatable": 0.4, "curious": 0.3, "plain": 0.3})) is None  # relatable leads and is the default
+    assert hook_voice.offer(_voice_rows(even, {"relatable": 0.3, "curious": 0.4, "plain": 0.4})) is None  # a tie for first is no winner
+    young = _voice_rows(even, best)
+    for r in young[:5]:
+        r["age"] = 3  # under 7 days old: not counted
+    assert hook_voice.offer(young) is None
+
+
+def test_approving_the_offer_sets_the_order_logs_it_and_rechecks_the_numbers(acct, tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from src import hook_voice
+    from src.db import get_connection as gc, set_setting
+    from src.web.app import app
+    (tmp_path / "LEARNINGS.md").write_text("# Spike: Learnings\n\n## older entry\n", encoding="utf-8")
+    monkeypatch.setattr(hook_voice, "ROOT_DIR", tmp_path)
+    set_setting(hook_voice.ORDER_KEY, "")
+    stats = {v: {"n": 10, "median_stayed": m} for v, m in {"relatable": 0.3, "curious": 0.4, "plain": 0.35}.items()}
+    assert hook_voice.make_default("nonsense", stats) is False and hook_voice.voice_order()[0] == "relatable"
+    assert hook_voice.make_default("curious", stats) is True and hook_voice.voice_order() == ("curious", "relatable", "plain")
+    text = (tmp_path / "LEARNINGS.md").read_text(encoding="utf-8")
+    assert text.index("Default hook voice is now curious") < text.index("older entry") and "median stayed 40.0%" in text
+    with gc() as conn:
+        assert conn.execute("SELECT 1 FROM events WHERE message LIKE 'Default hook voice changed from relatable to curious%'").fetchone()
+    set_setting(hook_voice.ORDER_KEY, "")
+    with TestClient(app) as client:  # no data behind it: the route refuses and changes nothing
+        assert client.post("/analytics/hook-voice", data={"voice": "plain"}, follow_redirects=False).status_code == 303
+    assert hook_voice.voice_order()[0] == "relatable"
